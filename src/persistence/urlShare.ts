@@ -1,3 +1,11 @@
+import {
+  normalizeTablePresentation,
+  type TablePresentation,
+} from "../features/query/tablePresentation";
+import {
+  normalizeAttributeOrders,
+  type AttributeOrders,
+} from "../features/attributes/attributeOrder";
 /**
  * URL hash-based share state codec.
  *
@@ -8,6 +16,8 @@
  */
 
 import type { Rule } from "../features/rules/types";
+import { normalizeSolarTimeZone } from "../features/solar/solarTimeZone";
+import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
 import type { GeographicCamera } from "./types";
 
@@ -18,9 +28,32 @@ import type { GeographicCamera } from "./types";
 export interface ShareableLayerState {
   readonly name: string;
   readonly modelUrl: string;
+  /** The USER's rules. A shared link never carries the synthetic catch-alls
+   *  the modes below are drawn with: they are derived on the other side, from
+   *  the three fields under them. */
   readonly rules: ReadonlyArray<Rule>;
+  /** Written as `colorBy === "rules"`, and the only thing a link minted before
+   *  "Color by" existed said about the styling — which is why
+   *  {@link readShareHash} can still derive a mode for one. */
   readonly rulesEnabled: boolean;
+  /**
+   * The layer's "Color by" mode and the two colours it may need.
+   *
+   * OPTIONAL, because a link minted before they existed carries none of them
+   * and every link ever minted still has to open. {@link readShareHash} fills
+   * all three in — validated, and with the mode derived from `rulesEnabled`
+   * when it is absent — before anything downstream sees the state, the same
+   * repair it already performs for a camera-only link's missing `layers`, so
+   * in practice a decoded layer always has them. The hash schema therefore
+   * stays v3: nothing about an existing link's meaning changed, and a build
+   * that predates these fields ignores them.
+   */
+  readonly colorBy?: ColorBy;
+  readonly singleColor?: string;
+  readonly unmatchedColor?: string;
   readonly visible: boolean;
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
 }
 
 /**
@@ -34,11 +67,19 @@ export interface ShareableLayerState {
  * the link.
  */
 export interface ShareableViewState {
+  readonly basemap?: import("../features/basemap/basemapStore").BasemapState;
   /**
    * Schema version. Declared explicitly so a hash states which frame its
    * numbers live in rather than leaving that to be inferred from shape:
-   * a future v4 that reuses the `cam` key with different semantics would
-   * otherwise sail past the structural check below.
+   * a future share v4 that reused the `cam` key with different semantics
+   * would otherwise sail past the structural check below.
+   *
+   * This number is the SHARE schema's, not the snapshot's, and the two have
+   * been allowed to diverge: snapshot v4 added `activeLayer`, and a hash
+   * carries no such field — it is a lightweight subset (camera, datetime,
+   * URL-backed city layers) and stays one. Nothing about a v3 hash's meaning
+   * changed, so every link ever minted still opens, and this stays `3` until
+   * something in the HASH changes.
    */
   readonly v: 3;
   /** Per-layer state. */
@@ -47,6 +88,8 @@ export interface ShareableViewState {
   readonly cam: GeographicCamera;
   /** ISO 8601 datetime. */
   readonly dt: string;
+  /** Optional selected-zone display for the shared instant. */
+  readonly tz?: import("../features/solar/solarTimeZone").SolarTimeZone;
   /** Pick mode. */
   readonly pm: PickMode;
 }
@@ -72,7 +115,12 @@ function fromBase64Url(b64: string): string {
 export function encodeShareState(state: ShareableViewState): string {
   // The version is stamped here rather than taken from the caller so that
   // every hash this build mints is tagged, whatever the caller passed.
-  const json = JSON.stringify({ ...state, v: SHARE_VERSION });
+  // ASCII JSON escapes preserve Unicode keys while remaining compatible
+  // with existing links whose base64 payload is Latin-1 JSON.
+  const json = JSON.stringify({ ...state, v: SHARE_VERSION }).replace(
+    /[\u0080-\uffff]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
   return SHARE_PREFIX + toBase64Url(json);
 }
 
@@ -115,8 +163,8 @@ export class UnsupportedShareLinkError extends Error {
   constructor(readonly found: number | null) {
     super(
       found !== null && found > SHARE_VERSION
-        ? `This share link was created by a newer version of Urbis (v${found}) than this one, so it cannot be opened here.`
-        : "This share link was created by an older version of Urbis and can no longer be opened. Shared cameras changed from scene coordinates to geographic coordinates; please ask for a new link.",
+        ? `This share link was created by a newer version of Roofy (v${found}) than this one, so it cannot be opened here.`
+        : "This share link was created by an older version of Roofy and can no longer be opened. Shared cameras changed from scene coordinates to geographic coordinates; please ask for a new link.",
     );
     this.name = "UnsupportedShareLinkError";
   }
@@ -172,10 +220,32 @@ export function readShareHash(hash: string): ShareHashResult {
   if (!isGeographicCamera(parsed.cam)) return NO_SHARE_HASH;
   if (typeof parsed.dt !== "string") return NO_SHARE_HASH;
 
-  // Normalize: a camera-only link (no layers at all) is still valid.
+  // Normalize: a camera-only link (no layers at all) is still valid, and every
+  // layer gets its three styling fields validated and defaulted here — through
+  // the SAME function the snapshot path uses, so one workspace cannot come back
+  // differently depending on which door it arrived by.
+  // A hand-edited hash can put anything in that array, and this function runs
+  // unguarded inside an App effect — so a `null` element must not become a
+  // TypeError and a blank app. A non-object entry is passed through untouched:
+  // it is not a layer, and rejecting it is the consumer's job, not this
+  // codec's.
+  const layers = Array.isArray(parsed.layers)
+    ? parsed.layers.map((l) =>
+        l !== null && typeof l === "object"
+          ? {
+              ...l,
+              ...normalizeColorBy(l),
+              attributeOrders: normalizeAttributeOrders(l.attributeOrders),
+              tablePresentation: normalizeTablePresentation(
+                l.tablePresentation,
+              ),
+            }
+          : l,
+      )
+    : [];
   return {
     kind: "ok",
-    state: Array.isArray(parsed.layers) ? parsed : { ...parsed, layers: [] },
+    state: { ...parsed, tz: normalizeSolarTimeZone(parsed.tz), layers },
   };
 }
 

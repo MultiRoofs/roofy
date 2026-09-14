@@ -18,6 +18,12 @@
  *  - No DuckDB/analytics integration for CityGML (CityJSON only for now)
  */
 
+import {
+  buildGmlAppearance,
+  collectGmlAppearances,
+  gmlSurfaceAppearance,
+  type GmlAppearanceIndex,
+} from "./appearance";
 import { XMLParser } from "fast-xml-parser";
 import type {
   BBox3,
@@ -38,10 +44,11 @@ import type {
 import {
   collectPolygonsFromMultiSurface,
   collectPolygonsFromSolid,
+  parsePolygonWithIds,
+  solidContainerIds,
   detectLodFromElementName,
   findLodGeometryEntries,
   normalizeSrsName,
-  parsePolygon,
   resolveGMLSurfaceType,
   stripPrefix,
 } from "./xmlHelpers";
@@ -64,6 +71,16 @@ const ALWAYS_ARRAY_TAGS = new Set([
   "bldg:consistsOfBuildingPart",
   "con:consistsOfBuildingPart",
   "consistsOfBuildingPart",
+  // Appearance module: several of each are the rule, not the exception.
+  "app:appearanceMember",
+  "appearanceMember",
+  "app:appearance",
+  "app:surfaceDataMember",
+  "surfaceDataMember",
+  "app:target",
+  "target",
+  "app:textureCoordinates",
+  "textureCoordinates",
 ]);
 
 function buildParser(): XMLParser {
@@ -191,14 +208,46 @@ function finalizeBBox(bbox: MutableBBox): BBox3 | null {
  * CityGML 2.0: <bldg:boundedBy> <bldg:RoofSurface> <bldg:lod2MultiSurface> ...
  * CityGML 3.0: <boundary> <con:RoofSurface> <lod2MultiSurface> ...
  */
+/** One polygon -> one Surface, with its appearance (if the file has any)
+ *  looked up by ring ids for textures and by polygon/container ids for
+ *  materials. */
+function surfaceFromPolygon(
+  poly: GMLPolygon,
+  type: Surface["type"],
+  lod: string | null,
+  bbox: MutableBBox,
+  containerIds: ReadonlyArray<string | undefined>,
+  appearance: GmlAppearanceIndex | null,
+): { surface: Surface; vertexCount: number } | null {
+  const parsed = parsePolygonWithIds(poly);
+  if (!parsed) return null;
+  let vertexCount = 0;
+  for (const ring of parsed.rings) {
+    for (const v of ring) {
+      expandBBox(bbox, v);
+      vertexCount++;
+    }
+  }
+  const surface: Surface = { type, rings: parsed.rings, attributes: {}, lod };
+  if (!appearance) return { surface, vertexCount };
+  const found = gmlSurfaceAppearance(
+    appearance,
+    parsed.ringIds,
+    parsed.rings.map((r) => r.length),
+    [poly["@_gml:id"], ...containerIds],
+  );
+  return { surface: found ? { ...surface, ...found } : surface, vertexCount };
+}
+
 function extractSemanticSurfaces(
   node: XMLNode,
   bbox: MutableBBox,
+  appearance: GmlAppearanceIndex | null,
+  objectId: string,
 ): { surfaces: Surface[]; vertexCount: number } {
   const surfaces: Surface[] = [];
   let vertexCount = 0;
 
-  // Collect all boundary containers (v2: bldg:boundedBy, v3: boundary)
   const boundaryContainers: XMLNode[] = [];
   for (const key of ["bldg:boundedBy", "boundary"]) {
     const val = node[key];
@@ -210,15 +259,17 @@ function extractSemanticSurfaces(
   }
 
   for (const container of boundaryContainers) {
-    // Find the semantic surface element (first non-attribute child)
     for (const [surfaceKey, surfaceValue] of Object.entries(container)) {
       if (surfaceKey.startsWith("@_")) continue;
       if (typeof surfaceValue !== "object" || surfaceValue === null) continue;
 
       const surfaceType = resolveGMLSurfaceType(surfaceKey);
       const surfaceNode = surfaceValue as XMLNode;
+      const surfaceId =
+        typeof surfaceNode["@_gml:id"] === "string"
+          ? surfaceNode["@_gml:id"]
+          : undefined;
 
-      // Find lod*MultiSurface or lod*Solid geometry containers
       const geomEntries = findLodGeometryEntries(surfaceNode);
       for (const [geomName, geomValue] of geomEntries) {
         if (typeof geomValue !== "object" || geomValue === null) continue;
@@ -226,41 +277,42 @@ function extractSemanticSurfaces(
         const lod = detectLodFromElementName(geomName);
         const geomNode = geomValue as XMLNode;
 
-        // Try MultiSurface
-        const ms = (geomNode["gml:MultiSurface"] ?? geomNode["MultiSurface"]) as
-          | GMLMultiSurface
-          | undefined;
+        const ms = (geomNode["gml:MultiSurface"] ??
+          geomNode["MultiSurface"]) as GMLMultiSurface | undefined;
         if (ms) {
-          const polygons = collectPolygonsFromMultiSurface(ms);
-          for (const poly of polygons) {
-            const rings = parsePolygon(poly);
-            if (!rings) continue;
-            for (const ring of rings) {
-              for (const v of ring) {
-                expandBBox(bbox, v);
-                vertexCount++;
-              }
-            }
-            surfaces.push({ type: surfaceType, rings, attributes: {}, lod });
+          const containers = [ms["@_gml:id"], surfaceId, objectId];
+          for (const poly of collectPolygonsFromMultiSurface(ms)) {
+            const r = surfaceFromPolygon(
+              poly,
+              surfaceType,
+              lod,
+              bbox,
+              containers,
+              appearance,
+            );
+            if (!r) continue;
+            vertexCount += r.vertexCount;
+            surfaces.push(r.surface);
           }
         }
 
-        // Try Solid
         const solid = (geomNode["gml:Solid"] ?? geomNode["Solid"]) as
           | GMLSolid
           | undefined;
         if (solid) {
-          const polygons = collectPolygonsFromSolid(solid);
-          for (const poly of polygons) {
-            const rings = parsePolygon(poly);
-            if (!rings) continue;
-            for (const ring of rings) {
-              for (const v of ring) {
-                expandBBox(bbox, v);
-                vertexCount++;
-              }
-            }
-            surfaces.push({ type: surfaceType, rings, attributes: {}, lod });
+          const containers = [...solidContainerIds(solid), surfaceId, objectId];
+          for (const poly of collectPolygonsFromSolid(solid)) {
+            const r = surfaceFromPolygon(
+              poly,
+              surfaceType,
+              lod,
+              bbox,
+              containers,
+              appearance,
+            );
+            if (!r) continue;
+            vertexCount += r.vertexCount;
+            surfaces.push(r.surface);
           }
         }
       }
@@ -277,6 +329,8 @@ function extractSemanticSurfaces(
 function extractFallbackGeometry(
   node: XMLNode,
   bbox: MutableBBox,
+  appearance: GmlAppearanceIndex | null,
+  objectId: string,
 ): { surfaces: Surface[]; vertexCount: number } {
   const surfaces: Surface[] = [];
   let vertexCount = 0;
@@ -288,32 +342,45 @@ function extractFallbackGeometry(
     const lod = detectLodFromElementName(geomName);
     const geomNode = geomValue as XMLNode;
 
-    let polygons: GMLPolygon[] = [];
+    const groups: Array<{
+      polygons: GMLPolygon[];
+      containers: Array<string | undefined>;
+    }> = [];
 
     const ms = (geomNode["gml:MultiSurface"] ?? geomNode["MultiSurface"]) as
       | GMLMultiSurface
       | undefined;
     if (ms) {
-      polygons = collectPolygonsFromMultiSurface(ms);
+      groups.push({
+        polygons: collectPolygonsFromMultiSurface(ms),
+        containers: [ms["@_gml:id"], objectId],
+      });
     }
 
     const solid = (geomNode["gml:Solid"] ?? geomNode["Solid"]) as
       | GMLSolid
       | undefined;
     if (solid) {
-      polygons = polygons.concat(collectPolygonsFromSolid(solid));
+      groups.push({
+        polygons: collectPolygonsFromSolid(solid),
+        containers: [...solidContainerIds(solid), objectId],
+      });
     }
 
-    for (const poly of polygons) {
-      const rings = parsePolygon(poly);
-      if (!rings) continue;
-      for (const ring of rings) {
-        for (const v of ring) {
-          expandBBox(bbox, v);
-          vertexCount++;
-        }
+    for (const { polygons, containers } of groups) {
+      for (const poly of polygons) {
+        const r = surfaceFromPolygon(
+          poly,
+          "unknown",
+          lod,
+          bbox,
+          containers,
+          appearance,
+        );
+        if (!r) continue;
+        vertexCount += r.vertexCount;
+        surfaces.push(r.surface);
       }
-      surfaces.push({ type: "unknown", rings, attributes: {}, lod });
     }
   }
 
@@ -355,15 +422,21 @@ function parseBuildingNode(
   id: string,
   objectType: string,
   node: XMLNode,
+  appearance: GmlAppearanceIndex | null,
 ): { object: CityObject; vertexCount: number } {
   const bbox = emptyBBox();
 
   // Try semantic surface extraction first
-  let { surfaces, vertexCount } = extractSemanticSurfaces(node, bbox);
+  let { surfaces, vertexCount } = extractSemanticSurfaces(
+    node,
+    bbox,
+    appearance,
+    id,
+  );
 
   // Fallback to direct geometry if no semantic surfaces found
   if (surfaces.length === 0) {
-    const fallback = extractFallbackGeometry(node, bbox);
+    const fallback = extractFallbackGeometry(node, bbox, appearance, id);
     surfaces = fallback.surfaces;
     vertexCount = fallback.vertexCount;
   }
@@ -401,6 +474,7 @@ function parseBuildingNode(
 function parseMember(
   member: XMLNode,
   idCounter: { n: number },
+  appearance: GmlAppearanceIndex | null,
 ): Array<{ object: CityObject; vertexCount: number }> | null {
   // Find the first city object element in the member
   for (const [key, value] of Object.entries(member)) {
@@ -417,7 +491,7 @@ function parseMember(
         : `citygml_obj_${idCounter.n++}`;
 
     try {
-      const result = parseBuildingNode(id, localName, node);
+      const result = parseBuildingNode(id, localName, node, appearance);
       const results = [result];
       const childIds: string[] = [];
 
@@ -450,6 +524,7 @@ function parseMember(
                 partId,
                 "BuildingPart",
                 partNode,
+                appearance,
               );
               partResult.object = {
                 ...partResult.object,
@@ -517,9 +592,12 @@ export function parseCityGML(xmlText: string): CityModel {
   let modelBBox: BBox3 | null = null;
   let totalVertexCount = 0;
   const idCounter = { n: 0 };
+  // Indexed once for the whole document: appearances may sit under the
+  // CityModel (`app:appearanceMember`) or inside a feature (`app:appearance`).
+  const appearance = collectGmlAppearances(parsed);
 
   for (const member of members) {
-    const results = parseMember(member, idCounter);
+    const results = parseMember(member, idCounter, appearance);
     if (!results) continue;
     for (const { object: obj, vertexCount } of results) {
       objects[obj.id] = obj;
@@ -528,11 +606,13 @@ export function parseCityGML(xmlText: string): CityModel {
     }
   }
 
+  const builtAppearance = buildGmlAppearance(appearance);
   return {
     sourceEncoding: "citygml",
     metadata,
     bbox: modelBBox,
     objects,
     vertexCount: totalVertexCount,
+    ...(builtAppearance ? { appearance: builtAppearance } : {}),
   };
 }

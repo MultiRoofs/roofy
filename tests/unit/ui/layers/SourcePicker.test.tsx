@@ -44,14 +44,7 @@ function browseInput(): HTMLInputElement {
 describe("SourcePicker — folder picking", () => {
   it("offers a folder picker that reports all selected files", () => {
     const onFiles = vi.fn();
-    render(
-      <SourcePicker
-        onFile={vi.fn()}
-        onFiles={onFiles}
-        onUrl={vi.fn()}
-        loading={false}
-      />,
-    );
+    render(<SourcePicker onFile={vi.fn()} onFiles={onFiles} loading={false} />);
 
     const input = folderInput();
     expect(input).not.toBeNull();
@@ -73,14 +66,7 @@ describe("SourcePicker — folder picking", () => {
         clicked.push(this);
       },
     );
-    render(
-      <SourcePicker
-        onFile={vi.fn()}
-        onFiles={vi.fn()}
-        onUrl={vi.fn()}
-        loading={false}
-      />,
-    );
+    render(<SourcePicker onFile={vi.fn()} onFiles={vi.fn()} loading={false} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Choose folder" }));
 
@@ -90,14 +76,7 @@ describe("SourcePicker — folder picking", () => {
   it("keeps a ONE-table folder a group, so the layer is named after the folder", () => {
     const onFile = vi.fn();
     const onFiles = vi.fn();
-    render(
-      <SourcePicker
-        onFile={onFile}
-        onFiles={onFiles}
-        onUrl={vi.fn()}
-        loading={false}
-      />,
-    );
+    render(<SourcePicker onFile={onFile} onFiles={onFiles} loading={false} />);
 
     // A package can be a single table with no `metadata.json`. Only the group
     // path reads `webkitRelativePath`, which is where the name "delft" is —
@@ -117,14 +96,7 @@ describe("SourcePicker — folder picking", () => {
   it("ignores an empty folder selection", () => {
     const onFiles = vi.fn();
     const onFile = vi.fn();
-    render(
-      <SourcePicker
-        onFile={onFile}
-        onFiles={onFiles}
-        onUrl={vi.fn()}
-        loading={false}
-      />,
-    );
+    render(<SourcePicker onFile={onFile} onFiles={onFiles} loading={false} />);
 
     const input = folderInput();
     Object.defineProperty(input, "files", { value: [] });
@@ -139,14 +111,7 @@ describe("SourcePicker — dropping", () => {
   it("routes a multi-file drop to onFiles and a single file to onFile", () => {
     const onFile = vi.fn();
     const onFiles = vi.fn();
-    render(
-      <SourcePicker
-        onFile={onFile}
-        onFiles={onFiles}
-        onUrl={vi.fn()}
-        loading={false}
-      />,
-    );
+    render(<SourcePicker onFile={onFile} onFiles={onFiles} loading={false} />);
     const zone = screen.getByTestId("source-picker-drop-zone");
 
     const a = new File(["a"], "building.parquet");
@@ -165,7 +130,7 @@ describe("SourcePicker — dropping", () => {
 
   it("falls back to onFile for a multi-file drop when onFiles is absent", () => {
     const onFile = vi.fn();
-    render(<SourcePicker onFile={onFile} onUrl={vi.fn()} loading={false} />);
+    render(<SourcePicker onFile={onFile} loading={false} />);
 
     const a = new File(["a"], "building.parquet");
     const b = new File(["b"], "metadata.json");
@@ -180,14 +145,7 @@ describe("SourcePicker — dropping", () => {
   it("does not try to load a dropped DIRECTORY, and says what to do instead", () => {
     const onFile = vi.fn();
     const onFiles = vi.fn();
-    render(
-      <SourcePicker
-        onFile={onFile}
-        onFiles={onFiles}
-        onUrl={vi.fn()}
-        loading={false}
-      />,
-    );
+    render(<SourcePicker onFile={onFile} onFiles={onFiles} loading={false} />);
 
     // What a browser delivers for a dropped folder: one zero-byte `File` that
     // no parser can read, plus an ITEM that admits it is a directory.
@@ -208,7 +166,7 @@ describe("SourcePicker — dropping", () => {
 
   it("falls back to onFile for a folder pick when onFiles is absent", () => {
     const onFile = vi.fn();
-    render(<SourcePicker onFile={onFile} onUrl={vi.fn()} loading={false} />);
+    render(<SourcePicker onFile={onFile} loading={false} />);
 
     const input = folderInput();
     const f1 = new File(["a"], "building.parquet");
@@ -221,16 +179,16 @@ describe("SourcePicker — dropping", () => {
 
 describe("SourcePicker — advertised formats", () => {
   it("accepts .parquet in the browse input", () => {
-    render(<SourcePicker onFile={vi.fn()} onUrl={vi.fn()} loading={false} />);
+    render(<SourcePicker onFile={vi.fn()} loading={false} />);
 
     expect(browseInput().getAttribute("accept")).toContain(".parquet");
   });
 
   it("lists CityParquet in the format hint and the drop copy", () => {
-    render(<SourcePicker onFile={vi.fn()} onUrl={vi.fn()} loading={false} />);
+    render(<SourcePicker onFile={vi.fn()} loading={false} />);
 
     expect(SUPPORTED_FORMATS).toBe(
-      ".city.json · .city.jsonl · .fcb · .gml · .parquet",
+      ".city.json · .city.jsonl · .fcb · .gml · .parquet · .geojson",
     );
     expect(screen.getByText(SUPPORTED_FORMATS)).toBeTruthy();
     expect(screen.getByTestId("source-picker-drop-zone").textContent).toContain(

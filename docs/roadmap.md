@@ -265,7 +265,7 @@ Current limitations (documented for future work):
 - **Building types only**: Only Building and BuildingPart are parsed. Other CityGML types (Transportation, Vegetation, WaterBody, LandUse, Relief, CityFurniture) will be added in M7.2.
 - **DOM-based parser**: Uses fast-xml-parser which loads the entire XML document into memory. For files >100MB, a SAX streaming parser (e.g. sax-wasm) should be implemented.
 - **XLink resolution**: Solid geometry that uses xlink:href references to polygons defined elsewhere is skipped. Only inline polygons in semantic surfaces are extracted.
-- **No DuckDB integration**: CityGML data is not imported into the DuckDB analytics engine (CityJSON only for now).
+- **DuckDB analytics via the flat fallback**: CityGML (and a ZIP of it) has no DuckDB reader, so its layer's table is built app-side from the parsed model and loaded through `read_json_auto` — browsable, filterable and exportable as attributes, but with no `read_cityjson` source behind it and so no CityParquet package to export. See Milestone 11.
 - **Axis order**: Coordinates are passed through as-is, relying on CRS metadata. No axis-order normalization for CRS with lat/lon order.
 
 ### M7.2: Non-Building CityGML Types (Planned)
@@ -476,6 +476,299 @@ offers no geospatial door, so the viewer shell only mounts once a city layer exi
 shell gates on city layers alone), which also means neither the zoom button nor the geo
 inspector is reachable in a geo-only workspace. A follow-up candidate, out of scope for
 both plans.
+
+## Milestone 11: DuckDB Integration — Per-Layer Tables, Query Table, Map Filter, Export (Complete)
+
+- 11.1 Engine: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB 1.5.5), per-extension
+  status, `ensureExtension` for `spatial`/`three_d`, `runQuery` with DuckDB's own
+  error message, VFS primitives, init retry.
+- 11.2 One table per city layer (`insights/layerTables.ts`), reader-backed from
+  bytes or a flat fallback from the parsed model / resident records; one FIFO
+  queue; `addCityLayer` as the single static add path.
+- 11.3 Table panel: pagination (100/500/1000), sort, structured WHERE filter,
+  DuckDB-only, states for engine-down / queued / building / failed / empty.
+- 11.4 "Filter map": the applied filter's feature-expanded ids reach the plugin
+  through `Layer.visibleObjectIds` and `CityModelMesh.setVisibleObjectIds`.
+- 11.5 Export: Parquet / CSV / JSON via `COPY`, and a CityParquet package via
+  `cityparquet_write` + `fflate`, every read-back validated by content.
+
+Delivered ON TOP of the Navara 0.1.1 state and the Roofy rebrand: `origin/develop`
+had already merged both, and this milestone was merged onto them rather than
+beside them — so the plugin's `setVisibleObjectIds` sits on 0.1.1, not on the
+0.0.5 line the branch started from, and it takes its place beside the plugins'
+`colors` seam: `buildCityMeshArrays` carries `surfaceColors` seventh and
+`visibleObjectIds` EIGHTH.
+
+`spatial` and `three_d` are integrated as LOADABLE CAPABILITIES only. They have
+nothing to operate on in v1: the layer table is attribute-only, and a geometry
+predicate needs either geometry columns materialised (the memory cost the
+design exists to avoid) or a computed-columns feature that reads the
+re-registered source on demand. `spatial` does not autoload in wasm and is a
+CORE extension (`INSTALL spatial`, ~5 s / 23.6 MB — not `FROM community`).
+Known `three_d` traps for that follow-up: `ST_3DFromWKB` throws on a
+MultiPolygon Z row and one such row poisons a whole column query (use
+`ST_3DTryFromWKB`); `ST_3DVolume` raises "solid is not manifold" on an
+unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`).
+
+Deferred: streaming-layer map filtering; persisting filters in snapshots and
+share links; a free-text SQL console; geometry-backed analysis on
+`spatial`/`three_d`; CityJSON/CityJSONSeq/FCB export until the upstream wasm
+writer stops bypassing the VFS; CityParquet-sourced layers as reader-backed
+tables (`cityparquet_read` is unusable in wasm).
+
+Also deferred, and it becomes a real bug the moment the first of those analysis
+features lands: the DuckDB status pill holds a SNAPSHOT. `App` reads
+`getDuckDBStatus()` once, after `retryEngine()` resolves, and keeps it in React
+state — but `ensureExtension` publishes a fresh status every time it loads
+`spatial` or `three_d`, and nothing re-reads it. Today nothing calls
+`ensureExtension`, so the pill is never wrong; a feature that loads an
+extension lazily will leave the tooltip listing the extensions from boot and
+omitting the one it just fetched — exactly the drift the tooltip exists to make
+visible. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` which
+`publishReady` notifies, with `App` subscribing rather than snapshotting.
+
+## Milestone 12: UI Redesign — One Active Layer, One Selection (Implemented; local verification)
+
+Approved design: `docs/superpowers/specs/2026-09-06-ui-redesign-design.md`
+(from the interactive prototype required by `docs/ui-redesign-handoff.md`).
+Plan: `docs/superpowers/plans/2026-09-06-ui-redesign.md`. Breaking UI changes,
+no compatibility shims; saved workspaces migrate to schema v4.
+
+- 12.1 Shared context (COMPLETE, bc2d1d9..f06e325): selection belongs to
+  exactly one layer; activating another layer, hiding or removing the owner
+  clears it; an applied static-city/vector filter also clears excluded selections; picking a feature
+  activates its layer; Escape clears. Attribute overlay, `Sync selection`,
+  the inspector's rule-target override, the status-bar table entrance and
+  the fit-all flight on every added layer are removed. Persistence v4 with an
+  explicit v3 migration (`persistence/migrateSnapshot.ts`).
+- 12.2 Shell and layers (COMPLETE, 2026-09-07): header (workspace, Save, Share, Preferences), full-
+  height left and right panels, the data drawer under the map column only,
+  collapse and resize; one layer list for every layer type with one Add
+  layer dialog (File / URL / Catalog, detection with correction); the active
+  layer's configuration (Style / Filter / Details) under the list.
+  Landed with: a geospatial-only workspace enters the viewer and its first
+  content fits once; the interface appearance is a System / Light / Dark
+  preference (new storage key, everyone starts on System); failed adds are
+  rows with Retry; the old toolbar, sidebar, layer panel and geo inspector
+  are deleted. The 12.5 scene sheet also gets the pending Shadow quality
+  control (see the 12.5 add-on).
+- 12.3 Styling and inspection (COMPLETE, 2026-09-07): Rules under the active
+  layer's Style as `Color by` (surface type / rules / single colour) with
+  presets first, per-layer drafts, an editable unmatched colour; vector
+  layers colour by attribute (typed categorical palette, a fixed Other
+  bucket, first-eight + overflow); a legend grouped by layer whose heading
+  opens the layer's Style and that grows to presentation size when both
+  side panels are collapsed; the right details panel (identity trail,
+  summary, rule match by identity, raw attributes with search, parts,
+  geometry, multi-selection aggregates, geo feature) replacing the
+  inspector and its Analysis tab; `Layer.rulesEnabled` deleted (colorBy is
+  the one answer). Remaining engine limitations: raster colormap (deferred),
+  stroke colour for vectors (the engine's polygon outline probed and does
+  not render — deferred), and a streaming SURFACE pick shows identity and
+  attributes without its roof metrics (the ring fetch is not wired; a
+  streaming BUILDING summary is complete).
+- 12.4 Linked data and filtering (IMPLEMENTED, 2026-09-08): Records / Summary drawer follows the active city or vector layer; building rows include derived roof metrics and part expansion, Raw objects, columns, counts, selected-only and export scopes. Static city and GeoJSON filters update map membership automatically, with clearable indicators outside the drawer. Streaming filters remain table-only over currently loaded records. Summary, details and legends aggregate real root/part geometry and distinguish unavailable values.
+- 12.5 Scene controls (IMPLEMENTED, 2026-09-08): Select Feature / Surface, compact camera controls and explicit layer/selection fit; exclusive nonmodal Sun & shade and Scene settings sheets; timezone-aware civil-time editing, seasonal presets and playback; persisted Shadow quality; interface appearance under Preferences. Weather and presentation looks retain their explanatory labels. Sheets scroll within the available map height, preserving camera and attribution access.
+- 12.6 Verification (LOCAL GATE, 2026-09-08): full suite 2,531 passed / 17 skipped before final wording and CSS polish; subsequent focused regression checks recorded in the reconciliation ledger. Browser checks cover city/vector records, filtering, selection, sheet interactions, resizing, expanded attribution and light/dark desktop/laptop layouts. See `scripts/smoke/ui-redesign.md` for reproducible scenarios and the reconciliation ledger for exact evidence and limitations. External Codex CLI review was rejected by automatic approval review because it would send source to an external service; local review completed. No commit or push performed.
+
+## Milestone 13: Processing Toolbox — Spatial Operations Across Layers (Specified)
+
+Goal: a QGIS-style processing toolbox (issue #10) that runs spatial operations
+in the browser on DuckDB-wasm with the `cityjson`, `spatial` and `three_d`
+extensions, writing results back as attribute columns of an existing layer.
+
+Feature specification (reviewed by Codex `gpt-6-astra`, two rounds):
+`docs/superpowers/specs/2026-09-10-processing-toolbox-design.md`. Mockup:
+`design/processing-toolbox-wireframe.html`.
+
+Deliverables (v1):
+
+- A **Tools** header button opening a Tools tab in the right panel: searchable
+  catalogue, per-tool parameter form (target layer, scope All / Matching /
+  Selected, LoD, parameters, output prefix), one run at a time with phases,
+  best-effort cancel with a defined commit boundary, result card, log and a
+  session history with Undo that restores previous values.
+- Tools: Roof metrics to attributes (no extension); Measure solids, Validate
+  solids (`three_d`, CityJSON/CityJSONSeq sources only), Height from extent
+  (bbox, every layer kind); Join attributes by location, Aggregate buildings
+  per area, Distance to nearest (`spatial`, vector layer reprojected app-side
+  with proj4 into the city layer's CRS).
+- Computed columns carry provenance and a badge in Details, the table, the
+  rule editor and exports. Features (Building plus parts) are the unit of
+  every count and roll-up; parts never count as buildings.
+- Results are session only; snapshots are unchanged (v4).
+
+Deferred (named slots in spec §9): footprint operations to a new vector
+layer, field calculator (next milestone), city-to-city joins, replay of runs
+on restore, geometry for layers without a reader.
+
+Status: specified 2026-09-10. **Milestone 13.1 implemented 2026-09-11** — the
+first vertical slice: the Tools button and panel, the catalogue, the tool form
+with frozen scope, the run queue with phases and cancel, the result card, the
+run log and session history with Undo, one tool (**Height from extent**), and
+the results surfacing in the table (badge + provenance), in Details (COMPUTED
+group) and in the rule editor (COMPUTED optgroup) with Style by result.
+Acceptance scenario 1 was smoked in a real browser: `scripts/smoke/processing-m1.md`.
+The seam and the DuckDB probe results are in `docs/architecture-notes.md`
+("Processing toolbox seam (M13.1, 2026-09-11)").
+
+**Milestone 13.2 implemented 2026-09-12** — **Roof metrics to attributes** as
+the second tool: an LoD select with per-LoD feature counts, six measure
+checkboxes (all ticked by default), a flat-threshold slider (0–15°, default 5°,
+strict `<`), §7's geometry-keyed contributor rule and roll-ups, skip accounting
+by LoD, and Style by result on `roof_area_m2` — computed app-side in JS, on
+every city layer kind including streaming. With it: the "Loading extension" run
+phase (`ensureExtension` inside the table FIFO, with the spec's failure copy),
+and a PUBLISHED DuckDB status (`useDuckDBStatus()`), so the catalogue's
+capability chips track an extension's state and offer Retry. A dead DuckDB
+worker is now DETECTED (its own `error`/`messageerror` event, published as
+`failed`): every queued and running run fails with §6.1's "Analytics engine
+stopped", every layer table is invalidated with the same message, every Undo is
+disabled, and the tool rows go dark with the existing "Not available while
+DuckDB is unavailable". §6.1's RECOVERY is deliberately not built — see the
+carried list. Verified in a real browser on the `two-buildings` fixture and on a
+Delft FCB layer (1,115 buildings, 9.2 s) in light and dark at 1000 px width. The
+M13.2 seams are in `docs/architecture-notes.md` ("Processing toolbox seam …
+M13.2 (2026-09-12)").
+
+**Milestone 13.3 implemented 2026-09-13** — the toolbox is finished. Five more
+tools ship: **Measure solids** and **Validate solids** (`three_d`, over the
+reader's own LoD geometry, with `ST_3DTryFromWKB`, `ST_3DValidationReport` and
+`ST_3DVolume` guarded exactly as the real engine requires) and the three
+cross-layer tools — **Join attributes by location**, **Aggregate buildings per
+area** and **Distance to nearest** (`spatial`, with the vector layer reprojected
+app-side through proj4 and registered as a per-run table). With them, three
+seams the toolbox needed: a **"Reading source"** run phase that re-registers a
+reader-backed layer's bytes for the length of one run and drops them again,
+typed output columns, and ONE Style-by-result descriptor on the tool definition
+instead of a branch per tool. Aggregate's count column is `bld_buildings_n`
+(`<prefix>buildings_n`) and its scope radios sit under TARGET, with a muted line
+saying the scope applies to the source layer's buildings.
+
+The **New layer** destination ships for every implemented tool: a run can write
+its results to a derived layer instead of to its target. A derived city layer is
+cut from its parent's TABLE and keeps its parent's reader, so it is
+reader-backed — every tool, proxy and export format the parent supports,
+CityParquet included, works on the copy — and a derived vector layer is a plain
+GeoJSON layer holding every area of its target. It is prepared inside the run's
+own queue slot and published in one step, so a cancel before that leaves nothing
+behind; its row is marked "Derived · not saved in workspaces", and both doors out
+of the workspace — the saved snapshot and the share link — omit it, with the
+active-layer index repointed at the filtered list. A derived layer dropped from a
+SHARE link gets no notice: §8 words that sentence for Save only.
+
+Also closed, all carried from 13.1 and 13.2: every await on one of `duckdb.ts`'s
+SIX raced primitives now settles when the worker dies — the race moved INTO the
+primitives, so the export dialog, the layer counts, the grid query, the
+map-filter sync, the Stats tab and the result card's median all stop waiting
+instead of hanging, with no call-site edit. What each of them then SHOWS differs
+and is the call site's own business: the export dialog and the median report the
+engine's sentence, while the map-filter sync clears the filter and the Stats tab
+simply stops waiting. Two awaits are deliberately still outside the race and are
+in the carried list below. `retryEngine` now checks the engine generation across
+its boot; `undoRun`
+no longer publishes a restore whose database is gone; rule drafts rotate an
+eight-colour palette and no longer set `Color by = Rules` before the user presses
+Save (at Save a result draft switches the mode from ANY mode, while a rule typed
+by hand keeps the editor's surface-only flip); the write step's SQL reaches the
+run log statement by statement; Open table scrolls the new columns into view; the
+drawer's synthetic "Roof area" header explains how it differs from the computed
+`roof_area_m2`; and the streaming-table sweep compares stream versions, so
+reopening the toolbox stops retiring a finished result card as stale.
+
+Two things a user meets that are deviations rather than details — the New layer
+destination is REFUSED on a streaming (FlatCityBuf) target, and a dead DuckDB
+worker is contained but still not recovered from — are in the carried list below.
+Browser acceptance is the milestone gate's own record:
+`scripts/smoke/processing-m3.md`. The M13.3 seams are in
+`docs/architecture-notes.md` ("Processing toolbox seam … M13.3 (2026-09-13)").
+
+The gate's own review found five things the milestone then fixed, and four of
+them change what a run computes. The all-scope FOOTPRINT reread is restricted to
+the layer table's own row ids, so a source file that gained buildings cannot
+reach §7.6's per-area counts with features the layer never had. A replaced
+computed column whose DECLARED TYPE differs is migrated inside the write's
+transaction (the whole column backed up, dropped and re-added), and Undo puts the
+original type back before restoring the values. §7.5's and §7.6's area tools drop
+the features of a MIXED layer that are not areas, counted under their own skip
+cause, so a Join cannot pick a coincident point as an area and an Aggregate never
+writes a building count onto one. And the distance join is bounded: candidates
+are prefiltered by the building's proxy box grown by the limit, and the source's
+properties are read only for the nearest candidate. Measure solids also guards
+`ST_3DSurfaceArea` on the validation report's degenerate-face count — it RAISES
+on such a solid and one row used to abort a whole Delft LoD 2.2 run.
+
+Three smaller gate findings closed with it: a caveat or skip cause now reads
+singular at a count of one ("1 invalid solid (no volume)", not "1 invalid
+solids"); Style by result is DISABLED on an undone card, where it was live and
+inert; and a VECTOR layer taking the focus no longer clears a CITY layer's
+selection, which is what made §10.11's "Selected" Aggregate scope unreachable
+through the UI (§6: changing the target does not change what a run is scoped to).
+Two user-visible strings are new and have no row in the plan's copy table —
+`solids with degenerate faces (no area)` and `<n> features skipped: not an area`,
+both written to §7.2's and §7.5's own patterns — and are proposed as adapted copy
+A18 and A19.
+
+Carried to M4 — things a user can notice today:
+
+- **The New layer destination is refused on a STREAMING target**, with "New
+  layer is not available for a streaming layer: its loaded buildings carry no
+  geometry to copy." A streaming layer's resident records carry no boundaries, so
+  the copy §6 describes could hold attributes but render nothing; building
+  geometry from resident records is a worker-protocol change, which §9 defers
+  ("Computing on layers without a reader"). Scenario 10's streaming variant is
+  therefore unmet.
+- **Streaming (FCB) runs still write to the table only** — unchanged since 13.2,
+  and still the repo owner's "future consideration". A streaming layer's
+  `model.objects` is empty, so a run's values show in the grid, the filter and
+  exports but not in Details, the rule editor or a colour rule, which §7.1 and §8
+  do ask for. Closing it means an attribute-overlay seam in the FCB plugin and
+  worker plus an Undo path (M2 plan, Design decision (b) and its "Future
+  consideration" section).
+- **A dead DuckDB worker is contained but still not recovered from.** Retry in
+  the status bar reboots the engine and rebuilds only the sources parked while it
+  was coming up, so a table that was `ready` when the worker died stays `failed`
+  and every tool stays disabled until the page is reloaded. What 13.3 fixed is
+  that nothing HANGS on that death any more, not that the session comes back.
+  Accepted as a deviation from §6.1's promise that Retry rebuilds tables, first
+  in M2 and again here. What 13.3 fixed is that no await on one of the six raced
+  primitives hangs on that death; the two below still can.
+- **Two engine awaits are still unraced against that death**:
+  `queryParquetBuffer`'s VFS REGISTRATION and CLEANUP (its query itself delegates
+  to the raced `queryDuckDB`), and `ensureExtension`'s in-flight INSTALL/LOAD.
+  Both sit outside the six primitives the race covers, so a parquet read or an
+  extension download caught by a worker death still never settles.
+- **A run over scope "All" builds an unbounded `IN (…)` list of contributor ids**
+  — on the solids path and on the cross-layer footprint path. Watched at the
+  milestone gate on the Delft sample; pushing contributor selection into SQL is
+  the fix if it bites a 100k-feature layer. The same gate MEASURED it on 1,115
+  buildings: a 40,830-character measure statement and a 78,204-character write,
+  both planned in well under a second, so nothing observed argues for doing it
+  now.
+- **Removing a layer does not clear its computed-column provenance** — only the
+  rebuild path calls `clearLayer`, so the session store keeps provenance for a
+  layer that is gone. Pre-existing, not introduced by the toolbox.
+- **"Show run log" on a derived layer's row goes dark once its run leaves the
+  20-run session history.** The ancestry itself is kept on the layer record; the
+  log it would open is not.
+- Cancel is best-effort at statement granularity for SQL — it is seen between
+  statements, so a long one runs to completion — and at a batch boundary inside
+  the app-side computes (Roof metrics' roll-up, the vector reprojection and its
+  NDJSON encoding).
+- A queued run's "Matching" ids are resolved at the HEAD of the queue, from the
+  filter frozen at Run. Ruled correct; recorded because the log header shows
+  `scopeCount 0` until then.
+- A corrupt bbox with `zmin > zmax` writes a negative height and reports it
+  honestly rather than guarding.
+- Everything §9 defers: footprint operations to a new vector layer, the field
+  calculator, city-to-city joins, replay of runs on restore, and computing on
+  layers without a reader.
+- Smaller items each task's reviewer deferred to the final review are recorded
+  per task in the milestone's SDD ledger (the M3 progress ledger, which lives
+  outside the repository).
+- **The app shell overflows horizontally below ~1024px** (`body.scrollWidth`
+  1024 at `innerWidth` 1000), clipping the right edge of the right panel with
+  the panel collapsed too. Pre-existing and unrelated to the toolbox.
 
 ## Cross-Cutting Workstreams
 

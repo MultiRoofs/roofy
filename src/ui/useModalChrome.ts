@@ -71,9 +71,14 @@ export function useModalChrome(
       if (e.key !== "Tab") return;
       const root = dialogRef.current;
       if (!root) return;
+      // A control inside a `hidden` subtree is not focusable in any browser —
+      // `.focus()` on it is a no-op — so counting one as the first or last stop
+      // of the cycle would strand the keyboard at that end. The Add Layer
+      // dialog keeps its inactive tab panel mounted-but-hidden, so this is a
+      // real case, not a defensive one.
       const focusable = Array.from(
         root.querySelectorAll<HTMLElement>(FOCUSABLE),
-      );
+      ).filter((el) => el.closest("[hidden]") === null);
       if (focusable.length === 0) {
         e.preventDefault();
         root.focus();

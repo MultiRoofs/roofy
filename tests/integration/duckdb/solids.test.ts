@@ -1,0 +1,982 @@
+// @vitest-environment node
+/**
+ * Every `three_d` fact the M3 plan's SQL rests on, against a REAL DuckDB 1.5.5
+ * with `three_d` v0.2.0 — the same wasm build the app ships.
+ *
+ * Opt-in: `DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb`.
+ * Skipped otherwise: it downloads a 36 MB binary and fetches a community
+ * extension over the network, neither of which belongs in the default run.
+ *
+ * WHAT ONLY THIS SUITE CAN CATCH: the community slot for a DuckDB version can
+ * be REBUILT under us (the duckdb-wasm pin pins the extension build, it does
+ * not freeze it). A renamed function or a `ST_3DVolume` that stopped raising
+ * would sail through every unit test in the repo, and the two guards the plan
+ * is built on — `ST_3DTryFromWKB` instead of `ST_3DFromWKB`, and
+ * `ST_3DVolume` only under `is_valid` — exist only because of what is
+ * asserted here.
+ *
+ * The statements in `MEASURE_SQL` and `VALIDATE_SQL` are the shapes
+ * `buildSolidMeasureSql` and `buildSolidValidationSql` emit: the last case of
+ * this suite asserts each builder's output IS the constant beside it and then
+ * runs it, so a literal here cannot describe a statement the app does not
+ * issue. Task 6 added the `geometry_type` column to both, for the reason
+ * `parsedRows` in `solidSql.ts` gives (a CompositeSolid's WKB name is
+ * "GeometryCollection Z", so "is this a solid?" is answerable only from the
+ * CityJSON type in the properties struct).
+ */
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import {
+  buildSolidMeasureSql,
+  buildSolidValidationSql,
+  buildSourceIdsSql,
+} from "../../../src/features/processing/solidSql";
+import type { Harness } from "./harness";
+
+const enabled = process.env.DUCKDB_INTEGRATION === "1";
+
+/** The fixture, under the VFS name the statements below address. */
+const SOURCE = "two.city.json";
+const LOD = "2.2";
+
+/** A Solid, INVALID (not closed, 2 open edges, 1 non-manifold edge). */
+const INVALID = "NL.IMBAG.Pand.0001";
+/** A MultiSurface at a solid LoD — the "not a solid" row. */
+const NOT_A_SOLID = "NL.IMBAG.Pand.0001-part1";
+/** A Solid, VALID. */
+const VALID = "NL.IMBAG.Pand.0002";
+
+/**
+ * The one-statement shape §7.2 runs, verbatim. **Task 6's `buildSolidMeasureSql`
+ * must emit THIS text**, not the plan's.
+ *
+ * `ST_3DTryFromWKB` in a subquery so the parse happens ONCE per row; the
+ * validation report beside it, so `r.is_valid` guards `ST_3DVolume` in the
+ * outer select. Every other measure is applied unguarded, which is the fact
+ * the assertions below exist to pin.
+ *
+ * DEVIATES from the plan's §7.2 text, forced by the engine and verified here
+ * 2026-09-12: the plan reads `r.is_valid AS is_valid` and rests on
+ * "`ST_3DValidationReport(NULL)` is NULL, so `r.is_valid` is NULL rather than
+ * false". That holds for a CONSTANT NULL only. Over a row vector, `three_d`
+ * v0.2.0 leaves the report's CHILD vectors untouched for a NULL solid:
+ * `ST_3DValidationReport(s) IS NULL` is true, yet `r.is_valid` reads
+ * uninitialised memory — observed both `false` and `true` for the SAME row on
+ * two runs, with garbage BIGINT counts beside it. So EVERY read of a report
+ * field carries `s IS NOT NULL`, the volume's condition included, which
+ * restores exactly the §7.2 output (`valid` NULL for a row that is not a
+ * solid). See the "tells a NULL solid's report apart" case below for the pin.
+ */
+const MEASURE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, geometry_type, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL THEN r.degenerate_face_count > 0 END AS degenerate, CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume_m3, CASE WHEN s IS NOT NULL AND r.degenerate_face_count = 0 THEN ST_3DSurfaceArea(s) END AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m FROM (SELECT "id", "feature_id", "geometry_properties_lod2_2".type AS geometry_type, ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
+
+/**
+ * §7.3's statement, the same way: all EIGHT report fields a validation run
+ * reads, each under the `s IS NOT NULL` guard.
+ *
+ * `orientation_error_count` is here because the report struct HAS it —
+ * `STRUCT(is_valid, is_closed, is_manifold, is_oriented, solid_count,
+ * shell_count, face_count, open_edge_count, non_manifold_edge_count,
+ * degenerate_face_count, orientation_error_count, code, message)` — and the
+ * plan's field list omits it. `code` and `message` are deliberately NOT
+ * selected: see the garbage case below.
+ *
+ * `buildSolidValidationSql` (Task 6) emits this text and the last case pins it;
+ * Task 10 spends the columns. The statement reads `orientation_error_count`
+ * although §7.3 names only seven columns: it is the only thing that explains an
+ * `is_oriented` of false, and a second statement to fetch it would parse every
+ * solid twice.
+ */
+const VALIDATE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, geometry_type, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL THEN r.is_closed END AS is_closed, CASE WHEN s IS NOT NULL THEN r.is_manifold END AS is_manifold, CASE WHEN s IS NOT NULL THEN r.is_oriented END AS is_oriented, CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n, CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n, CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n, CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n FROM (SELECT "id", "feature_id", "geometry_properties_lod2_2".type AS geometry_type, ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
+
+/**
+ * The same statement against the CityJSONSeq reader, by swapping ONLY the
+ * reader call — so the two runs cannot drift apart in any other character and
+ * "behaves identically" means what it says.
+ */
+function throughSeq(sql: string): string {
+  return sql.replace(
+    "read_cityjson('two.city.json', lod => '2.2')",
+    "read_cityjsonseq('two.city.jsonl', lod => '2.2')",
+  );
+}
+
+/** What one row of MEASURE_SQL / VALIDATE_SQL must contain, column by column. */
+type ExpectedRow = Record<string, string | number | boolean | null>;
+
+/**
+ * Asserts EVERY named column, with no `Number(…)` coercion that a NULL could
+ * slip through: a `null` expectation is asserted as NULL, an integer (0
+ * included) by identity, and only a non-integral measure is compared with a
+ * tolerance.
+ */
+function expectRow(
+  row: Record<string, unknown> | undefined,
+  expected: ExpectedRow,
+): void {
+  expect(row).toBeDefined();
+  for (const [column, want] of Object.entries(expected)) {
+    const got = row?.[column];
+    if (want === null) expect(got, column).toBeNull();
+    else if (typeof want === "number" && !Number.isInteger(want))
+      expect(got as number, column).toBeCloseTo(want, 6);
+    else expect(got, column).toBe(want);
+  }
+}
+
+describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
+  let db: Harness;
+
+  beforeAll(async () => {
+    // DYNAMIC, inside `beforeAll`: the file is collected by the default run
+    // and only `describe.skipIf` keeps it from executing — a top-level import
+    // would still evaluate the node bindings and resolve three wasm paths.
+    const harness = await import("./harness");
+    db = await harness.openDuckDB();
+    // A failure here IS the report this suite exists to make, so it is left
+    // to throw with the extension's own words.
+    harness.installExtension(db, "three_d");
+    db.register(SOURCE, "two-buildings.city.json");
+  }, 180_000);
+
+  afterAll(() => {
+    db?.close();
+  });
+
+  it("publishes every function name the plan's SQL uses", () => {
+    const rows = db.query(
+      "SELECT function_name FROM duckdb_functions() WHERE function_name LIKE 'st\\_3d%' ESCAPE '\\'",
+    );
+    const names = new Set(rows.map((r) => String(r["function_name"])));
+    for (const fn of [
+      "st_3dtryfromwkb",
+      "st_3dfromwkb",
+      "st_3dvolume",
+      "st_3dsurfacearea",
+      "st_3darea",
+      "st_3dfootprintarea",
+      "st_3dzmin",
+      "st_3dzmax",
+      "st_3dbounds",
+      "st_3disclosed",
+      "st_3dismanifold",
+      "st_3disoriented",
+      "st_3dnumshells",
+      "st_3dnumfaces",
+      "st_3dcentroid",
+      "st_3ddistance",
+      "st_3dvalidationreport",
+    ]) {
+      expect(names).toContain(fn);
+    }
+    // There is NO `ST_3DIsValid`: validity is the report's field. A task that
+    // reached for one would get a Catalog Error at run time.
+    expect(names.has("st_3disvalid")).toBe(false);
+  });
+
+  it("names the LoD column after the file's OWN label, and refuses another", () => {
+    const described = db
+      .query(
+        `DESCRIBE SELECT * FROM read_cityjson('${SOURCE}', lod => '${LOD}')`,
+      )
+      .map((r) => String(r["column_name"]));
+    // The label's "." becomes "_": "2.2" → geometry_lod2_2. This is why
+    // `LodColumn.suffix` exists and is never derived from the label.
+    expect(described).toContain("geometry_lod2_2");
+    expect(described).toContain("geometry_properties_lod2_2");
+    // The file's own label is the only one it answers to.
+    expect(() =>
+      db.query(`SELECT 1 FROM read_cityjson('${SOURCE}', lod => '2') LIMIT 1`),
+    ).toThrow(/LOD '2\.0' not found in file/);
+  });
+
+  it("reports the CityJSON geometry type in the properties struct", () => {
+    const rows = db.query(
+      `SELECT "id", "geometry_properties_lod2_2".type AS t FROM read_cityjson('${SOURCE}', lod => '${LOD}') ORDER BY "id"`,
+    );
+    const byId = new Map(rows.map((r) => [String(r["id"]), String(r["t"])]));
+    expect(byId.get(INVALID)).toBe("Solid");
+    expect(byId.get(NOT_A_SOLID)).toBe("MultiSurface");
+    expect(byId.get(VALID)).toBe("Solid");
+  });
+
+  it("has the two cheap WKB helpers, which need no three_d", () => {
+    const rows = db.query(
+      `SELECT "id", cityjson_wkb_geometry_type("geometry_lod2_2") AS wkb FROM read_cityjson('${SOURCE}', lod => '${LOD}') ORDER BY "id"`,
+    );
+    const byId = new Map(rows.map((r) => [String(r["id"]), String(r["wkb"])]));
+    expect(byId.get(VALID)).toBe("PolyhedralSurface Z");
+    expect(byId.get(NOT_A_SOLID)).toBe("MultiPolygon Z");
+    const extent = db.query(
+      `SELECT cityjson_wkb_extent("geometry_lod2_2") AS e FROM read_cityjson('${SOURCE}', lod => '${LOD}') WHERE "id" = '${VALID}'`,
+    );
+    expect(extent[0]?.["e"]).toMatchObject({ zmin: 0 });
+  });
+
+  it("RAISES on ST_3DFromWKB over a MultiPolygon Z — the whole statement", () => {
+    // Global Constraints: `ST_3DFromWKB` is never used. One such row fails the
+    // statement, so a layer with a single MultiSurface at a solid LoD would
+    // fail the whole run.
+    expect(() =>
+      db.query(
+        `SELECT ST_3DFromWKB("geometry_lod2_2") FROM read_cityjson('${SOURCE}', lod => '${LOD}')`,
+      ),
+    ).toThrow(/Unsupported WKB geometry type for SOLID_3D import/);
+  });
+
+  it("returns NULL from ST_3DTryFromWKB instead — for a MultiSurface, garbage and NULL", () => {
+    const rows = db.query(
+      `SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") IS NULL AS n FROM read_cityjson('${SOURCE}', lod => '${LOD}') ORDER BY "id"`,
+    );
+    const byId = new Map(rows.map((r) => [String(r["id"]), r["n"]]));
+    expect(byId.get(NOT_A_SOLID)).toBe(true);
+    expect(byId.get(VALID)).toBe(false);
+    const junk = db.query(
+      "SELECT ST_3DTryFromWKB('\\x00\\x01\\x02'::BLOB) IS NULL AS a, ST_3DTryFromWKB(NULL) IS NULL AS b",
+    );
+    expect(junk[0]).toMatchObject({ a: true, b: true });
+  });
+
+  it("refuses a bare NULL: ST_3DValidationReport has a SOLID_3D and a BLOB overload", () => {
+    // A unit test that spells `ST_3DValidationReport(NULL)` never runs. The
+    // cast is not optional.
+    expect(() =>
+      db.query("SELECT ST_3DValidationReport(NULL) IS NULL AS n"),
+    ).toThrow(/Could not choose a best candidate function/);
+  });
+
+  it("makes a CONSTANT NULL's report NULL — and only a constant one", () => {
+    const rows = db.query(
+      "SELECT ST_3DValidationReport(NULL::SOLID_3D) IS NULL AS report_null, ST_3DValidationReport(NULL::SOLID_3D).is_valid IS NULL AS flag_null",
+    );
+    expect(rows[0]).toMatchObject({ report_null: true, flag_null: true });
+  });
+
+  it("tells a NULL solid's report apart ONLY by `s IS NULL` — the field reads are GARBAGE", () => {
+    // THE trap of this milestone, and the reason `MEASURE_SQL` deviates from
+    // the plan's §7.2 text. For a solid that is NULL at RUN time (the row that
+    // is a MultiSurface), `three_d` v0.2.0 sets the report struct's own
+    // validity mask but leaves its CHILD vectors uninitialised: the struct
+    // reads NULL while every field read out of it returns whatever was in
+    // memory. `r.is_valid` came back `false` on one run of this very statement
+    // and `true` on another, with garbage BIGINT counts (`solid_count`
+    // 144117620806271230) beside it — so this case asserts only that the field
+    // is NOT NULL, never which value, and pins the guard that fixes it.
+    //
+    // The same applies to `r.code` and `r.message`: a `length(r.message)` over
+    // this vector returned 2_464_399 once and crashed the wasm instance with
+    // "memory access out of bounds" another time. NEVER read a report field
+    // without the `s IS NOT NULL` guard.
+    const rows = db.query(
+      `SELECT ST_3DValidationReport(s) IS NULL AS report_null, r.is_valid IS NOT NULL AS raw_field_not_null, CASE WHEN s IS NOT NULL THEN r.is_valid END IS NULL AS guarded_null FROM (SELECT ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('${SOURCE}', lod => '${LOD}') WHERE "id" = '${NOT_A_SOLID}')`,
+    );
+    expect(rows[0]).toMatchObject({
+      report_null: true,
+      raw_field_not_null: true,
+      guarded_null: true,
+    });
+  });
+
+  it("RAISES on ST_3DVolume over an unclosed solid, poisoning the statement", () => {
+    // The reason `CASE WHEN r.is_valid THEN ST_3DVolume(s) END` is the ONLY
+    // shape the plan allows. Unguarded, ONE bad building fails the run.
+    expect(() =>
+      db.query(
+        `SELECT ST_3DVolume(ST_3DTryFromWKB("geometry_lod2_2")) FROM read_cityjson('${SOURCE}', lod => '${LOD}') WHERE "id" = '${INVALID}'`,
+      ),
+    ).toThrow(/solid is not closed/);
+  });
+
+  it("answers every OTHER measure on an invalid solid", () => {
+    const rows = db.query(
+      `SELECT ST_3DSurfaceArea(s) AS a, ST_3DFootprintArea(s) AS f, ST_3DZMin(s) AS lo, ST_3DZMax(s) AS hi, ST_3DIsClosed(s) AS closed, ST_3DIsManifold(s) AS man, ST_3DIsOriented(s) AS ori, ST_3DNumShells(s) AS shells, ST_3DNumFaces(s) AS faces FROM (SELECT ST_3DTryFromWKB("geometry_lod2_2") AS s FROM read_cityjson('${SOURCE}', lod => '${LOD}') WHERE "id" = '${INVALID}')`,
+    );
+    expectRow(rows[0], {
+      a: 388,
+      f: 80,
+      lo: 0,
+      hi: 8.4,
+      closed: false,
+      man: false,
+      ori: false,
+      shells: 1,
+      faces: 7,
+    });
+  });
+
+  it("runs §7.2's one statement over all three rows and measures EVERY column", () => {
+    const byId = new Map(
+      db.query(MEASURE_SQL).map((r) => [String(r["id"]), r]),
+    );
+
+    // Volume is NULL because the guard refused it — not because the solid has
+    // none. §7.2: "volume NULL, valid false; envelope, footprint, height,
+    // ground and ridge still computed".
+    expectRow(byId.get(INVALID), {
+      // §7's roll-up ground: the part below belongs to the same FEATURE as this
+      // root, so a run must group on `f` and not on `id`.
+      f: INVALID,
+      parsed: true,
+      is_valid: false,
+      volume_m3: null,
+      envelope_m2: 388,
+      footprint_m2: 80,
+      ground_m: 0,
+      ridge_m: 8.4,
+    });
+    expectRow(byId.get(NOT_A_SOLID), {
+      f: INVALID,
+      parsed: false,
+      is_valid: null,
+      volume_m3: null,
+      envelope_m2: null,
+      footprint_m2: null,
+      ground_m: null,
+      ridge_m: null,
+    });
+    expectRow(byId.get(VALID), {
+      f: VALID,
+      parsed: true,
+      is_valid: true,
+      volume_m3: 2178,
+      envelope_m2: 1013.4,
+      footprint_m2: 180,
+      ground_m: 0,
+      ridge_m: 12.1,
+    });
+  });
+
+  it("reports the EIGHT §7.3 report fields on a parsed solid, valid or not", () => {
+    // Every field read carries the `s IS NOT NULL` guard, for the reason the
+    // case above pins. Task 10's `buildSolidValidationSql` must do the same on
+    // all eight, or an unparsed row gets garbage counts instead of NULL.
+    const byId = new Map(
+      db.query(VALIDATE_SQL).map((r) => [String(r["id"]), r]),
+    );
+    expectRow(byId.get(INVALID), {
+      f: INVALID,
+      parsed: true,
+      is_valid: false,
+      is_closed: false,
+      is_manifold: false,
+      is_oriented: false,
+      open_n: 2,
+      nm_n: 1,
+      deg_n: 0,
+      // The plan's field list omits `orientation_error_count`; the struct has
+      // it, and it counts the faces this solid winds the wrong way.
+      ori_n: 1,
+    });
+    // The unparsed row gets NULL in all eight — never a zero count, which would
+    // read as "checked and found nothing wrong".
+    expectRow(byId.get(NOT_A_SOLID), {
+      f: INVALID,
+      parsed: false,
+      is_valid: null,
+      is_closed: null,
+      is_manifold: null,
+      is_oriented: null,
+      open_n: null,
+      nm_n: null,
+      deg_n: null,
+      ori_n: null,
+    });
+    expectRow(byId.get(VALID), {
+      f: VALID,
+      parsed: true,
+      is_valid: true,
+      is_closed: true,
+      is_manifold: true,
+      is_oriented: true,
+      open_n: 0,
+      nm_n: 0,
+      deg_n: 0,
+      ori_n: 0,
+    });
+  });
+
+  it("answers ST_3DArea and ST_3DBounds, on the valid solid and the invalid one", () => {
+    // The plan states `ST_3DArea` is the same value as `ST_3DSurfaceArea` on
+    // these fixtures and that `ST_3DBounds` is a
+    // `STRUCT(min_x, min_y, min_z, max_x, max_y, max_z)`. Both unprobed until
+    // now, and both answer on an INVALID solid as well as a valid one — which
+    // is the property that lets a measure run report a bad building's extent.
+    const byId = new Map(
+      db
+        .query(
+          `SELECT "id", ST_3DArea(s) AS area, ST_3DSurfaceArea(s) AS surface, ST_3DBounds(s) AS b FROM (SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s FROM read_cityjson('${SOURCE}', lod => '${LOD}'))`,
+        )
+        .map((r) => [String(r["id"]), r]),
+    );
+
+    for (const id of [INVALID, VALID]) {
+      const row = byId.get(id);
+      expect(row?.["area"], id).toBe(row?.["surface"]);
+    }
+    expect(byId.get(INVALID)?.["area"]).toBe(388);
+    expect(byId.get(VALID)?.["area"]).toBeCloseTo(1013.4, 6);
+    // A NULL solid gives a NULL area, not a zero.
+    expect(byId.get(NOT_A_SOLID)?.["area"]).toBeNull();
+    expect(byId.get(NOT_A_SOLID)?.["b"]).toBeNull();
+
+    // The translate is [85000, 446000, 0] and the scale 0.001, so the bounds
+    // come back in the file's own CRS, not in local vertex units.
+    expect(byId.get(VALID)?.["b"]).toMatchObject({
+      min_x: 85020,
+      min_y: 446000,
+      min_z: 0,
+      max_x: 85035,
+      max_y: 446012,
+      max_z: 12.1,
+    });
+    expect(byId.get(INVALID)?.["b"]).toMatchObject({
+      min_x: 85000,
+      min_y: 446000,
+      min_z: 0,
+      max_x: 85010,
+      max_y: 446008,
+      max_z: 8.4,
+    });
+  });
+
+  it("behaves identically through read_cityjsonseq — every row, every column", () => {
+    // Not "some solid parses": the SAME two statements, with only the reader
+    // call swapped, must return the SAME rows. `two-buildings.city.jsonl`
+    // carries the same three objects across two CityJSONFeature lines, so a
+    // reader that lost a part, renamed a feature id or measured differently
+    // shows up here.
+    db.register("two.city.jsonl", "two-buildings.city.jsonl");
+    const byIdAsc = (rows: Record<string, unknown>[]) =>
+      [...rows].sort((a, b) => String(a["id"]).localeCompare(String(b["id"])));
+
+    const measured = byIdAsc(db.query(throughSeq(MEASURE_SQL)));
+    expect(measured.map((r) => r["id"])).toEqual([INVALID, NOT_A_SOLID, VALID]);
+    expect(measured).toEqual(byIdAsc(db.query(MEASURE_SQL)));
+    // Spelled out on the seq side too, so the parity assertions cannot pass by
+    // both readers being wrong in the same way.
+    expectRow(measured[2], {
+      id: VALID,
+      f: VALID,
+      parsed: true,
+      is_valid: true,
+      volume_m3: 2178,
+      envelope_m2: 1013.4,
+      footprint_m2: 180,
+      ground_m: 0,
+      ridge_m: 12.1,
+    });
+    expectRow(measured[1], {
+      id: NOT_A_SOLID,
+      f: INVALID,
+      parsed: false,
+      is_valid: null,
+      volume_m3: null,
+      envelope_m2: null,
+      footprint_m2: null,
+      ground_m: null,
+      ridge_m: null,
+    });
+
+    const validated = byIdAsc(db.query(throughSeq(VALIDATE_SQL)));
+    expect(validated).toEqual(byIdAsc(db.query(VALIDATE_SQL)));
+    expectRow(validated[0], {
+      id: INVALID,
+      f: INVALID,
+      parsed: true,
+      is_valid: false,
+      is_closed: false,
+      is_manifold: false,
+      is_oriented: false,
+      open_n: 2,
+      nm_n: 1,
+      deg_n: 0,
+      ori_n: 1,
+    });
+    expectRow(validated[2], {
+      id: VALID,
+      f: VALID,
+      parsed: true,
+      is_valid: true,
+      is_closed: true,
+      is_manifold: true,
+      is_oriented: true,
+      open_n: 0,
+      nm_n: 0,
+      deg_n: 0,
+      ori_n: 0,
+    });
+    expectRow(validated[1], {
+      id: NOT_A_SOLID,
+      f: INVALID,
+      parsed: false,
+      is_valid: null,
+      is_closed: null,
+      is_manifold: null,
+      is_oriented: null,
+      open_n: null,
+      nm_n: null,
+      deg_n: null,
+      ori_n: null,
+    });
+  });
+
+  // The repo carried no CompositeSolid; Decisions recorded item 4 settled that
+  // one IS added, so this is a real case and not a skip. Two unit cubes side by
+  // side: the parse must succeed, the report must read valid, and the volume
+  // must be the SUM of the members — which is the fact Task 7's §7 roll-up
+  // rests on.
+  it("parses a CompositeSolid and sums its members' volume", () => {
+    db.register("composite.city.json", "composite-solid.city.json");
+    const rows = db.query(
+      `SELECT cityjson_wkb_geometry_type("geometry_lod2_2") AS wkb,
+              "geometry_properties_lod2_2".type AS ptype,
+              CASE WHEN s IS NOT NULL THEN r.is_valid END AS valid,
+              CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume,
+              ST_3DNumShells(s) AS shells, ST_3DNumFaces(s) AS faces,
+              CASE WHEN s IS NOT NULL THEN r.is_closed END AS closed,
+              CASE WHEN s IS NOT NULL THEN r.is_manifold END AS man,
+              CASE WHEN s IS NOT NULL THEN r.is_oriented END AS ori,
+              CASE WHEN s IS NOT NULL THEN r.solid_count END AS solid_n,
+              CASE WHEN s IS NOT NULL THEN r.shell_count END AS shell_n,
+              CASE WHEN s IS NOT NULL THEN r.face_count END AS face_n,
+              CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n,
+              CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n,
+              CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n,
+              CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n,
+              ST_3DSurfaceArea(s) AS envelope, ST_3DFootprintArea(s) AS footprint
+       FROM (SELECT "geometry_lod2_2", "geometry_properties_lod2_2",
+                    ST_3DTryFromWKB("geometry_lod2_2") AS s,
+                    ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r
+             FROM read_cityjson('composite.city.json', lod => '2.2'))`,
+    );
+    // A CompositeSolid's WKB is a GeometryCollection Z, NOT the
+    // "PolyhedralSurface Z" a plain Solid carries: a task that keyed "is this
+    // a solid?" on the WKB type string would drop every CompositeSolid. The
+    // CityJSON type in the properties struct is the reliable answer.
+    expect(rows[0]?.["wkb"]).toBe("GeometryCollection Z");
+    expect(rows[0]?.["ptype"]).toBe("CompositeSolid");
+    // Both members counted: two shells, twelve faces (six each), and the
+    // SUMMED volume — the fact Task 7's §7 roll-up rests on. The two unit
+    // cubes share the face x = 1, so the envelope is the 12 outer unit squares
+    // and the footprint the 2 × 1 ground rectangle.
+    expectRow(rows[0], {
+      valid: true,
+      // The shared face x = 1 belongs to both members, and the report still
+      // reads the composite as closed, manifold and correctly oriented.
+      closed: true,
+      man: true,
+      ori: true,
+      volume: 2,
+      // The two ways of counting agree: the standalone measures and the
+      // report's own `shell_count` / `face_count`.
+      shells: 2,
+      faces: 12,
+      solid_n: 2,
+      shell_n: 2,
+      face_n: 12,
+      open_n: 0,
+      nm_n: 0,
+      deg_n: 0,
+      ori_n: 0,
+      envelope: 12,
+      footprint: 2,
+    });
+  });
+
+  // The FEATURE-level invalid solid. `two-buildings.city.json` cannot express
+  // one: its `NL.IMBAG.Pand.0001` has a MultiSurface PART at 2.2, so §7's
+  // contributor rule reads the whole feature as "not a solid". This fixture is
+  // that same solid on a building with NO parts, so a run over it measures one
+  // building and withholds one volume — which is what every FEATURE-level
+  // "invalid solid" expectation in this milestone rests on.
+  it("measures the invalid-solid fixture: every measure but the volume", () => {
+    db.register("invalid.city.json", "invalid-solid.city.json");
+    const rows = db.query(
+      `SELECT "id", s IS NOT NULL AS parsed,
+              CASE WHEN s IS NOT NULL THEN r.is_valid END AS valid,
+              CASE WHEN s IS NOT NULL THEN r.is_closed END AS closed,
+              CASE WHEN s IS NOT NULL THEN r.is_manifold END AS man,
+              CASE WHEN s IS NOT NULL THEN r.is_oriented END AS ori,
+              CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n,
+              CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n,
+              CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n,
+              CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n,
+              CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume,
+              ST_3DSurfaceArea(s) AS envelope, ST_3DFootprintArea(s) AS footprint,
+              ST_3DZMin(s) AS ground, ST_3DZMax(s) AS ridge
+       FROM (SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s,
+                    ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r
+             FROM read_cityjson('invalid.city.json', lod => '2.2'))`,
+    );
+    expect(rows).toHaveLength(1);
+    // The same numbers `NL.IMBAG.Pand.0001` gives in `two-buildings.city.json`
+    // — the fixture is that solid lifted out, so the two files must agree.
+    expectRow(rows[0], {
+      id: INVALID,
+      parsed: true,
+      valid: false,
+      closed: false,
+      man: false,
+      ori: false,
+      open_n: 2,
+      nm_n: 1,
+      deg_n: 0,
+      ori_n: 1,
+      volume: null,
+      envelope: 388,
+      footprint: 80,
+      ground: 0,
+      ridge: 8.4,
+    });
+  });
+
+  // ---------------------------------------------------------------- F1 / D11
+  //
+  // `ST_3DSurfaceArea` RAISES on a solid with a degenerate (zero-area) face,
+  // and ONE such row aborts the whole statement — which is what broke the
+  // Delft LoD 2.2 run at the M3 gate ("Invalid Error: ST_3DSurfaceArea: solid
+  // contains degenerate faces", the whole scope lost). There is no fixture
+  // file for it: the solid is BUILT here, as a closed box with one extra face
+  // whose four indices collapse onto two vertices.
+  //
+  // The three things this block pins, none of which any unit test can see:
+  //  - WHICH functions raise. Only `ST_3DSurfaceArea` does; the footprint,
+  //    ZMin and ZMax all answer normally, so guarding them would cost a real
+  //    footprint and a real height for nothing.
+  //  - That DuckDB's `TRY()` does NOT catch it (finding D11). `TRY` exists in
+  //    1.5.5 and swallows a CAST error, but a three_d "Invalid Error" comes
+  //    out of the extension and propagates through it.
+  //  - That the guard the app now issues — the report's own
+  //    `degenerate_face_count = 0` — makes exactly the raising row NULL and
+  //    leaves every other row's envelope intact.
+  describe("a solid with a degenerate face (F1)", () => {
+    const DEG_SOURCE = "degenerate.city.json";
+    const GOOD = "B.good";
+    const DEGENERATE = "B.degenerate";
+    /** The THREE zero-area faces probed, so the guard is not written against
+     *  one shape's accident. `DEGENERATE` is the first of them. */
+    const SHAPES = [DEGENERATE, "B.collapsed_triangle", "B.collinear_triangle"];
+    /** The control: a repeated face has REAL area, so it makes the solid
+     *  invalid without making it degenerate. */
+    const REPEATED = "B.repeated_ring";
+    const parsed = (source: string) =>
+      `(SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('${source}', lod => '2.2'))`;
+    /** ONE object of the fixture: `ST_3DSurfaceArea` raises for the whole
+     *  statement as soon as any row is degenerate, so a per-shape claim has to
+     *  be asked per row. */
+    const parsedOne = (source: string, id: string) =>
+      `(SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('${source}', lod => '2.2') WHERE "id" = '${id}')`;
+
+    beforeAll(() => {
+      /** A closed box, plus whatever extra faces the caller adds. */
+      const box = (extra: number[][][]) => ({
+        type: "Building",
+        geometry: [
+          {
+            type: "Solid",
+            lod: "2.2",
+            boundaries: [
+              [
+                [[0, 3, 2, 1]],
+                [[4, 5, 6, 7]],
+                [[0, 1, 5, 4]],
+                [[1, 2, 6, 5]],
+                [[2, 3, 7, 6]],
+                [[3, 0, 4, 7]],
+                ...extra,
+              ],
+            ],
+          },
+        ],
+      });
+      const doc = {
+        type: "CityJSON",
+        version: "2.0",
+        transform: {
+          scale: [0.001, 0.001, 0.001],
+          translate: [85000, 446000, 0],
+        },
+        metadata: {
+          referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/7415",
+        },
+        CityObjects: {
+          [GOOD]: box([]),
+          // The quad 0,1,1,0 has two pairs of identical vertices: zero area.
+          [DEGENERATE]: box([[[0, 1, 1, 0]]]),
+          // A triangle with a repeated vertex.
+          "B.collapsed_triangle": box([[[0, 1, 1]]]),
+          // Three COLLINEAR vertices — all distinct, and still no area
+          // (vertex 8 is the midpoint of the edge 0–1).
+          "B.collinear_triangle": box([[[0, 8, 1]]]),
+          // The ground ring again: a face with real area, repeated.
+          "B.repeated_ring": box([[[0, 3, 2, 1]]]),
+        },
+        vertices: [
+          [0, 0, 0],
+          [10000, 0, 0],
+          [10000, 8000, 0],
+          [0, 8000, 0],
+          [0, 0, 6000],
+          [10000, 0, 6000],
+          [10000, 8000, 6000],
+          [0, 8000, 6000],
+          // 8: the midpoint of the ground edge 0–1, for the collinear face.
+          [5000, 0, 0],
+        ],
+      };
+      db.registerBytes(
+        DEG_SOURCE,
+        new TextEncoder().encode(JSON.stringify(doc)),
+      );
+    });
+
+    it("reports each zero-area shape as degenerate, and the repeated face as not", () => {
+      // The evidence the guard reads `degenerate_face_count` rather than the
+      // one shape that reproduced the gate's abort: a collapsed quad, a
+      // collapsed triangle and three collinear points all answer the same way,
+      // and a repeated face — which has real area — does not.
+      const rows = db.query(
+        `SELECT "id", CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n
+         FROM ${parsed(DEG_SOURCE)} ORDER BY "id"`,
+      );
+      const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+      for (const shape of SHAPES) {
+        expect([shape, byId.get(shape)?.["deg_n"]]).toEqual([shape, 1]);
+      }
+      expect(byId.get(GOOD)?.["deg_n"]).toBe(0);
+      // And the control: a REPEATED ground ring is a face with real area, so
+      // the solid is invalid (§7.3 reports it) and NOT degenerate. Measured,
+      // not assumed — it is why the guard reads `degenerate_face_count` and
+      // never `is_valid`, which would withhold the area of every §7.3 failure.
+      expect(byId.get(REPEATED)?.["deg_n"]).toBe(0);
+    });
+
+    it("RAISES from ST_3DSurfaceArea on each shape, and answers the footprint", () => {
+      // F1's whole argument, per shape: the surface area is the ONLY measure
+      // that cannot be taken, so it is the only one guarded. The footprint is
+      // the box's own 10 × 8 m ground in every case — a zero-area face adds
+      // nothing to it.
+      for (const shape of SHAPES) {
+        expect(() =>
+          db.query(
+            `SELECT ST_3DSurfaceArea(s) AS v FROM ${parsedOne(DEG_SOURCE, shape)}`,
+          ),
+        ).toThrow(/ST_3DSurfaceArea: solid contains degenerate faces/);
+        const rows = db.query(
+          `SELECT ST_3DFootprintArea(s) AS footprint, ST_3DZMin(s) AS ground, ST_3DZMax(s) AS ridge FROM ${parsedOne(DEG_SOURCE, shape)}`,
+        );
+        expect([shape, rows[0]?.["footprint"]]).toEqual([shape, 80]);
+        expect([shape, rows[0]?.["ground"], rows[0]?.["ridge"]]).toEqual([
+          shape,
+          0,
+          6,
+        ]);
+      }
+      // The control answers everything, area included: no degenerate face, no
+      // refusal — although the solid is invalid.
+      const control = db.query(
+        `SELECT CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, ST_3DSurfaceArea(s) AS envelope, ST_3DFootprintArea(s) AS footprint FROM ${parsedOne(DEG_SOURCE, REPEATED)}`,
+      );
+      expect(control[0]?.["is_valid"]).toBe(false);
+      expect(control[0]?.["envelope"]).toBeGreaterThan(0);
+      // 120 m², not the box's 80: the repeated ring is a second real face and
+      // the footprint projection counts it. An answer, which is the point —
+      // the engine refuses nothing here.
+      expect(control[0]?.["footprint"]).toBe(120);
+    });
+
+    it("is reported as degenerate, and the good box beside it is not", () => {
+      const rows = db.query(
+        `SELECT "id",
+                CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid,
+                CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n,
+                CASE WHEN s IS NOT NULL THEN r.face_count END AS face_n
+         FROM ${parsed(DEG_SOURCE)} ORDER BY "id"`,
+      );
+      const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+      expectRow(byId.get(DEGENERATE), {
+        is_valid: false,
+        deg_n: 1,
+        face_n: 7,
+      });
+      expectRow(byId.get(GOOD), { is_valid: true, deg_n: 0, face_n: 6 });
+    });
+
+    it("RAISES from ST_3DSurfaceArea only — footprint, ZMin and ZMax answer", () => {
+      expect(() =>
+        db.query(`SELECT ST_3DSurfaceArea(s) AS v FROM ${parsed(DEG_SOURCE)}`),
+      ).toThrow(/ST_3DSurfaceArea: solid contains degenerate faces/);
+      // The other three measures the statement takes are SAFE on the very same
+      // row: this is the evidence the guard is put on one function and not on
+      // all four.
+      const rows = db.query(
+        `SELECT "id", ST_3DFootprintArea(s) AS footprint, ST_3DZMin(s) AS ground, ST_3DZMax(s) AS ridge FROM ${parsed(DEG_SOURCE)} ORDER BY "id"`,
+      );
+      const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+      expectRow(byId.get(DEGENERATE), { footprint: 80, ground: 0, ridge: 6 });
+      expectRow(byId.get(GOOD), { footprint: 80, ground: 0, ridge: 6 });
+    });
+
+    it("is NOT caught by DuckDB's TRY() (finding D11)", () => {
+      // `TRY` is a real 1.5.5 expression and it does swallow a CAST error …
+      expect(db.query("SELECT TRY(CAST('x' AS INTEGER)) AS v")[0]?.["v"]).toBe(
+        null,
+      );
+      // … but a three_d "Invalid Error" propagates straight through it, which
+      // is why the guard has to come from the validation report instead.
+      expect(() =>
+        db.query(
+          `SELECT TRY(ST_3DSurfaceArea(s)) AS v FROM ${parsed(DEG_SOURCE)}`,
+        ),
+      ).toThrow(/ST_3DSurfaceArea: solid contains degenerate faces/);
+    });
+
+    it("runs the APP's builder over it without raising, NULLing only the envelope", () => {
+      const rows = db.query(
+        buildSolidMeasureSql({
+          from: `read_cityjson('${DEG_SOURCE}', lod => '2.2')`,
+          geometryColumn: "geometry_lod2_2",
+          propertiesColumn: "geometry_properties_lod2_2",
+          ids: null,
+        }),
+      );
+      const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+      expectRow(byId.get(DEGENERATE), {
+        parsed: true,
+        is_valid: false,
+        degenerate: true,
+        // Both withheld: the volume by validity, the envelope by the new guard.
+        volume_m3: null,
+        envelope_m2: null,
+        // And both KEPT, which is what §7.2's caveat rule needs.
+        footprint_m2: 80,
+        ground_m: 0,
+        ridge_m: 6,
+      });
+      expectRow(byId.get(GOOD), {
+        parsed: true,
+        is_valid: true,
+        degenerate: false,
+        volume_m3: 480,
+        envelope_m2: 376,
+        footprint_m2: 80,
+      });
+    });
+
+    it("leaves the 2B invalid solid's envelope alone: it has NO degenerate face", () => {
+      // The reason the guard is `degenerate_face_count = 0` and never
+      // `r.is_valid`: `invalid-solid.city.json` is unclosed (2 open edges, 1
+      // non-manifold) with ZERO degenerate faces, and scenario 2B's card shows
+      // its envelope of 388. An `is_valid` guard would have erased it.
+      db.register("invalid-for-guard.city.json", "invalid-solid.city.json");
+      const rows = db.query(
+        buildSolidMeasureSql({
+          from: `read_cityjson('invalid-for-guard.city.json', lod => '2.2')`,
+          geometryColumn: "geometry_lod2_2",
+          propertiesColumn: "geometry_properties_lod2_2",
+          ids: null,
+        }),
+      );
+      expect(rows).toHaveLength(1);
+      expectRow(rows[0], {
+        is_valid: false,
+        degenerate: false,
+        volume_m3: null,
+        envelope_m2: 388,
+        footprint_m2: 80,
+        ground_m: 0,
+        ridge_m: 8.4,
+      });
+    });
+  });
+
+  it("runs the APP's own builders, not this file's literals", () => {
+    // The literals above and the builders must be ONE statement each. This is
+    // where that stops being a convention and becomes a test: the builders are
+    // pure string functions, so nothing here is mocked and no engine door is
+    // crossed to reach them.
+    const reader = `read_cityjson('${SOURCE}', lod => '${LOD}')`;
+    const columns = {
+      geometryColumn: "geometry_lod2_2",
+      propertiesColumn: "geometry_properties_lod2_2",
+    } as const;
+
+    const built = buildSolidMeasureSql({ from: reader, ...columns, ids: null });
+    expect(built).toBe(MEASURE_SQL);
+    const rows = db.query(built);
+    expect(rows).toHaveLength(3);
+    // §7.2's three outcomes, off the builder's own statement, and with the
+    // CityJSON type that tells "not a solid" from "no geometry" (D4).
+    const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+    expectRow(byId.get(VALID), {
+      geometry_type: "Solid",
+      parsed: true,
+      is_valid: true,
+      volume_m3: 2178,
+    });
+    expectRow(byId.get(INVALID), {
+      geometry_type: "Solid",
+      parsed: true,
+      is_valid: false,
+      volume_m3: null,
+      envelope_m2: 388,
+    });
+    expectRow(byId.get(NOT_A_SOLID), {
+      geometry_type: "MultiSurface",
+      parsed: false,
+      is_valid: null,
+      volume_m3: null,
+    });
+
+    const validation = buildSolidValidationSql({
+      from: reader,
+      ...columns,
+      ids: null,
+    });
+    expect(validation).toBe(VALIDATE_SQL);
+
+    // And SCOPED, which is the shape a run over a selection issues: the filter
+    // is inside the subquery, so exactly the asked-for row comes back.
+    const scoped = db.query(
+      buildSolidValidationSql({ from: reader, ...columns, ids: [VALID] }),
+    );
+    expect(scoped).toHaveLength(1);
+    expectRow(scoped[0], {
+      id: VALID,
+      geometry_type: "Solid",
+      parsed: true,
+      is_valid: true,
+      is_closed: true,
+      open_n: 0,
+      ori_n: 0,
+    });
+  });
+
+  // Task 7's THIRD statement: §6.1's id join asks the source which objects it
+  // still holds, over the whole SCOPE (roots and non-contributors included) and
+  // with no parse at all. The reader's row-per-object answer is what makes the
+  // join's "every id" threshold meaningful, so it is pinned here on the engine
+  // rather than assumed.
+  it("answers the id join: a row per object, scoped or whole", () => {
+    const reader = `read_cityjson('${SOURCE}', lod => '${LOD}')`;
+
+    const all = db.query(buildSourceIdsSql({ from: reader, ids: null }));
+    expect(all.map((row) => String(row["id"])).sort()).toEqual(
+      [INVALID, NOT_A_SOLID, VALID].sort(),
+    );
+    // ONE column: nothing here pays for a solid.
+    expect(Object.keys(all[0] ?? {})).toEqual(["id"]);
+
+    const scoped = db.query(
+      buildSourceIdsSql({ from: reader, ids: [VALID, INVALID] }),
+    );
+    expect(scoped.map((row) => String(row["id"])).sort()).toEqual(
+      [INVALID, VALID].sort(),
+    );
+
+    // An id the file does NOT hold simply does not come back — which is the
+    // whole mechanism: the executor compares what it asked for against this.
+    const gone = db.query(
+      buildSourceIdsSql({ from: reader, ids: [VALID, "NL.IMBAG.Pand.9999"] }),
+    );
+    expect(gone.map((row) => String(row["id"]))).toEqual([VALID]);
+  });
+});

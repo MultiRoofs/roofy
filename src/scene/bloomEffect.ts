@@ -109,9 +109,11 @@ function bloomEffectDescClass(): EffectDescConstructor {
      * wrapped in the ENGINE'S `Effect` class, never in our own
      * `new EffectPass(...)`.
      *
-     * `@navaramap/three` 0.0.5 INLINES its copy of `postprocessing` (6.39.3)
-     * into its bundle rather than importing the peer dependency, so the app's
-     * `postprocessing` (6.39.0) exports a DIFFERENT `Pass` class object. And
+     * `@navaramap/three` INLINES its copy of `postprocessing` (6.39.3) into
+     * its bundle rather than importing the peer dependency — 0.0.5 and 0.1.1
+     * alike; both bundles carry the `postprocessing@6.39.3` region and import
+     * only `three` and `@navaramap/engine*` — so the app's `postprocessing`
+     * (6.39.0) exports a DIFFERENT `Pass` class object. And
      * `EffectDesc.insertPass` picks the pass to hand the composer with
      * `instance instanceof Pass ? instance.rawPass : instance instanceof
      * PostprocessingPass ? instance : undefined` — against the engine's own
@@ -126,7 +128,8 @@ function bloomEffectDescClass(): EffectDescConstructor {
      * purely structurally (no `instanceof` anywhere in it, checked in the
      * 0.0.5 bundle), so the cross-copy composition is safe — but it is the
      * kind of thing a `postprocessing` bump could break, so re-verify that the
-     * halo still renders when either version moves.
+     * halo still renders when either version moves (last verified on the
+     * 0.1.1 bump, 2026-09-04: the cyber theme's glow renders).
      *
      * `mipmapBlur` is what makes the glow DIFFUSE (a wide, cheap mip pyramid)
      * rather than a tight kernel around the line, and it is also what makes

@@ -5,7 +5,7 @@
  * `ResidentObjectRecord` (the payload shipped for every resident cell)
  * deliberately excludes `Surface.rings` — see the doc comment on
  * `ResidentObjectRecord` in the plugin's workerProtocol. The two main-thread
- * consumers that need rings (rooftop solar scoring in AnalysisTab, and the
+ * consumers that need rings (rooftop solar scoring, and the
  * Surfaces tab) act on exactly one selected object at a time, so this hook
  * fetches rings for that one object lazily instead of shipping every object's
  * full geometry on every cell fetch/recolor.

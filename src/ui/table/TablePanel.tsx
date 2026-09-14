@@ -1,577 +1,611 @@
+import { ActionIcon } from "../ActionIcon";
+import { ColumnsPanel } from "./ColumnsPanel";
+import { columnLabel } from "../drawer/columnPolicy";
+import { orderedColumns, moveColumn } from "./columnOrder";
 /**
- * Bottom table panel showing city objects in a database-like view.
+ * The bottom panel: one layer's DuckDB table, filtered, sorted and paged.
  *
- * Data source: DuckDB SQL queries with infinite scroll (LIMIT/OFFSET).
- * Falls back to in-memory CityModel when DuckDB is unavailable.
- * Supports column sorting, row selection, and optional scene sync.
+ * DuckDB-ONLY. The in-memory fallbacks this file used to carry (a `CityModel`
+ * walk, a resident-record walk) are gone with the single global table they
+ * shadowed: every layer now has a table of its own, so a fallback would be a
+ * second, differently-shaped answer to the same question — with different
+ * column names, which is exactly how the old `type` vs `object_type` split
+ * happened.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { CityModel, CityObject } from "../../domain/citymodel/types";
-import { queryDuckDB } from "../../analytics/duckdb";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import type { DuckDBStatus } from "../../insights/duckdb";
+import { useLayerTableStore } from "../../insights/layerTables";
+import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
-import { useLayerStore } from "../../features/layers/layerStore";
-import { useStreamStore } from "../../features/streaming/streamStore";
-import { getResidentModel } from "../../features/streaming/residentModel";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import {
+  useActiveCityLayer,
+  useActiveLayer,
+} from "../../features/workspace/activeLayer";
 import type { Selection } from "../../domain/selection/types";
+import { ResizeHandle } from "../shell/ResizeHandle";
+import { SHELL_LIMITS, useShellStore } from "../shell/shellStore";
+import { DataGrid } from "./DataGrid";
+import { FilterBar } from "./FilterBar";
+import { Pagination } from "./Pagination";
+import { GeoRecordsPanel } from "./GeoRecordsPanel";
+import { geoRecords } from "../../features/geoLayers/geoRecords";
+// ONE pinned `en-US` formatter for the whole panel, and the empty-grid
+// sentences — see tableText.ts for why they do not live in a component.
+import { emptyGridMessage, formatCount } from "./tableText";
+import { useLayerQuery } from "./useLayerQuery";
+import { derivedBuildingValues } from "../drawer/derivedBuildingColumns";
+import { defaultColumns, derivedColumns } from "../drawer/columnPolicy";
+import { getResidentModel } from "../../features/streaming/residentModel";
+import { useStreamStore } from "../../features/streaming/streamStore";
+import { useLayerCounts } from "./useLayerCounts";
+import { useComputedColumnStore } from "../../insights/computedColumns";
 
-const PAGE_SIZE = 100;
+const STREAMING_FILTER_REASON =
+  "Map filtering is not available for streaming layers yet";
 
-interface TablePanelProps {
-  readonly duckdbTableLoaded: boolean;
-  readonly onCollapse: () => void;
-  readonly onHeightChange: (height: number) => void;
+export interface TablePanelProps {
+  readonly duckdbStatus: DuckDBStatus;
+  readonly onRetryDuckDB: () => void;
 }
 
-type SortDir = "asc" | "desc";
+/** The panel is the shell's drawer: its height and its own closing are
+ *  `shellStore`'s state, not props — the height limits live there too
+ *  (`SHELL_LIMITS`, clamped against the viewport). */
+export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
+  // The workspace's one active layer, with no fallback to the first: a table
+  // that quietly showed some OTHER layer's rows while the sidebar highlighted
+  // a geo layer is exactly the disagreement this milestone removes.
+  const active = useActiveLayer();
+  const activeLayer = useActiveCityLayer();
+  const activeGeoLayer = active?.kind === "geo" ? active.layer : null;
+  const geoRecordCount =
+    activeGeoLayer?.kind === "geojson"
+      ? geoRecords(activeGeoLayer.config.preparedData).length
+      : null;
+  const layerId = activeLayer?.id ?? null;
 
-export function TablePanel({
-  duckdbTableLoaded,
-  onCollapse,
-  onHeightChange,
-}: TablePanelProps) {
-  const [columns, setColumns] = useState<string[]>([]);
-  /**
-   * Mirror of `columns` for `loadPage`'s SQL guard. `columns` cannot be a
-   * dependency of that callback: every load calls `setColumns` with a fresh
-   * array, which would give the callback a new identity, which the reload
-   * effect below would treat as a data-source change — an endless query loop.
-   * The ref is written at the same instant as the state, so the guard reads a
-   * value at least as fresh as a dependency would have given it.
-   */
-  const columnsRef = useRef<string[]>([]);
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [sortCol, setSortCol] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [syncSelection, setSyncSelection] = useState(true);
-  const [tableSelection, setTableSelection] = useState<Set<string>>(new Set());
-  const pageRef = useRef(0);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  const sceneSelections = useSelectionStore((s) => s.selections);
-  const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
-  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
-
-  // Only meaningful (and only subscribed) for a streaming active layer —
-  // bumps on every cell commit, which is what drives loadPage to re-read
-  // the merged resident model below.
-  const streamVersion = useStreamStore((s) =>
-    activeLayer ? s.streams[activeLayer.id]?.version : undefined,
+  // The provenance registry's own object for this layer (never
+  // `computedColumnsOf`, which builds a fresh Set per call and so cannot be a
+  // selector snapshot); the Set below is derived from it under `useMemo`.
+  const computedProvenance = useComputedColumnStore((s) =>
+    layerId === null ? undefined : s.byLayer[layerId],
+  );
+  const computedColumnNames = useMemo(
+    () => new Set(Object.keys(computedProvenance ?? {})),
+    [computedProvenance],
   );
 
-  // Determine the active selected IDs based on sync mode
-  const selectedIds = syncSelection
-    ? new Set(sceneSelections.map((s) => s.objectId))
-    : tableSelection;
+  const view = useLayerQuery(layerId);
+  const layerCounts = useLayerCounts(layerId);
+  const query = useQueryStore((s) =>
+    layerId === null ? null : layerQuery(s, layerId),
+  );
+  const sceneSelections = useSelectionStore((s) => s.selections);
+  const streamVersion = useStreamStore((state) =>
+    layerId === null ? undefined : state.streams[layerId]?.version,
+  );
 
-  // -----------------------------------------------------------------------
-  // Data loading — DuckDB with in-memory fallback
-  // -----------------------------------------------------------------------
+  const drawerHeight = useShellStore((state) => state.drawerHeight);
+  const drawerExpanded = useShellStore((state) => state.drawerExpanded);
+  const drawerMax = Math.max(
+    SHELL_LIMITS.drawerMin,
+    Math.min(
+      SHELL_LIMITS.drawerMax,
+      (typeof window === "undefined" ? 900 : window.innerHeight) - 200,
+    ),
+  );
 
-  // Generation counter to discard stale async loads
-  const loadGenRef = useRef(0);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const columnsButtonRef = useRef<HTMLButtonElement>(null);
 
-  /** Every write to `columns` goes through here, so the ref cannot drift. */
-  const applyColumns = useCallback((next: string[]) => {
-    columnsRef.current = next;
-    setColumns(next);
+  // The dialog is about ONE layer — its table, its types, its LoD ladder — and
+  // the layer under it can change while it is open (the sidebar is live). It
+  // closes rather than silently re-pointing at a different layer's data.
+  useEffect(() => {
+    setColumnsOpen(false);
+  }, [active?.layer.id]);
+
+  // The registry cannot see the UI, and a streaming layer's table is only
+  // worth rebuilding while somebody is looking at it.
+  useEffect(() => {
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    return () => useLayerTableStore.getState().setTablePanelOpen(false);
   }, []);
 
-  const loadPage = useCallback(
-    async (page: number, reset: boolean) => {
-      if (reset) pageRef.current = 0;
-      const gen = ++loadGenRef.current;
-      setLoading(true);
-
-      try {
-        const offset = page * PAGE_SIZE;
-
-        if (duckdbTableLoaded) {
-          // DuckDB path — fetch data and count in parallel to avoid
-          // generation counter race (count was discarded if a re-render
-          // triggered another loadPage before the count query finished)
-          const safeCol =
-            sortCol && columnsRef.current.includes(sortCol)
-              ? sortCol.replace(/"/g, '""')
-              : null;
-          const orderClause = safeCol ? `ORDER BY "${safeCol}" ${sortDir}` : "";
-          const [result, countResult] = await Promise.all([
-            queryDuckDB(
-              `SELECT * FROM city_objects ${orderClause} LIMIT ${PAGE_SIZE} OFFSET ${offset}`,
-            ),
-            page === 0
-              ? queryDuckDB("SELECT COUNT(*) AS cnt FROM city_objects")
-              : null,
-          ]);
-          if (gen !== loadGenRef.current) return; // stale
-          if (result) {
-            if (reset || page === 0) {
-              applyColumns(result.columns);
-              setRows(result.rows);
-            } else {
-              setRows((prev) => [...prev, ...result.rows]);
-            }
-            setHasMore(result.rows.length === PAGE_SIZE);
-          } else {
-            setHasMore(false);
-          }
-          if (countResult?.rows[0]) {
-            setTotalCount(Number(countResult.rows[0].cnt) || 0);
-          }
-        } else if (activeLayer?.isStreaming) {
-          // Streaming layer, no DuckDB table: read whatever cells are
-          // currently resident via the memoised merge instead of a
-          // `CityModel` — a streaming layer never has one populated with
-          // real objects (see residentModel.ts's doc comment on why this
-          // isn't a Zustand selector).
-          const residentModel = getResidentModel(
-            activeLayer.id,
-            streamVersion ?? 0,
-          );
-          const allRecords = Object.values(residentModel.objects);
-          if (gen !== loadGenRef.current) return; // stale
-          if (page === 0) {
-            applyColumns(getColumnsFromRecords(allRecords));
-            setTotalCount(allRecords.length);
-          }
-
-          const sorted = sortRecordsInMemory(allRecords, sortCol, sortDir);
-          const pageRows = sorted
-            .slice(offset, offset + PAGE_SIZE)
-            .map(recordToRow);
-
-          if (reset || page === 0) {
-            setRows(pageRows);
-          } else {
-            setRows((prev) => [...prev, ...pageRows]);
-          }
-          setHasMore(offset + PAGE_SIZE < sorted.length);
-        } else if (activeLayer) {
-          // In-memory fallback
-          const allObjects = Object.values(activeLayer.model.objects).filter(
-            Boolean,
-          );
-          if (gen !== loadGenRef.current) return; // stale
-          if (page === 0) {
-            applyColumns(getColumnsFromModel(activeLayer.model));
-            setTotalCount(allObjects.length);
-          }
-
-          const sorted = sortInMemory(allObjects, sortCol, sortDir);
-          const pageRows = sorted
-            .slice(offset, offset + PAGE_SIZE)
-            .map(objectToRow);
-
-          if (reset || page === 0) {
-            setRows(pageRows);
-          } else {
-            setRows((prev) => [...prev, ...pageRows]);
-          }
-          setHasMore(offset + PAGE_SIZE < sorted.length);
-        } else {
-          setHasMore(false);
-        }
-      } finally {
-        if (gen === loadGenRef.current) setLoading(false);
-      }
-    },
-    [
-      duckdbTableLoaded,
-      sortCol,
-      sortDir,
-      activeLayer,
-      streamVersion,
-      applyColumns,
-    ],
-  );
-
-  // Reload on sort change or data source change
-  useEffect(() => {
-    void loadPage(0, true);
-  }, [loadPage]);
-
-  // Infinite scroll via IntersectionObserver
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !loading) {
-          pageRef.current += 1;
-          void loadPage(pageRef.current, false);
-        }
-      },
-      { root: bodyRef.current, threshold: 0.1 },
+  // MEMOISED: a new Set on every render gives `DataGrid` a new prop identity,
+  // which defeats the `React.memo` below — and this component re-renders on
+  // every hover, every camera settle and every store touch, while the grid is
+  // up to 1000 rows of DOM.
+  //
+  // There is ONE selection. The panel used to offer a "Sync selection"
+  // checkbox that, switched off, gave the grid a second selection of its own:
+  // a row highlighted here, an object highlighted in the viewport, and no way
+  // for the user to know which of the two the inspector was describing. It
+  // also died with the component, so collapsing the panel silently discarded
+  // whatever had been picked in it.
+  const partsById = useMemo(() => {
+    if (activeLayer === null) return {};
+    const objects = activeLayer.isStreaming
+      ? getResidentModel(activeLayer.id, streamVersion ?? 0).objects
+      : activeLayer.model.objects;
+    return Object.fromEntries(
+      Object.values(objects).map((object) => [object.id, object.children]),
     );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, loading, loadPage]);
+  }, [activeLayer, streamVersion]);
 
-  // -----------------------------------------------------------------------
-  // Sorting
-  // -----------------------------------------------------------------------
+  const partRows = useMemo(() => {
+    const pageRows = Object.fromEntries(
+      view.rows
+        .filter(
+          (row): row is Record<string, unknown> & { id: string } =>
+            typeof row.id === "string",
+        )
+        .map((row) => [row.id, row]),
+    );
+    if (activeLayer === null) return pageRows;
+    const objects = activeLayer.isStreaming
+      ? getResidentModel(activeLayer.id, streamVersion ?? 0).objects
+      : activeLayer.model.objects;
+    for (const object of Object.values(objects)) {
+      pageRows[object.id] ??= {
+        id: object.id,
+        object_type: object.objectType,
+        ...object.attributes,
+      };
+    }
+    return pageRows;
+  }, [activeLayer, streamVersion, view.rows]);
 
-  const handleSort = useCallback(
-    (col: string) => {
-      if (sortCol === col) {
-        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-      } else {
-        setSortCol(col);
-        setSortDir("asc");
-      }
-    },
-    [sortCol],
+  const selectedIds = useMemo(
+    () =>
+      new Set(
+        sceneSelections
+          .filter((s) => s.layerId === layerId)
+          .map((s) => s.objectId),
+      ),
+    [sceneSelections, layerId],
   );
-
-  // -----------------------------------------------------------------------
-  // Row selection
-  // -----------------------------------------------------------------------
 
   const handleRowClick = useCallback(
     (objectId: string, shiftKey: boolean) => {
-      if (syncSelection) {
-        const store = useSelectionStore.getState();
-        const layerId = activeLayer?.id;
-        if (!layerId) return;
-        const sel: Selection = { kind: "object", layerId, objectId };
-        if (shiftKey) {
-          store.toggleSelect(sel);
-        } else {
-          store.select(sel);
-        }
-      } else {
-        setTableSelection((prev) => {
-          const next = new Set(prev);
-          if (shiftKey) {
-            if (next.has(objectId)) next.delete(objectId);
-            else next.add(objectId);
-          } else {
-            next.clear();
-            next.add(objectId);
-          }
-          return next;
-        });
-      }
+      if (layerId === null) return;
+      const store = useSelectionStore.getState();
+      const sel: Selection = { kind: "object", layerId, objectId };
+      if (shiftKey) store.toggleSelect(sel);
+      else store.select(sel);
     },
-    [syncSelection, activeLayer],
+    [layerId],
   );
 
-  const handleUnselectAll = useCallback(() => {
-    if (syncSelection) {
-      useSelectionStore.getState().clear();
-    } else {
-      setTableSelection(new Set());
-    }
-  }, [syncSelection]);
+  const handleUnselectAll = useCallback(
+    () => useSelectionStore.getState().clear(),
+    [],
+  );
 
-  // -----------------------------------------------------------------------
-  // Render
-  // -----------------------------------------------------------------------
+  // A CALLBACK, like `selectedIds` is a memo: an inline arrow is a new prop
+  // identity every render, which is all it takes to defeat `DataGrid`'s memo.
+  const handleSort = useCallback(
+    (column: string) => {
+      if (layerId !== null)
+        useQueryStore.getState().toggleSort(layerId, column);
+    },
+    [layerId],
+  );
+
+  const derivedKeys = useMemo(
+    () => derivedColumns(view.columns),
+    [view.columns],
+  );
+  const derivedRows = useMemo(
+    () =>
+      view.rows.map((row) => {
+        const id = typeof row.id === "string" ? row.id : null;
+        if (query?.view === "raw" || id === null || activeLayer === null)
+          return row;
+        const objects = activeLayer.isStreaming
+          ? getResidentModel(activeLayer.id, streamVersion ?? 0).objects
+          : activeLayer.model.objects;
+        const values = derivedBuildingValues(id, objects);
+        return {
+          ...row,
+          [derivedKeys[0]!.name]: values.roofArea,
+          [derivedKeys[1]!.name]: values.meanSlope,
+          [derivedKeys[2]!.name]: values.parts,
+        };
+      }),
+    [activeLayer, derivedKeys, query?.view, streamVersion, view.rows],
+  );
+
+  const selectableColumns = useMemo(
+    () => [
+      ...view.columns.filter((column) => column.kind !== "blob"),
+      ...derivedKeys,
+    ],
+    [derivedKeys, view.columns],
+  );
+
+  const visibleColumns = useMemo(() => {
+    if (!query?.columns)
+      return defaultColumns(
+        view.columns,
+        query?.view ?? "buildings",
+        computedColumnNames,
+      );
+    return orderedColumns(selectableColumns, query.columns);
+  }, [
+    computedColumnNames,
+    query?.columns,
+    query?.view,
+    selectableColumns,
+    view.columns,
+  ]);
+
+  const reorderColumn = useCallback(
+    (source: string, target: string) => {
+      if (layerId === null) return;
+      useQueryStore.getState().setColumns(
+        layerId,
+        moveColumn(
+          visibleColumns.map((column) => column.name),
+          source,
+          target,
+        ),
+      );
+    },
+    [layerId, visibleColumns],
+  );
+
+  const engineDown =
+    duckdbStatus.state === "failed" || duckdbStatus.state === "uninitialized";
+
+  /**
+   * The message explains an ABSENT grid, not a stale one.
+   *
+   * With rows still on screen a page error is an annotation over the last good
+   * page. With none, it is the reason there is nothing — and `DataGrid` would
+   * otherwise answer "This layer has no rows yet.", which turns an engine
+   * failure into a claim about the data.
+   */
+  const pageError = view.message !== null && view.rows.length === 0;
 
   return (
     <div className="table-panel">
-      {/* Drag handle at top edge */}
-      <TableResizeHandle onHeightChange={onHeightChange} />
+      {/* Dragging the top edge UP (a negative delta) makes the drawer
+          taller — the drawer grows from its top. The delta is measured from
+          pointerdown, so the height it is added to is the one the drag
+          started from. */}
+      <ResizeHandle
+        axis="y"
+        label="Resize table"
+        current={drawerExpanded ? drawerMax : drawerHeight}
+        min={SHELL_LIMITS.drawerMin}
+        max={drawerMax}
+        direction={-1}
+        onResize={(height) => {
+          const shell = useShellStore.getState();
+          if (shell.drawerExpanded && height >= drawerMax) return;
+          shell.setDrawerHeight(height);
+          shell.setDrawerExpanded(false);
+        }}
+      />
 
+      {query?.rawObjectId !== null && query?.rawObjectId !== undefined && (
+        <div className="table-raw-target" role="status">
+          <span>Viewing raw object {query.rawObjectId}</span>
+          <button
+            type="button"
+            onClick={() => useQueryStore.getState().clearRawObject(layerId!)}
+          >
+            Return to filtered records
+          </button>
+        </div>
+      )}
       <div className="table-panel-header">
         <span className="table-panel-title">
-          Objects{" "}
-          <span className="table-count">
-            ({totalCount.toLocaleString()} rows)
-          </span>
+          {activeLayer?.name ?? activeGeoLayer?.name ?? "Objects"}
+          {geoRecordCount !== null && (
+            <span className="table-count">
+              {" "}
+              ({formatCount(geoRecordCount)} features)
+            </span>
+          )}
+          {view.status === "ready" && layerCounts.all !== null && (
+            /* The LAYER's size, not the filtered count: a heading number that
+               silently changes meaning when a filter is applied is how a user
+               comes to believe a filter deleted their data. How much matched
+               is the footer's job, beside the range it belongs to. */
+            <span
+              className="table-count"
+              title={`All ${query?.view === "raw" ? "objects" : "buildings"}, before any filter`}
+            >
+              {" "}
+              All {formatCount(layerCounts.all)} · Matching{" "}
+              {layerCounts.matching === null
+                ? "?"
+                : formatCount(layerCounts.matching)}{" "}
+              · Selected{" "}
+              {layerCounts.selected === null
+                ? "?"
+                : formatCount(layerCounts.selected)}{" "}
+              {query?.view === "raw" ? "objects" : "buildings"}
+              {activeLayer?.isStreaming ? " · currently loaded" : ""}
+            </span>
+          )}
         </span>
 
-        <label className="table-sync-label">
-          <input
-            type="checkbox"
-            checked={syncSelection}
-            onChange={(e) => setSyncSelection(e.target.checked)}
-          />
-          <span>Sync scene</span>
-        </label>
-
-        <button
-          className="tb-btn table-action-btn"
-          title="Unselect all"
-          onClick={handleUnselectAll}
+        <span
+          className="table-sync-label"
+          title={
+            activeLayer?.isStreaming
+              ? STREAMING_FILTER_REASON
+              : "Filters update the map and table together"
+          }
         >
-          <svg viewBox="0 0 24 24" width="14" height="14">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-          <span>Clear</span>
-        </button>
-
-        <div className="toolbar-spacer" />
-
-        <button
-          className="tb-btn table-action-btn"
-          title="Collapse table"
-          onClick={onCollapse}
+          {activeLayer?.isStreaming
+            ? "Table only · currently loaded"
+            : "Map + table"}
+        </span>
+        <div
+          className="table-layout-actions"
+          role="group"
+          aria-label="Table layout"
         >
-          <svg viewBox="0 0 16 16" width="14" height="14">
-            <path
-              d="M4 6l4 4 4-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            />
-          </svg>
-        </button>
-      </div>
+          <button
+            type="button"
+            className="tb-btn table-action-btn"
+            onClick={() =>
+              useShellStore.getState().setDrawerExpanded(!drawerExpanded)
+            }
+          >
+            <ActionIcon name={drawerExpanded ? "restore" : "expand"} />
+            {drawerExpanded ? "Show map" : "Expand"}
+          </button>
 
-      <div className="table-panel-body" ref={bodyRef}>
-        <table className="data-table">
-          <thead>
-            <tr>
-              {columns.map((col) => (
-                <th
-                  key={col}
-                  className={`data-th ${sortCol === col ? "sorted" : ""}`}
-                  onClick={() => handleSort(col)}
-                  aria-sort={
-                    sortCol === col
-                      ? sortDir === "asc"
-                        ? "ascending"
-                        : "descending"
-                      : "none"
-                  }
-                >
-                  <span>{col}</span>
-                  {sortCol === col && (
-                    <span className="sort-indicator">
-                      {sortDir === "asc" ? "\u25B2" : "\u25BC"}
-                    </span>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => {
-              const rowId = stringifyValue(row.id ?? i);
-              const isSelected = selectedIds.has(rowId);
-              return (
-                <tr
-                  key={rowId}
-                  className={`data-row ${isSelected ? "data-row-selected" : ""}`}
-                  onClick={(e) => handleRowClick(rowId, e.shiftKey)}
-                >
-                  {columns.map((col) => (
-                    <td
-                      key={col}
-                      className="data-td"
-                      title={formatCell(row[col])}
-                    >
-                      {formatCell(row[col])}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {/* Sentinel for infinite scroll */}
-        <div ref={sentinelRef} className="scroll-sentinel">
-          {loading && <span className="table-loading">Loading...</span>}
+          <button
+            className="tb-btn table-action-btn"
+            title="Collapse table"
+            onClick={() => useShellStore.getState().closeDrawer()}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14">
+              <path
+                d="M4 6l4 4 4-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+            </svg>
+          </button>
         </div>
       </div>
+      <div
+        className="table-panel-actions"
+        role="toolbar"
+        aria-label="Table actions"
+      >
+        {activeLayer !== null && (
+          <>
+            <button
+              type="button"
+              className="tb-btn table-action-btn"
+              ref={columnsButtonRef}
+              aria-expanded={columnsOpen}
+              onClick={() => setColumnsOpen((open) => !open)}
+              disabled={view.status !== "ready"}
+            >
+              <ActionIcon name="columns" />
+              Columns
+            </button>
+            {columnsOpen && layerId !== null && (
+              <ColumnsPanel
+                computedNames={
+                  new Set(derivedKeys.map((column) => column.name))
+                }
+                layerId={layerId}
+                anchorRef={columnsButtonRef}
+                columns={selectableColumns}
+                visible={visibleColumns}
+                label={(name) =>
+                  derivedKeys.some((key) => key.name === name)
+                    ? columnLabel(name)
+                    : name
+                }
+                onChange={(names) =>
+                  useQueryStore.getState().setColumns(layerId, names)
+                }
+                onMove={reorderColumn}
+                onClose={() => {
+                  setColumnsOpen(false);
+                  columnsButtonRef.current?.focus();
+                }}
+              />
+            )}
+          </>
+        )}
+        {activeLayer === null && (
+          <>
+            {" "}
+            <button
+              className="tb-btn table-action-btn"
+              title="Unselect all"
+              onClick={handleUnselectAll}
+            >
+              <ActionIcon name="clear" />
+              Clear selection
+            </button>
+          </>
+        )}{" "}
+      </div>
+
+      {activeLayer !== null && (
+        <div className="table-view-controls">
+          <div
+            className="table-record-controls"
+            role="group"
+            aria-label="Record controls"
+          >
+            {layerId !== null && (
+              <button
+                type="button"
+                className="tb-btn table-action-btn"
+                onClick={() =>
+                  useQueryStore
+                    .getState()
+                    .setView(
+                      layerId,
+                      query?.view === "raw" ? "buildings" : "raw",
+                    )
+                }
+              >
+                <ActionIcon name="feature" />
+                {query?.view === "raw" ? "Buildings" : "Raw objects"}
+              </button>
+            )}
+            {layerId !== null && (
+              <label className="table-sync-label">
+                <input
+                  type="checkbox"
+                  checked={query?.showSelectedOnly ?? false}
+                  onChange={(e) =>
+                    useQueryStore
+                      .getState()
+                      .setShowSelectedOnly(layerId, e.target.checked)
+                  }
+                />{" "}
+                Show selected records
+              </label>
+            )}
+            <button
+              className="tb-btn table-action-btn"
+              title="Unselect all"
+              onClick={handleUnselectAll}
+            >
+              <ActionIcon name="clear" />
+              Clear selection
+            </button>
+          </div>
+        </div>
+      )}
+
+      <>
+        {view.status === "ready" && query !== null && layerId !== null && (
+          <FilterBar
+            getCandidates={view.getCandidates}
+            columns={view.columns}
+            filter={query.filter}
+            // The body renders it instead when it is the reason the grid is
+            // empty — see `pageError` — so it is never said twice.
+            error={pageError ? null : view.message}
+            disabled={view.loading}
+            onChange={(filter) =>
+              useQueryStore.getState().setFilter(layerId, filter)
+            }
+            onApply={() => useQueryStore.getState().applyFilter(layerId)}
+            onClear={() => useQueryStore.getState().clearFilter(layerId)}
+          />
+        )}
+
+        <div
+          className={`table-panel-body ${view.loading ? "table-loading" : ""}`}
+        >
+          {activeGeoLayer !== null ? (
+            activeGeoLayer.kind === "geojson" ? (
+              <GeoRecordsPanel key={activeGeoLayer.id} layer={activeGeoLayer} />
+            ) : (
+              <div className="table-message">
+                This layer has no browsable vector records.
+              </div>
+            )
+          ) : duckdbStatus.state === "initializing" ? (
+            /* BEFORE the table state, deliberately. A Retry sets the status back
+             to `initializing` while every table is still `failed` from the
+             outage, and "This layer's table could not be built" over a retry
+             in progress reads as a Retry that did nothing. */
+            <div className="table-message">
+              <span className="loading-spinner" />
+              <span>Starting the analytics engine…</span>
+            </div>
+          ) : engineDown ? (
+            <div className="table-message" role="alert">
+              <p>
+                The analytics engine is not running
+                {duckdbStatus.state === "failed"
+                  ? `: ${duckdbStatus.error}`
+                  : "."}
+              </p>
+              <button
+                type="button"
+                className="tb-btn table-action-btn"
+                onClick={onRetryDuckDB}
+              >
+                Retry
+              </button>
+            </div>
+          ) : view.status === "no-layer" ? (
+            <div className="table-message">
+              Select a layer to browse its table.
+            </div>
+          ) : view.status === "queued" || view.status === "building" ? (
+            <div className="table-message">
+              <span className="loading-spinner" />
+              <span>Building this layer's table…</span>
+            </div>
+          ) : view.status === "failed" ? (
+            <div className="table-message" role="alert">
+              This layer's table could not be built: {view.message}
+            </div>
+          ) : (
+            <>
+              {/* The FilterBar carries this too — but the bar is COLLAPSED by
+                default, so a DuckDB page error or a compile refusal would
+                otherwise leave a stale grid with no explanation anywhere on
+                screen. */}
+              {view.message !== null && pageError && (
+                <div className="table-message" role="alert">
+                  {view.message}
+                </div>
+              )}
+              {!pageError && (
+                <DataGrid
+                  getColumnStats={view.getColumnStats}
+                  columns={visibleColumns}
+                  rows={derivedRows}
+                  sort={query?.sort ?? null}
+                  selectedIds={selectedIds}
+                  partsById={partsById}
+                  partRows={partRows}
+                  derivedColumnNames={
+                    new Set(derivedKeys.map((column) => column.name))
+                  }
+                  layerId={layerId}
+                  emptyMessage={emptyGridMessage(
+                    (query?.applied ?? null) !== null,
+                    activeLayer?.isStreaming !== true,
+                    view.unfilteredRows,
+                  )}
+                  onSort={handleSort}
+                  onReorder={reorderColumn}
+                  onRowClick={handleRowClick}
+                />
+              )}
+            </>
+          )}
+        </div>
+
+        {view.status === "ready" && query !== null && layerId !== null && (
+          <Pagination
+            page={query.page}
+            pageSize={query.pageSize}
+            totalRows={view.totalRows}
+            unfilteredRows={view.unfilteredRows}
+            filtered={query.applied !== null}
+            onPage={(page) => useQueryStore.getState().setPage(layerId, page)}
+            onPageSize={(size) =>
+              useQueryStore.getState().setPageSize(layerId, size)
+            }
+          />
+        )}
+      </>
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Resize handle (drag to change table height)
-// ---------------------------------------------------------------------------
-
-function TableResizeHandle({
-  onHeightChange,
-}: {
-  onHeightChange: (height: number) => void;
-}) {
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startY = e.clientY;
-      const panel = (e.target as HTMLElement).closest(
-        ".table-panel",
-      ) as HTMLElement | null;
-      if (!panel) return;
-      const startHeight = panel.getBoundingClientRect().height;
-
-      const onMouseMove = (me: MouseEvent) => {
-        const delta = startY - me.clientY;
-        const newHeight = Math.max(100, Math.min(startHeight + delta, 600));
-        onHeightChange(newHeight);
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-      };
-
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    [onHeightChange],
-  );
-
-  return <div className="table-resize-handle" onMouseDown={handleMouseDown} />;
-}
-
-// ---------------------------------------------------------------------------
-// In-memory helpers
-// ---------------------------------------------------------------------------
-
-function getColumnsFromModel(model: CityModel): string[] {
-  const cols = ["id", "type", "lod", "surface_count"];
-  const attrKeys = new Set<string>();
-  for (const obj of Object.values(model.objects)) {
-    if (!obj) continue;
-    for (const key of Object.keys(obj.attributes)) {
-      attrKeys.add(key);
-    }
-  }
-  return [...cols, ...Array.from(attrKeys).sort()];
-}
-
-function objectToRow(obj: CityObject): Record<string, unknown> {
-  const row: Record<string, unknown> = {
-    id: obj.id,
-    type: obj.objectType,
-    lod: obj.lod,
-    surface_count: obj.surfaces.length,
-  };
-  for (const [key, value] of Object.entries(obj.attributes)) {
-    row[key] =
-      typeof value === "object" && value !== null
-        ? JSON.stringify(value)
-        : value;
-  }
-  return row;
-}
-
-function sortInMemory(
-  objects: CityObject[],
-  sortCol: string | null,
-  sortDir: SortDir,
-): CityObject[] {
-  if (!sortCol) return objects;
-
-  return [...objects].sort((a, b) => {
-    const av = getObjectValue(a, sortCol);
-    const bv = getObjectValue(b, sortCol);
-    const cmp = compareValues(av, bv);
-    return sortDir === "asc" ? cmp : -cmp;
-  });
-}
-
-function getObjectValue(obj: CityObject, col: string): unknown {
-  if (col === "id") return obj.id;
-  if (col === "type") return obj.objectType;
-  if (col === "lod") return obj.lod;
-  if (col === "surface_count") return obj.surfaces.length;
-  return obj.attributes[col];
-}
-
-// ---------------------------------------------------------------------------
-// Streaming (ResidentObjectRecord) helpers — mirror the in-memory helpers
-// above field-for-field, but read `surface_count` from `r.surfaceCount`
-// instead of `surfaces.length`, since a ResidentObjectRecord never carries
-// a `surfaces` array (see `@cityjson/navara-flatcitybuf`'s workerProtocol.ts for why).
-// ---------------------------------------------------------------------------
-
-function getColumnsFromRecords(
-  records: ReadonlyArray<ResidentObjectRecord>,
-): string[] {
-  const cols = ["id", "type", "lod", "surface_count"];
-  const attrKeys = new Set<string>();
-  for (const r of records) {
-    for (const key of Object.keys(r.attributes)) {
-      attrKeys.add(key);
-    }
-  }
-  return [...cols, ...Array.from(attrKeys).sort()];
-}
-
-function recordToRow(r: ResidentObjectRecord): Record<string, unknown> {
-  const row: Record<string, unknown> = {
-    id: r.id,
-    type: r.objectType,
-    lod: r.lod,
-    surface_count: r.surfaceCount,
-  };
-  for (const [key, value] of Object.entries(r.attributes)) {
-    row[key] =
-      typeof value === "object" && value !== null
-        ? JSON.stringify(value)
-        : value;
-  }
-  return row;
-}
-
-function sortRecordsInMemory(
-  records: ReadonlyArray<ResidentObjectRecord>,
-  sortCol: string | null,
-  sortDir: SortDir,
-): ResidentObjectRecord[] {
-  if (!sortCol) return [...records];
-
-  return [...records].sort((a, b) => {
-    const av = getRecordValue(a, sortCol);
-    const bv = getRecordValue(b, sortCol);
-    const cmp = compareValues(av, bv);
-    return sortDir === "asc" ? cmp : -cmp;
-  });
-}
-
-function getRecordValue(r: ResidentObjectRecord, col: string): unknown {
-  if (col === "id") return r.id;
-  if (col === "type") return r.objectType;
-  if (col === "lod") return r.lod;
-  if (col === "surface_count") return r.surfaceCount;
-  return r.attributes[col];
-}
-
-/**
- * A cell value as text. `String(unknown)` is not good enough: an attribute
- * value straight out of DuckDB or a CityJSON file can be a plain object, which
- * `String` renders as the useless "[object Object]" \u2014 a row would sort and
- * display identically for every distinct object. Every branch narrows first,
- * so `String` only ever sees a primitive.
- */
-function stringifyValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint"
-  ) {
-    return String(value);
-  }
-  if (value === null || value === undefined) return "";
-  return JSON.stringify(value) ?? "";
-}
-
-function compareValues(a: unknown, b: unknown): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return -1;
-  if (b == null) return 1;
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return stringifyValue(a).localeCompare(stringifyValue(b));
-}
-
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return "\u2014";
-  if (typeof value === "number") {
-    return Number.isInteger(value) ? String(value) : value.toFixed(2);
-  }
-  return stringifyValue(value);
 }

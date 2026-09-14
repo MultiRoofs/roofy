@@ -10,7 +10,7 @@ Milestones 1–4 are complete. M3: solar/shading with suncalc, proj4, shadow map
 
 ## Project Context
 
-MultiRoof Viewer is being designed as a web-based viewer and analysis workspace for 3D city models in support of the MultiRoofs project. The product focus is urban rooftop analysis for planning, simulation, and communication.
+Roofy (GitHub `MultiRoofs/roofy`) is being designed as a web-based viewer and analysis workspace for 3D city models in support of the MultiRoofs project. The product focus is urban rooftop analysis for planning, simulation, and communication.
 
 ## Product Direction
 
@@ -115,3 +115,7 @@ Initial external references:
 
 - DuckDB `cityjson` extension
 - Delft CityJSONSeq sample fixture: `https://storage.googleapis.com/cityjson/delft.city.jsonl`
+
+## UI consistency
+
+Follow [the shared UI consistency rules](docs/ui-consistency.md) for every UI change. The approved direction is Soft Utility. Reuse the control tokens in `src/app/flatControls.css`: 8px radius, 38px primary height, and 30px compact field height. Keep button, input, select, slider, spacing, icon, and interaction states consistent across panels; verify new controls against existing peers in the browser before finishing.

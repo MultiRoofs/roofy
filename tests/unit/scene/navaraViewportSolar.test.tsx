@@ -189,6 +189,11 @@ import {
 } from "../../../src/features/layers/layerStore";
 import { useSolarStore } from "../../../src/features/solar/solarStore";
 import type { CityModel } from "../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../src/scene/cityColors";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -222,12 +227,21 @@ function makeLayer(id: string): Layer {
     visible: true,
     rules: [],
     rulesEnabled: true,
+    // Defaults, like every other field of this fixture: a layer with no
+    // rules colours by surface type. A case that needs a mode sets one.
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
   } as Layer;
 }
@@ -237,10 +251,13 @@ function makeHandle(id: string) {
     id,
     setVisible: vi.fn(),
     setLod: vi.fn(),
+    setVisibleObjectIds: vi.fn(),
     setStyle: vi.fn(),
     // The real `CityModelHandle` gained this with the scene themes; the
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(),
     resolveRaycast: vi.fn(() => null as unknown),
@@ -265,7 +282,8 @@ function zenithEcef(site: { lat: number; lon: number }) {
 
 /** Renders the viewport with one layer loaded and the engine up. */
 async function mountWithLayer() {
-  useLayerStore.setState({ layers: [makeLayer("a")], activeLayerId: "a" });
+  useLayerStore.setState({ layers: [makeLayer("a")] });
+  useWorkspaceStore.setState({ activeLayerId: "a" });
   const result = render(<NavaraViewport onTriangleCount={() => {}} />);
   await waitFor(() =>
     expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
@@ -293,7 +311,8 @@ describe("NavaraViewport solar wiring", () => {
     cityPluginInstance.addCityModel.mockImplementation(
       (_model: unknown, opts: { id: string }) => makeHandle(opts.id),
     );
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSolarStore.setState({
       datetime: new Date("2026-06-21T12:00:00.000Z"),
       latLon: null,
@@ -305,7 +324,8 @@ describe("NavaraViewport solar wiring", () => {
 
   afterEach(() => {
     cleanup();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSolarStore.setState({ timeAnimating: false, latLon: null });
   });
 
@@ -325,7 +345,8 @@ describe("NavaraViewport solar wiring", () => {
     await mountWithLayer();
     expect(useSolarStore.getState().sunPosition).not.toBeNull();
     await act(async () => {
-      useLayerStore.setState({ layers: [], activeLayerId: null });
+      useLayerStore.setState({ layers: [] });
+      useWorkspaceStore.setState({ activeLayerId: null });
     });
     await waitFor(() => expect(useSolarStore.getState().latLon).toBeNull());
     expect(useSolarStore.getState().sunPosition).toBeNull();
@@ -415,7 +436,8 @@ describe("NavaraViewport solar wiring", () => {
       renders(datetime, sun);
       return null;
     }
-    useLayerStore.setState({ layers: [makeLayer("a")], activeLayerId: "a" });
+    useLayerStore.setState({ layers: [makeLayer("a")] });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
     render(
       <>
         <NavaraViewport onTriangleCount={() => {}} />
@@ -521,7 +543,8 @@ describe("NavaraViewport solar wiring", () => {
   });
 
   it("subscribes exactly once across a StrictMode double mount", async () => {
-    useLayerStore.setState({ layers: [makeLayer("a")], activeLayerId: "a" });
+    useLayerStore.setState({ layers: [makeLayer("a")] });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
     render(
       <StrictMode>
         <NavaraViewport onTriangleCount={() => {}} />

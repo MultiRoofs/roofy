@@ -65,7 +65,7 @@ describe("parseLinearRing", () => {
     const result = parseLinearRing({
       "gml:posList": "0 0 0 10 0 0 10 10 0 0 10 0 0 0 0",
     });
-    expect(result.length).toBe(5);
+    expect(result.length).toBe(4); // closing duplicate dropped
     expect(result[0]).toEqual([0, 0, 0]);
   });
 
@@ -109,7 +109,7 @@ describe("parsePolygon", () => {
     });
     expect(result).not.toBeNull();
     expect(result!.length).toBe(1); // 1 ring (exterior)
-    expect(result![0]!.length).toBe(5);
+    expect(result![0]!.length).toBe(4); // closing duplicate dropped
   });
 
   it("parses polygon with interior ring", () => {

@@ -1,8 +1,8 @@
 /**
  * Extent of a geospatial layer, for "Zoom to layer".
  *
- * ENGINE-FREE and computed from the layer's OWN data, because Navara 0.0.5
- * exposes no bounds/fit API on Layer or Source — the engine draws a geo layer
+ * ENGINE-FREE and computed from the layer's OWN data, because Navara (0.0.5,
+ * and still 0.1.1) exposes no bounds/fit API on Layer or Source — the engine draws a geo layer
  * but cannot say where it is. GeoJSON is walked coordinate by coordinate; a
  * 3D Tiles tileset answers from its root bounding volume; an XYZ raster
  * template names no extent at all, so a raster layer has none (null).
@@ -248,4 +248,33 @@ export function resolveGeoLayerBounds(
     case "raster-xyz":
       return Promise.resolve(null);
   }
+}
+
+/** Bounds of selected prepared GeoJSON features, or null without coordinates. */
+export function selectedGeoJsonBounds(
+  data: unknown,
+  selectedIds: ReadonlySet<string>,
+): GeodeticBounds | null {
+  const source = data as { type?: unknown; features?: unknown[] } | null;
+  const features =
+    source?.type === "FeatureCollection" && Array.isArray(source.features)
+      ? source.features
+      : source?.type === "Feature"
+        ? [source]
+        : [];
+  const selected = features.filter((feature) => {
+    const properties = (feature as { properties?: unknown }).properties;
+    // Late import avoids pushing selection identity into the generic walker.
+    return (
+      typeof properties === "object" &&
+      properties !== null &&
+      typeof (properties as Record<string, unknown>)
+        .__roofy_stable_feature_id === "object" &&
+      selectedIds.has(
+        (properties as Record<string, { stableId?: unknown }>)
+          .__roofy_stable_feature_id!.stableId as string,
+      )
+    );
+  });
+  return geoJsonBounds({ type: "FeatureCollection", features: selected });
 }

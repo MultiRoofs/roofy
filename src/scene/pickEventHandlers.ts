@@ -3,8 +3,8 @@
  *
  * Pure and engine-free: no `@navaramap/*`, no Three.js, no store singleton, no
  * DOM. `NavaraViewport` owns the engine seam — it turns a
- * `view.on("mousedown"|"mousemove"|"click"|"mouseleave")` payload into the
- * small structural shapes this module takes (a canvas point, an ECEF ray),
+ * `view.on("pointerdown"|"pointermove"|"click"|"featureClick")` payload into
+ * the small structural shapes this module takes (a canvas point, an ECEF ray),
  * reads `PickMode`/`ToolMode` off the store, and pushes the resulting intent
  * back. Everything decision-shaped lives here so it is testable in Node.
  *
@@ -26,6 +26,10 @@ import type {
   Selection,
   ToolMode,
 } from "../domain/selection/types";
+import {
+  publicGeoProperties,
+  readGeoStableFeatureId,
+} from "../features/geoLayers/geoJsonRecords";
 import type {
   EcefRay,
   PickedFeatureLike,
@@ -39,10 +43,11 @@ export type PickIntent =
   | { readonly kind: "toggle"; readonly selection: Selection };
 
 /** The pointer gestures that produce a selection intent. `move` is a hover,
- *  `click` is a commit. The engine's own `pick` event fires only on a mouseup
- *  with no intervening mousemove (Task B1), but the own-raycast path listens to
- *  the raw `click` — which fires after a camera drag too — so the router must
- *  put a {@link createClickGate} in front of this. */
+ *  `click` is a commit. Since Navara 0.1.1 the engine's `click` is itself a
+ *  gesture (press and release within `CLICK_PIXEL_TOLERANCE`, never the end of
+ *  a camera drag), and its `featureClick` pick is gated the same way; the
+ *  router still puts a {@link createClickGate} in front of this so the two
+ *  paths can never disagree about what counted as a click. */
 export interface PickPointerEvent {
   readonly type: "move" | "click";
   readonly shiftKey: boolean;
@@ -183,28 +188,41 @@ function firstFinite(...values: ReadonlyArray<number | undefined>): number {
   return 0;
 }
 
-/** How far the pointer may travel between mousedown and click and still count
- *  as a click rather than a camera drag. Zero would be the engine's own rule;
- *  a few pixels absorb hand jitter without letting an orbit through. */
-export const CLICK_DRAG_TOLERANCE_PX = 3;
+/** How far the pointer may travel between pointerdown and click and still
+ *  count as a click rather than a camera drag.
+ *
+ *  MIRRORS the engine's `CLICK_PIXEL_TOLERANCE` (5 px in Navara 0.1.1, after
+ *  Cesium's `_clickPixelTolerance`), which gates both its `click` event and the
+ *  `featureClick` pick — a local constant rather than an import because this
+ *  module is engine-free. Keeping the two equal is what makes the city path
+ *  (own raycast on `click`) and the geo path (the engine's pick) agree on what
+ *  was a click: on 0.0.5 the engine's pick had ZERO tolerance while this gate
+ *  allowed 3 px, so a 1 px jitter selected a city object but cleared a geo
+ *  one. Touch taps get 30 px in the engine (`TAP_PIXEL_TOLERANCE`); the gate
+ *  does not special-case them, so a jittery tap that the engine still counts
+ *  can be refused here — a miss, never a wrong selection. */
+export const CLICK_DRAG_TOLERANCE_PX = 5;
 
 export interface ClickGate {
   down(point: ScreenPoint): void;
   move(point: ScreenPoint): void;
+  /** The browser cancelled the gesture (`pointercancel`): no click may ride on
+   *  the press that started it. Cleared by the next `down`. */
+  cancel(): void;
   /** True when the pointer has not travelled past the tolerance since the last
-   *  mousedown — i.e. this really is a click and not the end of a drag. */
+   *  pointerdown — i.e. this really is a click and not the end of a drag. */
   isClean(): boolean;
 }
 
 /**
- * Suppress the click that ends a camera drag.
+ * Suppress a click that does not belong to a clean press-and-release.
  *
- * The engine's `click` event is the raw DOM click, which fires after an orbit
- * or pan just as it does after a tap: without this gate, every camera gesture
- * would end by clearing (or changing) the selection. The engine's own `pick`
- * event guards itself exactly this way — it fires "only on a clean mouseup"
- * (Task B1) — but the own-raycast path does not go through `pick`, so the
- * router has to reimplement the guard.
+ * Since Navara 0.1.1 the engine's `click` is a gesture rather than the raw DOM
+ * click — it never fires after an orbit or a pan — so this gate is defence in
+ * depth rather than the only guard: it refuses a click whose press this
+ * component never saw as clean (a `pointercancel` in between, a press over the
+ * sky that the engine emitted nothing for), and it keeps the tolerance the
+ * own-raycast path applies identical to the one the engine's pick applies.
  */
 export function createClickGate(
   tolerancePx: number = CLICK_DRAG_TOLERANCE_PX,
@@ -223,6 +241,10 @@ export function createClickGate(
       const dx = point.x - origin.x;
       const dy = point.y - origin.y;
       if (dx * dx + dy * dy > tolerancePx * tolerancePx) dragged = true;
+    },
+    cancel() {
+      origin = null;
+      dragged = true;
     },
     isClean() {
       return !dragged;
@@ -281,13 +303,15 @@ export function applyPickIntent(
 }
 
 /**
- * What the viewport stashes from the engine's own `pick` event.
+ * What the viewport stashes from the engine's own `featureClick` event.
  *
  * Geo (GeoJSON) layers are drawn BY the engine, so their picks arrive through
- * the engine's `pick` event — which fires only on a clean mouseup — rather than
- * through the own-raycast path the city plugins use. The viewport cannot act on
- * it there and then (the click that follows is what commits a selection), so it
- * stashes this much and asks the router on the next `click`.
+ * the engine's `featureClick` event (`pick` before Navara 0.1.0) — which fires
+ * only for a clean press-and-release, just before the `click` of the same
+ * gesture — rather than through the own-raycast path the city plugins use. The
+ * viewport cannot act on it there and then (the click that follows is what
+ * commits a selection), so it stashes this much and asks the router on the
+ * next `click`.
  *
  * `engineLayerId` is `unknown` on purpose: it is `FeatureInfo.layerId`, the
  * ENGINE's id — an opaque token from an alpha engine whose type we do not
@@ -321,6 +345,7 @@ export function geoSelectionFromStash(
   return {
     geoLayerId,
     batchId: stash.batchId,
-    properties: stash.properties ?? {},
+    stableFeatureId: readGeoStableFeatureId(stash.properties) ?? undefined,
+    properties: publicGeoProperties(stash.properties ?? {}),
   };
 }

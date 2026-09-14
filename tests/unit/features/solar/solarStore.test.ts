@@ -133,3 +133,10 @@ describe("useSolarStore", () => {
     }
   });
 });
+
+it("rejects invalid playback rates without poisoning the animation clock", () => {
+  useSolarStore.getState().setTimeSpeed(600);
+  for (const speed of [0, -1, NaN, Infinity, 86401])
+    useSolarStore.getState().setTimeSpeed(speed);
+  expect(useSolarStore.getState().timeSpeed).toBe(600);
+});

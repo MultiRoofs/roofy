@@ -29,6 +29,7 @@ import {
 } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
+import type { CityObject } from "../../../src/domain/citymodel/types";
 import type {
   ProjectStateStore,
   SnapshotSummary,
@@ -36,6 +37,7 @@ import type {
 import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
 import type { StreamState } from "../../../src/features/streaming/streamStore";
 import { ENGINE_BOOT_TIMEOUT_MS } from "../../../src/app/App";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -94,13 +96,24 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
 }));
 
 // DuckDB-wasm is irrelevant here and expensive to even import.
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
+  getEngineGeneration: vi.fn(() => 1),
+  onEngineDeath: vi.fn(() => () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
-  loadModelIntoDuckDB: vi.fn(async () => false),
-  loadCityModelFromMemory: vi.fn(async () => false),
-  loadResidentObjectsIntoDuckDB: vi.fn(async () => false),
-  shouldUseSourceUrlPath: vi.fn(() => false),
+  isExtensionLoaded: vi.fn(() => false),
+  ensureExtension: vi.fn(async () => false),
+  formatDuckDBError: (e: unknown) =>
+    e instanceof Error ? e.message : String(e),
+  runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  registerBuffer: vi.fn(async () => false),
+  dropBuffer: vi.fn(async () => {}),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
+  queryParquetBuffer: vi.fn(async () => null),
 }));
 
 /** What `openStreamingLayer` saw, and when. `layersAtCall` is the real
@@ -132,7 +145,14 @@ vi.mock(
       await importOriginal<
         typeof import("../../../src/domain/citymodel/loadCityModel")
       >();
-    return { ...actual, loadFromUrl: (url: string) => loadFromUrl(url) };
+    // ALL of them: the third argument is the encoding the Add Layer dialog's
+    // correction resolved to, and a mock that forwarded only the URL would
+    // hide an app that dropped it on the way through.
+    return {
+      ...actual,
+      loadFromUrl: (...args: Parameters<typeof actual.loadFromUrl>) =>
+        loadFromUrl(...args),
+    };
   },
 );
 
@@ -153,13 +173,18 @@ const emptyStore: ProjectStateStore = {
   remove: async () => {},
 };
 
-/** Type the URL into the landing page's URL box and submit it. */
+/** Type the URL into the landing page's URL box, let it be classified (the
+ *  field detects on blur), and add it — the two beats the redesigned form
+ *  asks for. */
 function loadFromUrlBox(url: string): void {
+  fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+  fireEvent.click(screen.getByRole("tab", { name: "URL" }));
   const input = screen.getByPlaceholderText(
     "https://example.com/model.city.json",
   );
   fireEvent.change(input, { target: { value: url } });
-  fireEvent.click(screen.getByRole("button", { name: "Load" }));
+  fireEvent.blur(input);
+  fireEvent.click(screen.getAllByRole("button", { name: "Add layer" }).at(-1)!);
 }
 
 const model = {
@@ -168,6 +193,14 @@ const model = {
   bbox: null,
   objects: {},
   vertexCount: 0,
+};
+
+/** What `loadFromUrl` resolves since Task 15: the model PLUS the decoded
+ *  source bytes and the encoding, for the layer's DuckDB table. */
+const loaded = {
+  model,
+  bytes: new TextEncoder().encode("{}"),
+  encoding: "cityjson" as const,
 };
 
 describe("App engine-boot flag for a first-layer .fcb open", () => {
@@ -182,13 +215,13 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
         modelRef: { type: "url", url: FCB_URL },
         visible: true,
         rules: [],
-        rulesEnabled: true,
         isStreaming: true,
       });
       return "stream-1";
     };
     loadFromUrl.mockReset();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -199,7 +232,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
   it("mounts the viewport with ZERO layers and resolves the plugin once it publishes", async () => {
     render(<App persistenceStore={emptyStore} />);
     // Landing page: no viewport, so no engine and no FlatCityBuf plugin.
-    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
 
     loadFromUrlBox(FCB_URL);
 
@@ -220,7 +253,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
   });
 
-  it("returns to the landing page when the .fcb open fails", async () => {
+  it("retains the empty viewer and reports a failed .fcb open", async () => {
     openStreamingLayerImpl = async () => {
       throw new Error("Streaming refused: non-metric CRS");
     };
@@ -230,14 +263,11 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     await waitFor(() =>
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );
-    // The hold is released in `finally`, so the user gets the drop zone back
-    // instead of being stranded on an empty globe.
-    await waitFor(() =>
-      expect(screen.queryByTestId("navara-viewport")).toBeNull(),
-    );
     expect(
-      screen.getByText("Streaming refused: non-metric CRS"),
+      await screen.findByText("Error · Streaming refused: non-metric CRS"),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
   });
 
   it("does NOT boot the engine for a non-streaming source", async () => {
@@ -250,12 +280,17 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     render(<App persistenceStore={emptyStore} />);
     loadFromUrlBox(JSON_URL);
 
-    await waitFor(() => expect(loadFromUrl).toHaveBeenCalledWith(JSON_URL));
+    // Three arguments: the URL, the default http client, and the encoding the
+    // landing page's detection resolved to — a `.city.json` reaching the
+    // reader as CityJSON rather than being re-derived there.
+    await waitFor(() =>
+      expect(loadFromUrl).toHaveBeenCalledWith(JSON_URL, undefined, "cityjson"),
+    );
     // Still parsing: a CityJSON layer mounts the viewport as a CONSEQUENCE of
     // existing, so there is nothing to boot early for.
-    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
 
-    release(model);
+    release(loaded);
     await waitFor(() =>
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );
@@ -282,7 +317,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "The 3D viewport did not start. The .fcb layer could not be opened.",
+          "Error · The 3D viewport did not start. The .fcb layer could not be opened.",
         ),
       ).toBeInTheDocument(),
     );
@@ -312,7 +347,8 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
 
 describe("App object count across static and streaming layers", () => {
   beforeEach(() => {
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useStreamStore.setState({ streams: {} });
   });
   afterEach(cleanup);
@@ -328,7 +364,6 @@ describe("App object count across static and streaming layers", () => {
       modelRef: { type: "url", url: FCB_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       isStreaming: true,
     });
     useStreamStore.setState({
@@ -359,21 +394,22 @@ describe("App object count across static and streaming layers", () => {
     // The status bar is the ONE readout now — the toolbar's Objects pill was
     // deleted as a duplicate of it — and `getByText` throwing on a second
     // match is what keeps it that way.
-    await waitFor(() => expect(screen.getByText("2123")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/2,123/)).toBeTruthy());
   });
 });
 
 /**
  * The inspector follows VIEWPORT picks, not just clicks in the layer panel:
- * a picked geo feature makes its layer the active geo layer (so the panel
- * shows that layer's config), and a picked city object hands the panel back
- * by clearing it. Both directions are `App`-level effects with no UI of their
- * own, so they are driven through the selection store directly.
+ * a pick activates the layer it landed on, whichever kind that is. The rule
+ * lives in `installWorkspaceInvariants`, which `App` installs on mount — so
+ * what this proves is that the shell really installs it, driven through the
+ * selection store directly because the picks have no UI of their own.
  */
 describe("App inspector follows viewport picks across the geo/city split", () => {
   const resetStores = () => {
-    useLayerStore.setState({ layers: [], activeLayerId: null });
-    useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useGeoLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSelectionStore.getState().clear();
   };
 
@@ -383,7 +419,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
     resetStores();
   });
 
-  it("activates the picked feature's geo layer, then clears it on a city pick", async () => {
+  it("activates the picked feature's geo layer, then the city layer on a city pick", async () => {
     useLayerStore.getState().addLayer({
       id: "city-1",
       name: "delft.city.json",
@@ -391,7 +427,6 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       isStreaming: false,
     });
     const geoLayerId = useGeoLayerStore.getState().addGeoLayer({
@@ -412,7 +447,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
         properties: { name: "A13" },
       });
     });
-    expect(useGeoLayerStore.getState().activeGeoLayerId).toBe(geoLayerId);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(geoLayerId);
 
     act(() => {
       useSelectionStore.getState().select({
@@ -421,6 +456,105 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
         objectId: "NL.IMBAG.Pand.1",
       });
     });
-    expect(useGeoLayerStore.getState().activeGeoLayerId).toBeNull();
+    // Not merely "no longer the geo layer": the city layer the pick landed on
+    // is now THE active layer, so the inspector, the legend and the highlight
+    // are all describing the same thing.
+    expect(useWorkspaceStore.getState().activeLayerId).toBe("city-1");
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+  });
+
+  it("Close empties the workspace — geospatial layers included — and leaves nothing active", async () => {
+    // Geo layers used to SURVIVE Close, so the next city model opened onto
+    // somebody else's roads with a geospatial inspector over it. "Close" now
+    // means the whole workspace.
+    useLayerStore.getState().addLayer({
+      id: "city-1",
+      name: "delft.city.json",
+      model,
+      modelRef: { type: "url", url: JSON_URL },
+      visible: true,
+      rules: [],
+      isStreaming: false,
+    });
+    useGeoLayerStore.getState().addGeoLayer({
+      name: "roads",
+      kind: "geojson",
+      config: { url: "https://x/roads.geojson" },
+    });
+
+    render(<App persistenceStore={emptyStore} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    // "New workspace" — the header's name for what "Close file" used to do.
+    fireEvent.click(screen.getByRole("button", { name: "Untitled workspace" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
+    });
+
+    expect(useLayerStore.getState().layers).toEqual([]);
+    expect(useGeoLayerStore.getState().layers).toEqual([]);
+    expect(useWorkspaceStore.getState().activeLayerId).toBeNull();
+  });
+});
+
+/**
+ * The floating `AttributePanel` overlay used to duplicate whatever the
+ * inspector already showed for the selection — same attribute, rendered
+ * twice, once floating over the viewport and once in the details panel. The
+ * inspector (`InspectorPanel`) is now the one attribute view.
+ */
+describe("App renders exactly one attribute view for a selection", () => {
+  const resetStores = () => {
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
+    useSelectionStore.getState().clear();
+  };
+
+  beforeEach(resetStores);
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  it("shows the inspector's attribute row once, with no floating overlay", async () => {
+    const selectedObject: CityObject = {
+      id: "building-1",
+      objectType: "Building",
+      attributes: { measuredHeight: 12 },
+      surfaces: [],
+      bbox: [0, 0, 0, 10, 5, 3],
+      children: [],
+      parents: [],
+      lod: "2.2",
+    };
+    useLayerStore.getState().addLayer({
+      id: "city-1",
+      name: "delft.city.json",
+      model: { ...model, objects: { [selectedObject.id]: selectedObject } },
+      modelRef: { type: "url", url: JSON_URL },
+      visible: true,
+      rules: [],
+      isStreaming: false,
+    });
+
+    render(<App persistenceStore={emptyStore} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    act(() => {
+      useSelectionStore.getState().select({
+        kind: "object",
+        layerId: "city-1",
+        objectId: "building-1",
+      });
+    });
+
+    expect(document.querySelector(".attribute-panel")).toBeNull();
+    // The floating overlay used to render this same key a second time —
+    // once in its own `<table>`, once in the inspector's attribute row.
+    expect(screen.getAllByText("measuredHeight")).toHaveLength(1);
   });
 });

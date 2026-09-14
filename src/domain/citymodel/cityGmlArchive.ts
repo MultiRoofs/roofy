@@ -30,7 +30,7 @@
  */
 
 import { unzipSync, type UnzipFileInfo } from "fflate";
-import { mergeBBox } from "@cityjson/navara-core";
+import { mergeBBox, mergeModelAppearances } from "@cityjson/navara-core";
 import type { BBox3, CityModel, CityObject } from "./types";
 import { parseCityGML } from "./citygml/parseCityGML";
 
@@ -159,8 +159,12 @@ function mergeArchiveModels(
   let bbox: BBox3 | null = null;
   let vertexCount = 0;
 
-  for (const { entry, model } of models) {
-    for (const [id, object] of Object.entries(model.objects)) {
+  // Each file parsed its own appearance with its own indices; fold them into
+  // one table and rewrite the surfaces to it (shared images deduplicate).
+  const merged = mergeModelAppearances(models.map((m) => m.model));
+
+  for (const [i, { entry, model }] of models.entries()) {
+    for (const [id, object] of Object.entries(merged.units[i]!)) {
       const owner = owners.get(id);
       if (owner !== undefined) {
         throw new Error(
@@ -180,6 +184,7 @@ function mergeArchiveModels(
     bbox,
     objects,
     vertexCount,
+    ...(merged.appearance ? { appearance: merged.appearance } : {}),
   };
 }
 

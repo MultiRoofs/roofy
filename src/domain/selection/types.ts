@@ -37,5 +37,7 @@ export interface GeoFeatureSelection {
   readonly geoLayerId: string;
   /** Engine per-feature batch id. */
   readonly batchId: number;
+  /** Stable source identity, when the GeoJSON source was normalized. */
+  readonly stableFeatureId?: string;
   readonly properties: Readonly<Record<string, unknown>>;
 }

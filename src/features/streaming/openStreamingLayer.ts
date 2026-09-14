@@ -1,3 +1,5 @@
+import { type TablePresentation } from "../query/tablePresentation";
+import { type AttributeOrders } from "../attributes/attributeOrder";
 /**
  * Opens a `.fcb` source (URL or local `File`/`Blob`) for viewport streaming
  * and registers it with the two stores the UI reads.
@@ -21,7 +23,7 @@
  *  3. Register the `StreamState` and subscribe the store to the handle's
  *     four reports. The plugin owns the streaming state machine and only
  *     tells us what it did; the store mirrors what the UI reads (LodSelector,
- *     LayerPanel, StatusBar, InspectorPanel).
+ *     LayerPanel, StatusBar, DetailsPanel).
  *
  * The **caller must pass a `Blob`, never an `ArrayBuffer`**, for a local
  * file — the worker's `openFcb` uses `FcbReader.fromBlob` for true range
@@ -29,12 +31,19 @@
  * A `File` already IS a `Blob`, so passing it straight through (as this
  * module and its callers do) satisfies that without any extra step.
  */
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import { useStreamStore } from "./streamStore";
 import type { StreamPlugin } from "./streamPlugin";
 import { useLayerStore } from "../layers/layerStore";
 import type { CityModel } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
+import {
+  effectiveRules,
+  effectiveRulesEnabled,
+  normalizeColorBy,
+  type ColorBy,
+} from "../rules/colorBy";
 
 export interface OpenStreamingLayerInput {
   /** The live `FlatCityBufPlugin`, passed in rather than read from
@@ -45,13 +54,22 @@ export interface OpenStreamingLayerInput {
   readonly name: string;
   readonly modelRef: CityModelReference;
   readonly rules?: ReadonlyArray<Rule>;
-  readonly rulesEnabled?: boolean;
+  /** A restored "Color by" choice. Absent means DERIVED from {@link rules},
+   *  the same rule `layerStore.addLayer` applies — see `rules/colorBy.ts`. */
+  readonly colorBy?: ColorBy;
+  readonly singleColor?: string;
+  readonly unmatchedColor?: string;
   readonly visible?: boolean;
   /** First-level object groups to stream without geometry, seeded into the
    *  plugin before its first commit — a restored layer's very first fetch is
    *  then already filtered, rather than fetching what it must immediately
    *  refetch without. */
   readonly hiddenTypes?: ReadonlyArray<string>;
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
+  /** A restored choice. `undefined` (a fresh open) means "the first texture
+   *  theme the stream reports"; `null` means plain colours, deliberately. */
+  readonly selectedAppearance?: AppearanceTheme | null;
 }
 
 export async function openStreamingLayer(
@@ -61,13 +79,31 @@ export async function openStreamingLayer(
   // layer exists: `openStream` registers the handle under this id, and every
   // later lookup (`getHandle`, `remove`, a pick's `layerId`) goes through it.
   const id = crypto.randomUUID();
+  // Hoisted, not defaulted twice: the plugin seed and the store record must
+  // agree by IDENTITY, or the first `syncStreamState` would see a different
+  // array than the one the stream was opened with and re-bake every cell it
+  // had just baked.
+  const rules = input.rules ?? [];
+  const colorBy = normalizeColorBy({ ...input, rules });
+  // `effectiveRulesEnabled` answers "does this paint?" from the mode alone,
+  // and `effectiveRules` reads the mode and the two colours — the settled
+  // `colorBy` is the one answer both the plugin seed and the store record
+  // draw from, so a seed built from a different answer would be an
+  // equal-but-distinct array the first `syncStreamState` reads as a change.
+  const styling = { rules, ...colorBy };
   const handle = await input.plugin.openStream({
     id,
     source: input.source,
-    rules: input.rules ?? [],
-    rulesEnabled: input.rulesEnabled ?? true,
+    // The EFFECTIVE list, so the very first cell is baked exactly like every
+    // cell that arrives after it — a rule with zero conditions colours a
+    // streamed roof, which is the whole premise of "Color by".
+    rules: effectiveRules(styling),
+    rulesEnabled: effectiveRulesEnabled(styling),
     visible: input.visible ?? true,
     hiddenTypes: input.hiddenTypes ?? [],
+    // Seeded before the first commit, so a restored textured layer's first
+    // cells are already baked with images.
+    appearance: input.selectedAppearance ?? null,
   });
 
   const model: CityModel = {
@@ -84,11 +120,22 @@ export async function openStreamingLayer(
     model,
     modelRef: input.modelRef,
     visible: input.visible ?? true,
-    rules: input.rules ?? [],
-    rulesEnabled: input.rulesEnabled ?? true,
+    // The layer keeps the USER's rules; the synthetic catch-alls live only
+    // inside `effectiveRules` and never reach the store, the editor or a
+    // snapshot.
+    rules,
+    ...colorBy,
     hiddenTypes: input.hiddenTypes ?? [],
+    attributeOrders: input.attributeOrders,
+    tablePresentation: input.tablePresentation,
     isStreaming: true,
+    // A streaming layer's model is a stub, so the store cannot pick a load
+    // default here; `onAppearanceThemes` below does, once themes are known.
+    selectedAppearance: input.selectedAppearance ?? null,
   });
+  // A fresh open (no restored choice) adopts the first texture theme the
+  // stream reports, exactly as a static textured layer opens textured.
+  let autoPicked = input.selectedAppearance !== undefined;
 
   // The plugin owns the streaming state machine and only REPORTS; the store
   // mirrors what the UI reads (LodSelector, LayerPanel, StatusBar, Inspector).
@@ -110,6 +157,19 @@ export async function openStreamingLayer(
     handle.onTypes((types) =>
       useStreamStore.getState().setTypes(layerId, types),
     ),
+    handle.onAppearanceThemes((themes) => {
+      useStreamStore.getState().setAppearanceThemes(layerId, themes);
+      if (autoPicked) return;
+      const texture = themes.find((t) => t.kind === "texture");
+      if (!texture) return;
+      autoPicked = true;
+      const layer = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId);
+      if (layer && layer.selectedAppearance === null) {
+        useLayerStore.getState().setLayerAppearance(layerId, texture);
+      }
+    }),
     handle.onCommit(() => {
       const store = useStreamStore.getState();
       // Level first: `LodSelector` reads it alongside the ladder, and updating
@@ -138,6 +198,7 @@ export async function openStreamingLayer(
     ladderVersion: 0,
     types: handle.typesSeen,
     typesVersion: 0,
+    appearanceThemes: handle.appearanceThemes,
     status: handle.status,
     message: handle.message,
     version: handle.version,

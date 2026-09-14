@@ -1,7 +1,7 @@
 /**
- * `App`'s CityParquet paths: the two URL-restore sites, and the DuckDB skip.
+ * `App`'s CityParquet paths: the two URL-restore sites.
  *
- * Why these three cases exist:
+ * Why these cases exist:
  *
  *   * A snapshot and a share link each rebuild a URL layer with their OWN copy
  *     of the loader hook's routing, so each has to be pinned separately — the
@@ -9,10 +9,6 @@
  *     Both use a `gs://` source on purpose: it carries no extension at all, so
  *     a site that classified with `detectEncoding` would read it as CityJSON
  *     and hand parquet bytes (or a bucket listing) to `JSON.parse`.
- *   * The DuckDB effect must not offer a CityParquet layer to the cityjson
- *     extension. Same trap, one step later: `read_cityjson('gs://…')` is a
- *     query that can only fail, on every selection, and the layer's real
- *     analytics come from the in-memory fallback.
  *
  * The engine is never imported (`NavaraViewport` is mocked — jsdom has no
  * WebGL and `@navaramap/three` crashes at module scope under Node), and the
@@ -26,6 +22,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
@@ -35,6 +32,7 @@ import type {
   ProjectSnapshot,
   ProjectStateStore,
 } from "../../../src/persistence/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -79,6 +77,14 @@ const jsonModel: CityModel = {
   vertexCount: 0,
 };
 
+/** What `loadFromUrl` resolves since Task 15: the model PLUS the decoded
+ *  source bytes and the encoding, for the layer's DuckDB table. */
+const jsonLoaded = {
+  model: jsonModel,
+  bytes: new TextEncoder().encode("{}"),
+  encoding: "cityjson" as const,
+};
+
 vi.mock("../../../src/scene/NavaraViewport", () => ({
   NavaraViewport: forwardRef<CitySceneHandle, Record<string, unknown>>(
     function MockNavaraViewport(_props, ref) {
@@ -102,31 +108,62 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
   ),
 }));
 
-/** DuckDB's analytics surface, controlled per test. `extensionReady` and
- *  `urlPath` are what put the effect on the extension branch at all — the
- *  other app tests pin them false and never reach it. */
+/** DuckDB's analytics surface, controlled per test. `extensionReady` is what
+ *  would put the effect on the extension branch at all — no surviving test in
+ *  this file needs a ready engine, so it stays false throughout. */
 let extensionReady = false;
-let urlPath = false;
-const loadModelIntoDuckDB = vi.fn((_url: string, _encoding: string) =>
-  Promise.resolve(true),
-);
-const loadCityModelFromMemory = vi.fn((_model: CityModel) =>
-  Promise.resolve(true),
-);
 
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
+  getEngineGeneration: vi.fn(() => 1),
+  onEngineDeath: vi.fn(() => () => {}),
   getDuckDBStatus: vi.fn(() =>
     extensionReady
-      ? { state: "ready", extensionLoaded: true }
+      ? {
+          state: "ready",
+          extensions: {
+            cityjson: { state: "loaded" },
+            spatial: { state: "unloaded" },
+            three_d: { state: "unloaded" },
+          },
+          loadedExtensions: [{ name: "cityjson", version: "0.4.0" }],
+          platform: "wasm_eh",
+        }
       : { state: "uninitialized" },
   ),
-  loadModelIntoDuckDB: (url: string, encoding: string) =>
-    loadModelIntoDuckDB(url, encoding),
-  loadCityModelFromMemory: (model: CityModel) => loadCityModelFromMemory(model),
-  loadResidentObjectsIntoDuckDB: vi.fn(async () => false),
-  shouldUseSourceUrlPath: () => urlPath,
+  isExtensionLoaded: vi.fn(() => extensionReady),
+  ensureExtension: vi.fn(async () => false),
+  formatDuckDBError: (e: unknown) =>
+    e instanceof Error ? e.message : String(e),
+  runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  registerBuffer: vi.fn(async () => false),
+  dropBuffer: vi.fn(async () => {}),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
+  queryParquetBuffer: vi.fn(async () => null),
 }));
+
+/** What the app asked DuckDB to build a table from, per layer. `vi.hoisted`
+ *  because the `vi.mock` factory below is hoisted above this declaration. */
+const enqueued = vi.hoisted(
+  () => [] as Array<{ layerId: string; kind: string }>,
+);
+vi.mock("../../../src/insights/layerTables", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/insights/layerTables")>();
+  return {
+    ...actual,
+    enqueueLayerTable: vi.fn(
+      async (layerId: string, source: { kind: string }) => {
+        enqueued.push({ layerId, kind: source.kind });
+      },
+    ),
+    dropLayerTable: vi.fn(async () => {}),
+  };
+});
 
 vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
   openStreamingLayer: vi.fn(async () => "stream-1"),
@@ -203,7 +240,16 @@ function storeWith(snapshot: ProjectSnapshot | null): ProjectStateStore {
 }
 
 async function clickRestore(): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: useWorkspaceStore.getState().name }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+  await waitFor(() =>
+    expect(document.querySelector(".workspace-snapshot")).not.toBeNull(),
+  );
+  fireEvent.click(
+    document.querySelector<HTMLButtonElement>(".workspace-snapshot")!,
+  );
 }
 
 function shareHash(
@@ -223,16 +269,15 @@ function shareHash(
 
 beforeEach(() => {
   extensionReady = false;
-  urlPath = false;
-  loadModelIntoDuckDB.mockClear();
-  loadCityModelFromMemory.mockClear();
   loadFromUrl.mockReset();
-  loadFromUrl.mockResolvedValue(jsonModel);
+  loadFromUrl.mockResolvedValue(jsonLoaded);
   loadCityParquetFromUrl.mockReset();
   loadCityParquetFromUrl.mockResolvedValue(parquetModel);
   loadCityParquetFromFiles.mockReset();
   loadCityParquetFromFiles.mockResolvedValue(parquetModel);
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
+  enqueued.length = 0;
   location.hash = "";
 });
 
@@ -272,7 +317,7 @@ describe("App snapshot restore — CityParquet layers", () => {
     expect(layer.model.sourceEncoding).toBe("cityparquet");
     expect(layer.modelRef).toEqual({ type: "url", url: PARQUET_URL });
     expect(layer.rules).toEqual([RULE]);
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
     expect(layer.hiddenTypes).toEqual(["Building"]);
   });
@@ -371,59 +416,16 @@ describe("App share-link restore — CityParquet layers", () => {
   });
 });
 
-describe("App DuckDB load — CityParquet layers", () => {
-  beforeEach(() => {
-    // The branch this suite is about: the extension is loaded and the layer's
-    // source is a URL, so the effect WOULD reach for `read_cityjson`.
-    extensionReady = true;
-    urlPath = true;
-  });
-
-  it("never offers a CityParquet layer to the cityjson extension, falling back in-memory", async () => {
-    render(<App persistenceStore={storeWith(null)} />);
-    useLayerStore.getState().addLayer({
-      id: "layer-1",
-      name: "delft",
-      model: parquetModel,
-      // No extension to read: `detectEncoding` calls this "cityjson", so only
-      // the model's own `sourceEncoding` can keep it off the extension path.
-      modelRef: { type: "url", url: PARQUET_URL },
-      visible: true,
-      rules: [],
-      rulesEnabled: true,
-    });
-
-    await waitFor(() =>
-      expect(loadCityModelFromMemory).toHaveBeenCalledWith(parquetModel),
-    );
-    expect(loadModelIntoDuckDB).not.toHaveBeenCalled();
-  });
-
-  it("still uses the extension for an ordinary CityJSON URL layer", async () => {
-    render(<App persistenceStore={storeWith(null)} />);
-    useLayerStore.getState().addLayer({
-      id: "layer-1",
-      name: "delft",
-      model: jsonModel,
-      modelRef: { type: "url", url: JSON_URL },
-      visible: true,
-      rules: [],
-      rulesEnabled: true,
-    });
-
-    await waitFor(() =>
-      expect(loadModelIntoDuckDB).toHaveBeenCalledWith(JSON_URL, "cityjson"),
-    );
-  });
-});
-
 /**
  * A failed GROUP add has to be visible from wherever it was attempted.
  *
  * `loadError` is rendered inline — in the LANDING branch only. Inside the
- * viewer shell the Add Layer dialog closes on the way out, so before this the
- * "no CityParquet object tables" sentence went nowhere at all and dropping two
- * wrong files simply did nothing.
+ * viewer shell the Add Layer dialog closes on the way out, so the "no
+ * CityParquet object tables" sentence has to land somewhere else: since 12.2
+ * that is an ERROR ROW in the layer list, where the layer would have
+ * appeared. It used to be a toast, and a toast times out, names no source and
+ * cannot be retried — the row does all three, so the toast is gone rather
+ * than doubled.
  */
 describe("App — a failed group add is reported", () => {
   const NO_TABLES = "No CityParquet object tables in the selection.";
@@ -431,6 +433,8 @@ describe("App — a failed group add is reported", () => {
   /** Two files, the way a browser delivers a multi-file drop. jsdom has no
    *  real `DataTransfer`, so the shape the handler reads is supplied. */
   function dropTwoFiles(): void {
+    if (!screen.queryByRole("dialog", { name: "Add layer" }))
+      fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
     fireEvent.drop(screen.getByTestId("source-picker-drop-zone"), {
       dataTransfer: {
         files: [new File(["a"], "a.city.json"), new File(["b"], "b.city.json")],
@@ -440,7 +444,7 @@ describe("App — a failed group add is reported", () => {
     });
   }
 
-  it("toasts the loader's message inside the viewer shell", async () => {
+  it("leaves an error row in the layer list inside the viewer shell", async () => {
     loadCityParquetFromFiles.mockRejectedValue(new Error(NO_TABLES));
     render(<App persistenceStore={storeWith(null)} />);
     // A layer, so the shell is up and the landing page's inline error slot is
@@ -452,38 +456,87 @@ describe("App — a failed group add is reported", () => {
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "+ Add Layer" }));
-    // The dialog opens on the geospatial tab; the city-model drop zone is the
-    // one this group add goes through.
-    fireEvent.click(screen.getByRole("tab", { name: /city model/i }));
+    // Scoped to the layers panel on purpose: "Add layer" is also the label of
+    // the landing page's URL submit button and of the dialog's own confirm
+    // button, and an unscoped query resolves against whichever of them is on
+    // screen first — which is how this click used to land on the landing
+    // page's button and never open the dialog at all.
+    const panel = await screen.findByRole("complementary", {
+      name: "Layers panel",
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: "Add layer" }));
+    // The dialog opens on the File tab, which is where a group of files is
+    // dropped; a multi-file selection is a CityParquet package by
+    // construction, so the confirming click is all it needs.
     dropTwoFiles();
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add layer",
+      }),
+    );
 
     await waitFor(() =>
       expect(loadCityParquetFromFiles).toHaveBeenCalledTimes(1),
     );
-    const toast = await waitFor(() => {
-      const el = document.querySelector(".toast");
-      if (el === null) throw new Error("no toast yet");
-      return el;
-    });
-    expect(toast.textContent).toBe(NO_TABLES);
+    // The row names the source AND the reason, and offers a retry — none of
+    // which a toast did.
+    expect(await screen.findByText(`Error · ${NO_TABLES}`)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Retry a.city.json" }),
+    ).toBeTruthy();
+    // ONE report: the toast that used to double it is gone.
+    expect(document.querySelector(".toast")).toBeNull();
     // The dialog closed on the way out, as it does for a single file.
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("reports it ONCE on the landing page — inline, with no toast", async () => {
+  it("reports a failed first add once in the empty viewer", async () => {
     loadCityParquetFromFiles.mockRejectedValue(new Error(NO_TABLES));
     render(<App persistenceStore={storeWith(null)} />);
 
     dropTwoFiles();
-
-    expect(await screen.findByText(NO_TABLES)).toBeTruthy();
-    expect(document.querySelector(".error-message")?.textContent).toBe(
-      NO_TABLES,
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Add layer" })).getByRole(
+        "button",
+        { name: "Add layer" },
+      ),
     );
+    expect(await screen.findByText(`Error · ${NO_TABLES}`)).toBeTruthy();
+    expect(screen.getAllByText(new RegExp(NO_TABLES))).toHaveLength(1);
     expect(document.querySelector(".toast")).toBeNull();
+  });
+});
+
+describe("DuckDB layer tables", () => {
+  it("builds a CityParquet layer's table from the parsed MODEL — there is no reader for it", async () => {
+    location.hash = shareHash([
+      {
+        name: "pkg",
+        modelUrl: PARQUET_URL,
+        rules: [],
+        rulesEnabled: true,
+        visible: true,
+      },
+    ]);
+    render(<App persistenceStore={storeWith(null)} />);
+    await waitFor(() => expect(enqueued).toHaveLength(1));
+    expect(enqueued[0]!.kind).toBe("model");
+  });
+
+  it("builds an ordinary CityJSON URL layer's table from the decoded BYTES", async () => {
+    location.hash = shareHash([
+      {
+        name: "delft",
+        modelUrl: JSON_URL,
+        rules: [],
+        rulesEnabled: true,
+        visible: true,
+      },
+    ]);
+    render(<App persistenceStore={storeWith(null)} />);
+    await waitFor(() => expect(enqueued).toHaveLength(1));
+    expect(enqueued[0]!.kind).toBe("bytes");
   });
 });

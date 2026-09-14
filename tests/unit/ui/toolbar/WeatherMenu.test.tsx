@@ -11,7 +11,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { WeatherMenu } from "../../../../src/ui/toolbar/WeatherMenu";
-import { ViewerToolbar } from "../../../../src/ui/toolbar/ViewerToolbar";
 import {
   DEFAULT_ATMOSPHERE_STATE,
   useAtmosphereStore,
@@ -174,32 +173,5 @@ describe("WeatherMenu", () => {
       const { container } = renderOpen();
       expect(container.querySelector(".weather-menu-hint")).toBeNull();
     });
-  });
-});
-
-describe("ViewerToolbar sky cluster", () => {
-  const baseProps = {
-    pickMode: "object" as const,
-    toolMode: "select" as const,
-    onSetPickMode: () => undefined,
-    onSetToolMode: () => undefined,
-    onClose: () => undefined,
-    onToggleInspector: () => undefined,
-    onToggleLeftSidebar: () => undefined,
-    onFitAll: () => undefined,
-    theme: "dark" as const,
-    onToggleTheme: () => undefined,
-  };
-
-  // Sun then weather: both are controls for the SKY, and the adjacency is the
-  // whole reason weather left the Rendering panel.
-  it("puts the weather button immediately after the sun's", () => {
-    const { container } = render(<ViewerToolbar {...baseProps} />);
-    const sun = screen.getByLabelText("Sun position");
-    const weather = screen.getByLabelText("Weather");
-    const buttons = [...container.querySelectorAll("button")];
-    expect(buttons.indexOf(weather as HTMLButtonElement)).toBe(
-      buttons.indexOf(sun as HTMLButtonElement) + 1,
-    );
   });
 });

@@ -1,0 +1,182 @@
+/**
+ * The COLLISION rule, pinned.
+ *
+ * `scene/cityColors.ts` says it in prose — "nothing below is byte-equal to a
+ * preset, the new-rule default or the default geospatial colour" — and until
+ * this file existed nothing checked it. The rule is not decoration: a
+ * highlight equal to a rule colour makes a selected surface look unselected, a
+ * base roof equal to a rule colour makes that rule look like a no-op, and an
+ * unmatched grey equal to the unknown-surface grey makes "no rule applies"
+ * indistinguishable from "no surface type".
+ *
+ * Task 26 added four constants to that file (the unmatched grey, the single
+ * colour, the categorical palette and its Other bucket), which is what finally
+ * made the missing test worth writing.
+ */
+import { describe, expect, it } from "vitest";
+import {
+  CATEGORY_OTHER_HEX,
+  CATEGORY_PALETTE_HEX,
+  CITY_COLORS,
+  NEW_RULE_COLOR_HEX,
+  RULE_PALETTE_HEX,
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../src/scene/cityColors";
+import { RULE_PRESETS } from "../../../src/features/rules/presets";
+import { DEFAULT_GEO_LAYER_STYLE } from "../../../src/features/geoLayers/geoLayerStyle";
+
+const lower = (hex: string) => hex.toLowerCase();
+
+/** The values `cityColors.ts` itself owns: the two interaction accents and
+ *  every base surface colour. */
+const CHROME: ReadonlyArray<readonly [string, string]> = [
+  ["highlight", CITY_COLORS.highlightColor!],
+  ["hover", CITY_COLORS.hoverColor!],
+  ...Object.entries(CITY_COLORS.surfaceColors ?? {}).map(
+    ([type, hex]) => [`surface ${type}`, hex] as const,
+  ),
+];
+
+/**
+ * The values a `cityColors` constant must not collide WITH: every rule colour
+ * a user can end up with, plus the colour a geospatial layer draws in.
+ *
+ * Note that this list is deliberately not internally distinct — the "Steep
+ * roofs" preset and `DEFAULT_GEO_LAYER_STYLE` are both the brand accent, and
+ * that is fine: they never appear on the same geometry, and the hard rule is
+ * about `cityColors` values, not about these.
+ */
+const RULE_COLORS: ReadonlyArray<readonly [string, string]> = [
+  ...RULE_PRESETS.map((p) => [`preset ${p.label}`, p.create().color] as const),
+  ["new-rule default", NEW_RULE_COLOR_HEX],
+  ["default geo layer", DEFAULT_GEO_LAYER_STYLE.color],
+];
+
+const NEW_CONSTANTS: ReadonlyArray<readonly [string, string]> = [
+  ["UNMATCHED_COLOR_HEX", UNMATCHED_COLOR_HEX],
+  ["SINGLE_COLOR_HEX", SINGLE_COLOR_HEX],
+  ["CATEGORY_OTHER_HEX", CATEGORY_OTHER_HEX],
+  ...CATEGORY_PALETTE_HEX.map(
+    (hex, i) => [`CATEGORY_PALETTE_HEX[${i}]`, hex] as const,
+  ),
+];
+
+describe("the interaction accents and the base surfaces", () => {
+  it("are never byte-equal to a rule colour", () => {
+    const ruleColors = new Set(RULE_COLORS.map(([, hex]) => lower(hex)));
+    for (const [name, hex] of CHROME) {
+      expect([name, ruleColors.has(lower(hex))]).toEqual([name, false]);
+    }
+  });
+
+  it("are distinct from one another", () => {
+    const values = CHROME.map(([, hex]) => lower(hex));
+    expect(new Set(values).size).toBe(values.length);
+  });
+});
+
+describe("the colorBy constants", () => {
+  it("differ from highlight, hover and every base surface colour", () => {
+    const reserved = new Set(CHROME.map(([, hex]) => lower(hex)));
+    for (const [name, hex] of NEW_CONSTANTS) {
+      expect([name, reserved.has(lower(hex))]).toEqual([name, false]);
+    }
+  });
+
+  it("differ from every rule preset, the new-rule default and the geo default", () => {
+    const ruleColors = new Set(RULE_COLORS.map(([, hex]) => lower(hex)));
+    for (const [name, hex] of NEW_CONSTANTS) {
+      expect([name, ruleColors.has(lower(hex))]).toEqual([name, false]);
+    }
+  });
+
+  it("differ from one another", () => {
+    const values = NEW_CONSTANTS.map(([, hex]) => lower(hex));
+    expect(new Set(values).size).toBe(values.length);
+  });
+
+  it("are all `#rrggbb`, which is what the persistence validator accepts", () => {
+    for (const [name, hex] of NEW_CONSTANTS) {
+      expect([name, /^#[0-9a-f]{6}$/i.test(hex)]).toEqual([name, true]);
+    }
+  });
+
+  it("offers exactly 8 categorical colours plus a reserved Other", () => {
+    expect(CATEGORY_PALETTE_HEX).toHaveLength(8);
+    expect(CATEGORY_PALETTE_HEX).not.toContain(CATEGORY_OTHER_HEX);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The rule palette (Task 26): the colours SUCCESSIVE rules take
+// ---------------------------------------------------------------------------
+
+describe("the rule palette", () => {
+  it("begins with the new-rule default, so a first rule is unchanged", () => {
+    expect(RULE_PALETTE_HEX[0]).toBe(NEW_RULE_COLOR_HEX);
+  });
+
+  it("never collides with the chrome — highlight, hover or a base surface", () => {
+    // The hard rule this file exists for: a rule colour equal to the highlight
+    // makes a selected ruled surface look unselected.
+    const reserved = new Set(CHROME.map(([, hex]) => lower(hex)));
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([hex, reserved.has(lower(hex))]).toEqual([hex, false]);
+    }
+  });
+
+  it("never collides with the default geospatial colour", () => {
+    // A rule and an untouched vector layer on the same colour makes the rule
+    // look like it painted the overlay.
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([
+        hex,
+        lower(hex) === lower(DEFAULT_GEO_LAYER_STYLE.color),
+      ]).toEqual([hex, false]);
+    }
+  });
+
+  it("never collides with Single or Unmatched, the two modes it shares a layer with", () => {
+    // Both are drawn on the SAME layer as a rule: `unmatchedColor` paints every
+    // surface no rule claimed, and Single is what the layer falls back to — so a
+    // rule wearing either one is a rule with nothing to show for itself.
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([hex, lower(hex) === lower(UNMATCHED_COLOR_HEX)]).toEqual([
+        hex,
+        false,
+      ]);
+      expect([hex, lower(hex) === lower(SINGLE_COLOR_HEX)]).toEqual([
+        hex,
+        false,
+      ]);
+    }
+  });
+
+  it("never collides with the categorical scale", () => {
+    // Design decision (i): a rule wearing a CATEGORY's colour reads as a
+    // category.
+    const categories = new Set(CATEGORY_PALETTE_HEX.map(lower));
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([hex, categories.has(lower(hex))]).toEqual([hex, false]);
+    }
+    expect(RULE_PALETTE_HEX).not.toContain(CATEGORY_OTHER_HEX);
+  });
+
+  it("is eight DISTINCT `#rrggbb` values", () => {
+    expect(RULE_PALETTE_HEX).toHaveLength(8);
+    expect(new Set(RULE_PALETTE_HEX.map(lower)).size).toBe(8);
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([hex, /^#[0-9a-f]{6}$/i.test(hex)]).toEqual([hex, true]);
+    }
+  });
+
+  it("touches a preset at index 0 only — that IS the new-rule default", () => {
+    // Unlike the four `colorBy` constants above, these ARE rule colours, so
+    // coinciding with a preset is not a collision in the same sense. Pinned so
+    // a future palette edit is a deliberate one.
+    const presets = new Set(RULE_PRESETS.map((p) => lower(p.create().color)));
+    const hits = RULE_PALETTE_HEX.filter((hex) => presets.has(lower(hex)));
+    expect(hits).toEqual([NEW_RULE_COLOR_HEX]);
+  });
+});

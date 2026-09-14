@@ -1,0 +1,83 @@
+.scene-settings-sheet__body > section,
+.scene-settings-sheet__body > details {
+  display: grid;
+  gap: 0.625rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.scene-settings-sheet__body > :is(section, details) + :is(section, details) {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.scene-settings-sheet h3,
+.scene-settings-sheet summary,
+.scene-settings-sheet .attr-section-title {
+  margin: 0 0 0.25rem;
+  color: var(--fg);
+  font: 600 0.75rem/1.4 var(--font-ui);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.scene-settings-sheet summary {
+  cursor: pointer;
+}
+
+.scene-settings-sheet details[open] > summary {
+  margin-bottom: 0.75rem;
+}
+
+.scene-settings-sheet label {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.scene-settings-sheet .scene-settings-sheet__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 1.5rem;
+}
+
+.scene-settings-sheet__hint {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.scene-settings-sheet__readout {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.scene-settings-sheet output {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Embedded selectors share the sheet's gutter, rather than adding a second. */
+.scene-settings-sheet .attr-section {
+  padding: 0;
+}
+
+.scene-settings-sheet .attr-section-title {
+  margin-bottom: 0.625rem;
+}
+
+.scene-settings-sheet .layer-item {
+  margin: 0;
+}
+
+.scene-settings-sheet .layer-vis-btn {
+  padding: 0;
+  min-height: 1.5rem;
+  border: 0;
+  background: transparent;
+}

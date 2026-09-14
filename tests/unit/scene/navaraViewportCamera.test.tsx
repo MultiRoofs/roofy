@@ -1,6 +1,5 @@
 /**
- * NavaraViewport camera-control wiring: the compass and the map-control
- * cluster.
+ * NavaraViewport camera wiring and its imperative handle.
  *
  * Companion to `navaraViewport.test.tsx` (the static half),
  * `navaraViewportSolar.test.tsx` and `navaraViewportStreaming.test.tsx`, and it
@@ -13,21 +12,21 @@
  *
  *  - the compass follows the camera through the engine's `movestart`/`move`/
  *    `moveend` events, which live on `view.camera`, NOT on the view;
- *  - it also follows the moves that emit NO events — `setCamera`, i.e. an
- *    alignment, a restore and every button in the cluster — because those
- *    publish their own pose;
- *  - EVERY button's move goes through the streaming settle suppression, so a
- *    zoom or a tilt cannot masquerade as a pan and re-trigger FCB fetches;
- *  - the dial is idle until the engine has a camera to report, and idle again
- *    once it is gone.
+ *  - it also follows the moves that emit NO events — `setCamera`, such as an
+ *    alignment — because those publish their own pose;
+ *  - imperative zoom and north-reset moves go through streaming settle
+ *    suppression, so they cannot masquerade as pans and re-trigger FCB fetches;
+ *  - no pose is exposed until the engine has a camera to report, and it is
+ *    cleared once the engine is gone.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 
 const init = vi.fn(async () => {});
 const dispose = vi.fn();
 const setCamera = vi.fn();
-const flyTo = vi.fn();
+// Returns the never-landing flight declared below (called only after module init).
+const flyTo = vi.fn((..._args: unknown[]): unknown => flightInProgress);
 
 /** The view's own bus (`postRender` is what seeds the first pose). */
 const listeners = new Map<string, Set<(...args: never[]) => void>>();
@@ -177,6 +176,14 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
  *  A passthrough, so the move still happens — but a RECORDED one, because "did
  *  this move run inside the window?" is the assertion. */
 const suppressSettleThenCommit = vi.fn(async (fn: () => unknown) => fn());
+/** A flight that never lands — `view.flyTo`'s return on Navara 0.1.x resolves
+ *  at the END of the flight, and the settle gate holds only as long as the
+ *  move hands that very promise to `suppressSettleThenCommit`. */
+const flightInProgress = new Promise<boolean>(() => {});
+function settleWrappedMove(): unknown {
+  const move = suppressSettleThenCommit.mock.calls.at(-1)![0] as () => unknown;
+  return move();
+}
 vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
   FlatCityBufPlugin: vi.fn(function () {
     return {
@@ -191,11 +198,7 @@ vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
 import { getCameraPose } from "../../../src/scene/cameraPose";
-import {
-  formatBearing,
-  TILT_STEP_DEG,
-  ZOOM_IN_FACTOR,
-} from "../../../src/scene/cameraControls";
+import { ZOOM_IN_FACTOR } from "../../../src/scene/cameraControls";
 import type { GeographicCameraState } from "../../../src/scene/geographicCamera";
 import {
   useLayerStore,
@@ -211,6 +214,11 @@ import {
   TILTED_PITCH_DEG,
 } from "../../../src/scene/viewModePolicy";
 import type { CityModel } from "../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../src/scene/cityColors";
 
 class ResizeObserverStub {
   observe() {}
@@ -246,12 +254,21 @@ function makeLayer(id: string): Layer {
     visible: true,
     rules: [],
     rulesEnabled: true,
+    // Defaults, like every other field of this fixture: a layer with no
+    // rules colours by surface type. A case that needs a mode sets one.
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
   } as Layer;
 }
@@ -261,10 +278,13 @@ function makeHandle(id: string) {
     id,
     setVisible: vi.fn(),
     setLod: vi.fn(),
+    setVisibleObjectIds: vi.fn(),
     setStyle: vi.fn(),
     // The real `CityModelHandle` gained this with the scene themes; the
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(),
     resolveRaycast: vi.fn(() => null as unknown),
@@ -283,15 +303,12 @@ function lastCamera(): GeographicCameraState {
   return call![0] as GeographicCameraState;
 }
 
-function compass(): HTMLElement {
-  return screen.getByRole("button", { name: /reset heading/i });
-}
-
 /** Mount, let the engine come up, and give it the first rendered frame that
  *  makes the camera readable. */
 async function mount(withLayer = false) {
   if (withLayer) {
-    useLayerStore.setState({ layers: [makeLayer("a")], activeLayerId: "a" });
+    useLayerStore.setState({ layers: [makeLayer("a")] });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
     cityPluginInstance.addCityModel.mockImplementation(() => makeHandle("a"));
   }
   const ref = { current: null as CitySceneHandle | null };
@@ -319,14 +336,53 @@ describe("NavaraViewport camera controls", () => {
     suppressSettleThenCommit.mockClear();
     cityPluginInstance.addCityModel.mockReset();
     cityPluginInstance.getHandle.mockReset();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSolarStore.getState().setLatLon(null);
   });
 
   afterEach(() => {
     cleanup();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useViewModeStore.setState({ mode: DEFAULT_VIEW_MODE });
+  });
+
+  it("keeps a restored camera when the first model registers after restore completes", async () => {
+    const { ref } = await mount();
+    cameraThrows = false;
+    const saved = {
+      lng: 4.36,
+      lat: 52.01,
+      height: 160,
+      heading: 123,
+      pitch: -23,
+      roll: 2,
+    };
+    act(() => ref.current!.setCameraState(saved));
+    expect(lastCamera()).toEqual(saved);
+    flyTo.mockClear();
+    suppressSettleThenCommit.mockClear();
+    cityPluginInstance.addCityModel.mockImplementation(() =>
+      makeHandle("restored"),
+    );
+    await act(async () => {
+      useLayerStore.setState({ layers: [makeLayer("restored")] });
+      useWorkspaceStore.setState({ activeLayerId: "restored" });
+    });
+    expect(cityPluginInstance.addCityModel).toHaveBeenCalled();
+    // No queued fit may replace the saved camera once the geometry catches up.
+    expect(suppressSettleThenCommit).not.toHaveBeenCalled();
+    expect(flyTo).not.toHaveBeenCalled();
+    expect(lastCamera()).toEqual(saved);
+    await act(async () => {
+      useLayerStore.setState({ layers: [] });
+    });
+    await act(async () => {
+      useLayerStore.setState({ layers: [makeLayer("new")] });
+    });
+    expect(flyTo).not.toHaveBeenCalled();
+    expect(setCamera).toHaveBeenCalledTimes(2); // restore + new first layer
   });
 
   it("subscribes to the CAMERA's move events, not the view's", async () => {
@@ -338,11 +394,9 @@ describe("NavaraViewport camera controls", () => {
   });
 
   it("stays idle until the engine has rendered a frame it can read", async () => {
-    const { container } = await mount();
-    // `positionGeographic` still throws — no camera to report, so the cluster
-    // is dimmed and every button refuses.
+    await mount();
+    // `positionGeographic` still throws — no camera pose is available yet.
     expect(getCameraPose()).toBeNull();
-    expect(container.querySelector(".camera-controls.is-idle")).not.toBeNull();
 
     cameraThrows = false;
     fireView("postRender");
@@ -352,21 +406,32 @@ describe("NavaraViewport camera controls", () => {
       lat: 52,
       zoom: 15.5,
     });
-    expect(compass().textContent).toContain("045°");
-    expect(container.querySelector(".camera-controls.is-idle")).toBeNull();
+  });
+
+  it("publishes the first layer camera after the initial globe pose was seeded", async () => {
+    await mount();
+    cameraThrows = false;
+    fireView("postRender");
+    cityPluginInstance.addCityModel.mockImplementation(() => makeHandle("a"));
+    await act(async () => {
+      useLayerStore.setState({ layers: [makeLayer("a")] });
+    });
+    const framed = lastCamera();
+    expect(flyTo).not.toHaveBeenCalled();
+    expect(getCameraPose()).toMatchObject({
+      heading: framed.heading,
+      pitch: framed.pitch,
+      lat: framed.lat,
+    });
   });
 
   it("follows a gesture: the dial tracks the camera's own move events", async () => {
     await mount();
     cameraThrows = false;
     fireView("postRender");
-    expect(compass().textContent).toContain("045°");
-
     pose = { heading: 200, pitch: -30, roll: 0 };
     fireCamera("moveend");
-    expect(compass().textContent).toContain("200°");
-    expect(compass().textContent).toContain("S");
-    expect(screen.getByTitle("Tilt below the horizon").textContent).toBe("30°");
+    expect(getCameraPose()).toMatchObject({ heading: 200, pitch: -30 });
   });
 
   it("follows an alignment too, though `setCamera` emits no events", async () => {
@@ -382,17 +447,17 @@ describe("NavaraViewport camera controls", () => {
 
     act(() => ref.current!.alignView("left"));
     const aligned = lastCamera();
-    expect(compass().textContent).toContain(formatBearing(aligned.heading));
+    expect(getCameraPose()).toMatchObject({ heading: aligned.heading });
     // A view from the left is a view towards the east.
     expect(aligned.heading).toBeCloseTo(90, 6);
   });
 
   it("zooms towards what the camera is looking at, inside the settle window", async () => {
-    await mount();
+    const { ref } = await mount();
     cameraThrows = false;
     fireView("postRender");
 
-    act(() => screen.getByRole("button", { name: "Zoom in" }).click());
+    act(() => ref.current!.zoomIn());
 
     expect(suppressSettleThenCommit).toHaveBeenCalled();
     const next = lastCamera();
@@ -403,52 +468,25 @@ describe("NavaraViewport camera controls", () => {
   });
 
   it("zooms out by exactly the inverse step", async () => {
-    await mount();
+    const { ref } = await mount();
     cameraThrows = false;
     fireView("postRender");
 
-    act(() => screen.getByRole("button", { name: "Zoom out" }).click());
+    act(() => ref.current!.zoomOut());
     expect(suppressSettleThenCommit).toHaveBeenCalled();
     expect(lastCamera().height).toBeCloseTo(500 / ZOOM_IN_FACTOR, 6);
   });
 
-  it("tilts by one step per click, in the settle window, and says so", async () => {
-    await mount();
+  it("faces north through the imperative API inside the settle window", async () => {
+    const { ref } = await mount();
     cameraThrows = false;
     fireView("postRender");
 
-    act(() =>
-      screen.getByRole("button", { name: /towards the horizon/i }).click(),
-    );
-    expect(suppressSettleThenCommit).toHaveBeenCalled();
-    expect(lastCamera().pitch).toBeCloseTo(-60 + TILT_STEP_DEG, 6);
-    // The readout follows the commanded pose without waiting for a frame.
-    expect(screen.getByTitle("Tilt below the horizon").textContent).toBe("50°");
-
-    // The engine applies the move it was handed; the next click starts from
-    // there, so the pair is a round trip rather than two clicks off one state.
-    const tilted = lastCamera();
-    pose = { heading: tilted.heading, pitch: tilted.pitch, roll: tilted.roll };
-    position = { lng: tilted.lng, lat: tilted.lat, height: tilted.height };
-    act(() =>
-      screen.getByRole("button", { name: /towards a plan view/i }).click(),
-    );
-    expect(lastCamera().pitch).toBeCloseTo(-60, 6);
-    expect(lastCamera().height).toBeCloseTo(500, 4);
-  });
-
-  it("faces north when the compass is clicked, and reads 000 immediately", async () => {
-    await mount();
-    cameraThrows = false;
-    fireView("postRender");
-    expect(compass().textContent).toContain("045°");
-
-    act(() => compass().click());
+    act(() => ref.current!.resetNorth());
 
     expect(suppressSettleThenCommit).toHaveBeenCalled();
     expect(lastCamera().heading).toBe(0);
-    expect(compass().textContent).toContain("000°");
-    expect(compass().textContent).toContain("N");
+    expect(getCameraPose()).toMatchObject({ heading: 0 });
   });
 
   it("hands the camera back and unsubscribes when the engine goes away", async () => {
@@ -489,7 +527,8 @@ describe("NavaraViewport view modes and flyTo", () => {
     cameraOn.mockClear();
     cameraOff.mockClear();
     suppressSettleThenCommit.mockClear();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useViewModeStore.setState({ mode: DEFAULT_VIEW_MODE });
   });
 
@@ -502,20 +541,24 @@ describe("NavaraViewport view modes and flyTo", () => {
     await mount();
     cameraThrows = false;
     fireView("postRender");
+    expect(cameraOptions[0]?.enableSpin).toBe(true);
     expect(cameraOptions.at(-1)).toEqual({
       enableSpin: true,
+      spinDuration: 1,
       enableTilt: true,
     });
 
     act(() => useViewModeStore.getState().setViewMode("2.5d"));
     expect(cameraOptions.at(-1)).toEqual({
       enableSpin: true,
+      spinDuration: 1,
       enableTilt: false,
     });
 
     act(() => useViewModeStore.getState().setViewMode("2d"));
     expect(cameraOptions.at(-1)).toEqual({
-      enableSpin: false,
+      enableSpin: true,
+      spinDuration: 1,
       enableTilt: false,
     });
   });
@@ -538,8 +581,9 @@ describe("NavaraViewport view modes and flyTo", () => {
       pitch: PLAN_PITCH_DEG,
     });
     // A programmatic move is not a gesture: it goes through the streaming
-    // settle window like every other one.
+    // settle window like every other one — holding it for the whole flight.
     expect(suppressSettleThenCommit).toHaveBeenCalled();
+    expect(settleWrappedMove()).toBe(flightInProgress);
   });
 
   it("tilts to exactly 60 degrees for 2.5D, keeping the heading", async () => {
@@ -566,7 +610,8 @@ describe("NavaraViewport view modes and flyTo", () => {
     expect(flyTo).not.toHaveBeenCalled();
     // The controller flags ARE applied, though — the mode has to be real.
     expect(cameraOptions.at(-1)).toEqual({
-      enableSpin: false,
+      enableSpin: true,
+      spinDuration: 1,
       enableTilt: false,
     });
   });
@@ -582,36 +627,9 @@ describe("NavaraViewport view modes and flyTo", () => {
     expect(flyTo).not.toHaveBeenCalled();
     expect(cameraOptions.at(-1)).toEqual({
       enableSpin: true,
+      spinDuration: 1,
       enableTilt: true,
     });
-  });
-
-  it("clamps the tilt buttons to the mode's angle", async () => {
-    await mount();
-    cameraThrows = false;
-    fireView("postRender");
-    act(() => useViewModeStore.getState().setViewMode("2.5d"));
-    setCamera.mockClear();
-
-    // 2.5D pins the pitch: a tilt click lands back on exactly -60 instead of
-    // stepping away from the mode.
-    act(() =>
-      screen.getByRole("button", { name: /towards the horizon/i }).click(),
-    );
-    expect(lastCamera().pitch).toBe(TILTED_PITCH_DEG);
-  });
-
-  it("mounts the place search IN the scene, wired to the same flyTo", async () => {
-    // It lived in the toolbar until 2026-08-06. The relocation is what this
-    // pins: the search is a canvas overlay like the compass and the scale bar,
-    // and it reaches the engine through the viewport's own `flyTo` rather than
-    // through a prop the app threads down from the chrome.
-    const { container } = await mount();
-    const search = container.querySelector(".address-search");
-    expect(search).not.toBeNull();
-    expect(
-      search!.querySelector("button[aria-label='Search for a place']"),
-    ).not.toBeNull();
   });
 
   it("flies to a searched place, animated, and lets the mode pin the angle", async () => {
@@ -624,7 +642,7 @@ describe("NavaraViewport view modes and flyTo", () => {
       ref.current!.flyTo({ lng: 6.92, lat: 53.33, heightM: 1500 }, 1200),
     );
     expect(flyTo).toHaveBeenCalledTimes(1);
-    const [target, duration] = flyTo.mock.calls[0]!;
+    const [target, options] = flyTo.mock.calls[0]!;
     expect(target).toMatchObject({
       lng: 6.92,
       lat: 53.33,
@@ -632,8 +650,13 @@ describe("NavaraViewport view modes and flyTo", () => {
       heading: 0,
       pitch: -60,
     });
-    expect(duration).toBe(1200);
+    // Navara 0.1.x: the duration travels in a `FlyToOptions` object (with
+    // `maxHeight`/`easing`), no longer as a bare second argument.
+    expect(options).toEqual({ duration: 1200 });
     expect(suppressSettleThenCommit).toHaveBeenCalled();
+    // ...and the flight promise (resolved at the END of the flight) is what
+    // the settle gate holds on: the move RETURNS it, never `void`s it.
+    expect(settleWrappedMove()).toBe(flightInProgress);
   });
 
   it("keeps a searched flight flat while in 2D", async () => {

@@ -1,0 +1,284 @@
+/**
+ * Spec §6.4: the run header a planner can read back, the statements with their
+ * timings, the warnings, the error, and Copy.
+ */
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { RunRecord } from "../../../../src/features/processing/types";
+
+const { LogView } = await import("../../../../src/ui/processing/LogView");
+const { formatRunLog, clockTime } =
+  await import("../../../../src/ui/processing/runFormat");
+const { useProcessingStore } =
+  await import("../../../../src/features/processing/processingStore");
+const { useGeoLayerStore } =
+  await import("../../../../src/features/geoLayers/geoLayerStore");
+const { useLayerStore } =
+  await import("../../../../src/features/layers/layerStore");
+
+const startedAt = new Date(2026, 8, 10, 14, 2, 11).getTime();
+
+function runFixture(patch: Partial<RunRecord> = {}): RunRecord {
+  return {
+    id: "r1",
+    toolId: "height-from-extent",
+    targetLayerId: "L1",
+    targetName: "Delft",
+    targetDerivedFrom: null,
+    sourceLayerId: null,
+    sourceName: null,
+    scope: "all",
+    scopeCount: 1115,
+    featureIds: null,
+    lod: null,
+    params: {},
+    prefix: "extent_",
+    columns: ["extent_height_m", "extent_zmin_m", "extent_zmax_m"],
+    status: "done",
+    phase: null,
+    startedAt,
+    elapsedMs: 412,
+    summary: {
+      line: "1,115 buildings measured · 0.4 s",
+      detail: null,
+      measured: 1115,
+      skipped: [],
+      nonNullByColumn: { extent_height_m: 1115 },
+    },
+    error: null,
+    log: [
+      {
+        label: "Compute extents",
+        sql: 'SELECT "id" FROM layer_1',
+        ms: 412,
+        rows: 1116,
+      },
+    ],
+    warnings: ["ST_3DVolume skipped 37 invalid solids"],
+    undoable: true,
+    stale: false,
+    destination: "layer",
+    newLayerName: null,
+    newLayerId: null,
+    note: null,
+    ...patch,
+  };
+}
+
+afterEach(() => {
+  cleanup();
+  useProcessingStore.getState().resetForTest();
+  useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
+});
+
+describe("LogView", () => {
+  it("lists a warning the run raised twice, without colliding keys", () => {
+    const twice = "ST_3DVolume skipped 37 invalid solids";
+    useProcessingStore
+      .getState()
+      .upsertRun(runFixture({ warnings: [twice, twice] }));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<LogView runId="r1" />);
+    expect(screen.getAllByText(twice)).toHaveLength(2);
+    expect(errors.mock.calls.map((c) => String(c[0])).join("\n")).not.toMatch(
+      /same key/,
+    );
+    errors.mockRestore();
+  });
+
+  it("renders the header, the statement and the warning", () => {
+    useProcessingStore.getState().upsertRun(runFixture());
+    render(<LogView runId="r1" />);
+    expect(screen.getByText("Height from extent")).toBeInTheDocument();
+    expect(screen.getByText("Delft")).toBeInTheDocument();
+    expect(
+      screen.getByText("All · 1,115 buildings (frozen at 14:02:11)"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("extent_height_m, extent_zmin_m, extent_zmax_m"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Compute extents")).toBeInTheDocument();
+    expect(screen.getByText('SELECT "id" FROM layer_1')).toBeInTheDocument();
+    expect(screen.getByText("0.4 s · 1,116 rows")).toBeInTheDocument();
+    expect(
+      screen.getByText("ST_3DVolume skipped 37 invalid solids"),
+    ).toBeInTheDocument();
+  });
+
+  it("copies the whole log as text", async () => {
+    useProcessingStore.getState().upsertRun(runFixture());
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    render(<LogView runId="r1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(formatRunLog(runFixture()));
+  });
+
+  it("goes back to the view that opened it", () => {
+    useProcessingStore.getState().upsertRun(runFixture());
+    useProcessingStore.getState().openTool("height-from-extent");
+    useProcessingStore.getState().openLog("r1");
+    render(<LogView runId="r1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(useProcessingStore.getState().view).toEqual({
+      kind: "tool",
+      toolId: "height-from-extent",
+    });
+  });
+
+  it("names the parent a DERIVED target was cut from — [adapted copy A7]", () => {
+    // §6.4's header is "the reproducible record of the run: a planner can read
+    // it back and rerun by hand", and a derived layer's own name says nothing
+    // about where its rows came from.
+    //
+    // The ancestry comes off the RECORD, and NO layer is seeded here on
+    // purpose: §6.4 is a historical document, and a header that read the live
+    // store would lose the segment the moment the target was removed — for a
+    // run the history deliberately keeps.
+    useProcessingStore.getState().upsertRun(
+      runFixture({
+        targetLayerId: "L1",
+        targetName: "Delft · solids",
+        targetDerivedFrom: {
+          layerId: "L0",
+          layerName: "Delft",
+          runId: "run_0",
+        },
+      }),
+    );
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+    render(<LogView runId="r1" />);
+    expect(
+      screen.getByText("Delft · solids · Derived from Delft"),
+    ).toBeInTheDocument();
+  });
+
+  it("names the parent of a derived VECTOR target too — [adapted copy A7]", () => {
+    // A derived layer is a derived layer: §6.2's sentence does not distinguish
+    // the two kinds, and one capture at Run covers both stores — so Aggregate's
+    // copies are not a second code path here.
+    useProcessingStore.getState().upsertRun(
+      runFixture({
+        targetLayerId: "L1",
+        targetName: "Zones · buildings",
+        targetDerivedFrom: {
+          layerId: "L0",
+          layerName: "Zones",
+          runId: "run_0",
+        },
+      }),
+    );
+    render(<LogView runId="r1" />);
+    expect(
+      screen.getByText("Zones · buildings · Derived from Zones"),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves an ORDINARY target's row as the layer's own name", () => {
+    useLayerStore.setState({
+      layers: [{ id: "L1", name: "Delft", derivedFrom: null } as never],
+    });
+    useProcessingStore
+      .getState()
+      .upsertRun(runFixture({ targetLayerId: "L1" }));
+    render(<LogView runId="r1" />);
+    expect(screen.getByText("Delft")).toBeInTheDocument();
+    expect(screen.queryByText(/Derived from/)).toBeNull();
+  });
+
+  it("says so when the run is gone", () => {
+    render(<LogView runId="missing" />);
+    expect(
+      screen.getByText("This run is no longer in the history"),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("formatRunLog", () => {
+  it("is the header, the statements and the warnings as plain text", () => {
+    const text = formatRunLog(runFixture());
+    expect(text).toContain("Target layer: Delft");
+    expect(text).toContain("Source layer: —");
+    expect(text).toContain(
+      `Scope: All · 1,115 buildings (frozen at ${clockTime(startedAt)})`,
+    );
+    expect(text).toContain(
+      "Output columns: extent_height_m, extent_zmin_m, extent_zmax_m",
+    );
+    expect(text).toContain("Status: done");
+    expect(text).toContain('SELECT "id" FROM layer_1');
+    expect(text).toContain("0.4 s · 1,116 rows");
+    expect(text).toContain("Warning: ST_3DVolume skipped 37 invalid solids");
+  });
+
+  it("carries [adapted copy A7]'s parent into the Copy text too", () => {
+    expect(
+      formatRunLog(
+        runFixture({
+          targetDerivedFrom: {
+            layerId: "L0",
+            layerName: "Delft",
+            runId: "run_0",
+          },
+        }),
+      ),
+    ).toContain("Target layer: Delft · Derived from Delft");
+  });
+
+  it("names the error of a failed run", () => {
+    expect(
+      formatRunLog(runFixture({ status: "failed", error: "Binder Error: x" })),
+    ).toContain("Error: Binder Error: x");
+  });
+});
+
+describe("§6.4's building-geometry row", () => {
+  it("names the proxy the run used", () => {
+    useProcessingStore.getState().upsertRun(
+      runFixture({
+        toolId: "join-by-location",
+        params: { proxy: "rectangle" },
+      }),
+    );
+    render(<LogView runId="r1" />);
+    expect(screen.getByText("Extent rectangle")).toBeInTheDocument();
+    expect(formatRunLog(runFixture({ params: { proxy: "centre" } }))).toContain(
+      "Building geometry: Extent centre",
+    );
+  });
+
+  it("keeps the em dash for a tool that has no proxy", () => {
+    useProcessingStore.getState().upsertRun(runFixture({ params: {} }));
+    render(<LogView runId="r1" />);
+    expect(
+      screen.getByText("Building geometry").closest("div"),
+    ).toHaveTextContent("—");
+  });
+
+  it("ignores a params value that is not one of the three proxies", () => {
+    // The row reads the FROZEN parameters, which a future tool may spell
+    // differently; an unknown value is "no proxy", never a crash.
+    expect(
+      formatRunLog(runFixture({ params: { proxy: "something-else" } })),
+    ).toContain("Building geometry: —");
+  });
+
+  it("prints a structured parameter as JSON, not as [object Object]", () => {
+    // §6.4 is "the reproducible record of the run: a planner can read it back
+    // and rerun by hand" — and Aggregate's parameters are a list of rows.
+    expect(
+      formatRunLog(
+        runFixture({ params: { rows: [{ op: "count", column: null }] } }),
+      ),
+    ).toContain('rows = [{"op":"count","column":null}]');
+    useProcessingStore
+      .getState()
+      .upsertRun(runFixture({ params: { rows: [{ op: "count" }] } }));
+    render(<LogView runId="r1" />);
+    expect(screen.getByText('rows = [{"op":"count"}]')).toBeInTheDocument();
+  });
+});

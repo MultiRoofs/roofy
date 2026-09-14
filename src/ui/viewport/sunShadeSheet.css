@@ -1,0 +1,94 @@
+.sun-shade-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sun-shade-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+}
+
+.sun-shade-datetime {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.sun-shade-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-shade-ticks {
+  display: flex;
+  justify-content: space-between;
+  color: var(--fg-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-shade-ticks i {
+  flex: 1;
+}
+
+.sun-shade-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sun-shade-actions > button:first-child {
+  margin-right: auto;
+  min-width: 4rem;
+}
+
+.sun-shade-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.sun-shade-zone,
+.sun-shade-error {
+  margin: -0.625rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+}
+
+.sun-shade-error {
+  color: var(--danger);
+}
+
+.sun-shade-position {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-shade-body .sun-shade-shadows {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--fg);
+}
+.sun-speed-custom {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+.sun-speed-custom p {
+  grid-column: 1/-1;
+  margin: 0;
+  color: var(--danger);
+}

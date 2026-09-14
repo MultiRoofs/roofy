@@ -19,7 +19,7 @@ import {
 describe("DEFAULT_GEO_LAYER_STYLE", () => {
   it("is the accent, point size and line width the app shipped as constants", () => {
     expect(DEFAULT_GEO_LAYER_STYLE).toEqual({
-      color: "#ff5a3c",
+      color: "#f2683c",
       pointSizePx: 24,
       lineWidthPx: 2,
       fillOpacity: 1,
@@ -29,7 +29,7 @@ describe("DEFAULT_GEO_LAYER_STYLE", () => {
 
 describe("hexColorToNumber", () => {
   it("reads the six-digit form the pickers emit", () => {
-    expect(hexColorToNumber("#ff5a3c")).toBe(0xff5a3c);
+    expect(hexColorToNumber("#f2683c")).toBe(0xf2683c);
     expect(hexColorToNumber("#000000")).toBe(0x000000);
     expect(hexColorToNumber("#FFFFFF")).toBe(0xffffff);
   });
@@ -53,7 +53,7 @@ describe("styleColorNumber", () => {
     expect(
       styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "#00aaff" }),
     ).toBe(0x00aaff);
-    expect(styleColorNumber(DEFAULT_GEO_LAYER_STYLE)).toBe(0xff5a3c);
+    expect(styleColorNumber(DEFAULT_GEO_LAYER_STYLE)).toBe(0xf2683c);
   });
 
   it("falls back to the default accent rather than handing the engine NaN", () => {
@@ -61,9 +61,9 @@ describe("styleColorNumber", () => {
     // the layer black or not at all, which reads as a data problem.
     expect(
       styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "not a colour" }),
-    ).toBe(0xff5a3c);
+    ).toBe(0xf2683c);
     expect(styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "" })).toBe(
-      0xff5a3c,
+      0xf2683c,
     );
   });
 });
@@ -131,5 +131,67 @@ describe("normalizeGeoLayerStyle", () => {
 
   it("accepts the shorthand hex form as a colour", () => {
     expect(normalizeGeoLayerStyle({ color: "#f53" }).color).toBe("#f53");
+  });
+
+  it("carries a valid colorByAttribute through, categories and all", () => {
+    const style = normalizeGeoLayerStyle({
+      colorByAttribute: {
+        attribute: "zone",
+        categories: [
+          { value: "residential", color: "#8fd020" },
+          { value: null, color: "#4b8ef7" },
+        ],
+      },
+    });
+
+    expect(style.colorByAttribute).toEqual({
+      attribute: "zone",
+      categories: [
+        { value: "residential", color: "#8fd020" },
+        { value: null, color: "#4b8ef7" },
+      ],
+    });
+  });
+
+  it("drops the invalid category entries but keeps the valid ones", () => {
+    const style = normalizeGeoLayerStyle({
+      colorByAttribute: {
+        attribute: "zone",
+        categories: [
+          { value: "residential", color: "#8fd020" },
+          { value: "retail", color: "not-a-colour" },
+          { value: 5, color: "#4b8ef7" },
+          "junk",
+        ],
+      },
+    });
+
+    expect(style.colorByAttribute).toEqual({
+      attribute: "zone",
+      categories: [{ value: "residential", color: "#8fd020" }],
+    });
+  });
+
+  it("drops the whole colorByAttribute when its attribute or list is unusable", () => {
+    for (const bad of [
+      { attribute: "", categories: [{ value: "a", color: "#8fd020" }] },
+      { attribute: 5, categories: [{ value: "a", color: "#8fd020" }] },
+      { attribute: "zone", categories: [] },
+      { attribute: "zone", categories: "nope" },
+      { attribute: "zone" },
+      "zone",
+    ]) {
+      expect(normalizeGeoLayerStyle({ colorByAttribute: bad })).toEqual(
+        DEFAULT_GEO_LAYER_STYLE,
+      );
+    }
+  });
+
+  it("leaves colorByAttribute ABSENT when the input never named it", () => {
+    // Absent, not null: an untouched style must not grow a field (the
+    // snapshot schema stays put for exactly this reason).
+    expect(
+      "colorByAttribute" in normalizeGeoLayerStyle({ color: "#00aaff" }),
+    ).toBe(false);
   });
 });

@@ -68,9 +68,15 @@ const SOURCE_ID = "footprints";
 const FILL_LAYER_ID = "footprints-fill";
 const LINE_LAYER_ID = "footprints-line";
 
-/** The catalogue's own accent orange (see `basemaps.ts` for the CARTO tiles
- *  this is drawn over) — legible on both the light and the dark sheet. */
-const FOOTPRINT_COLOR = "#e8973f";
+/** The brand lime (`--brand-primary`), read the same way `basemapStyle` reads
+ *  the sheet: once, at mount. Lime-500 sits on CARTO's dark sheet; on the light
+ *  one it is the darker lime-700 the light theme uses for every tint, since
+ *  lime-500 on a near-white map does not hold contrast. */
+function footprintColor(): string {
+  return document.documentElement.dataset.theme !== "light"
+    ? "#a7e32b"
+    : "#7cb518";
+}
 
 /** CARTO, exactly as `src/scene/basemaps.ts` uses it — same service, same
  *  tile scheme, and the same credit line, which is a licence obligation and
@@ -243,7 +249,7 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
         type: "fill",
         source: SOURCE_ID,
         paint: {
-          "fill-color": FOOTPRINT_COLOR,
+          "fill-color": footprintColor(),
           "fill-opacity": [
             "case",
             ["boolean", ["feature-state", "selected"], false],
@@ -259,7 +265,7 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
         type: "line",
         source: SOURCE_ID,
         paint: {
-          "line-color": FOOTPRINT_COLOR,
+          "line-color": footprintColor(),
           "line-width": [
             "case",
             ["boolean", ["feature-state", "selected"], false],

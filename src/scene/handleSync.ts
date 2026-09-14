@@ -16,7 +16,12 @@
  * `@cityjson/navara-cityjson` barrel never reaches an `@navaramap/*` module
  * (NODE_IMPORT_SAFE = false — see Global Constraints).
  */
-import { compileRuleEvaluator } from "@cityjson/navara-core";
+import {
+  appearanceThemesEqual,
+  compileRuleEvaluator,
+  type AppearanceTheme,
+  type CityModel,
+} from "@cityjson/navara-core";
 import type {
   CityModelHandle,
   EcefRay,
@@ -29,6 +34,10 @@ import type {
 } from "@cityjson/navara-cityjson";
 import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
 import type { Rule } from "../features/rules/types";
+import {
+  effectiveRules,
+  effectiveRulesEnabled,
+} from "../features/rules/colorBy";
 import type { Layer } from "../features/layers/layerStore";
 
 /** What the app remembers about a live static handle, so the next sync can
@@ -41,12 +50,20 @@ export interface LiveLayer {
    *  it on every edit. Recorded (not pushed) on the add path: `registry.add`
    *  passes it to `addCityModel`, so a new handle is built filtered. */
   hiddenTypes: ReadonlyArray<string>;
-  /** The `rules` array last compiled into `handle.setStyle`, by IDENTITY —
-   *  `undefined` means "this handle has never been styled". `layerStore`
-   *  replaces the array on every rule edit, so reference equality is an exact
-   *  "did the rules change?" test and costs nothing per frame. */
+  /** The `visibleObjectIds` set last pushed, by IDENTITY — `layerStore`
+   *  replaces it on every apply. `undefined` means "never pushed", which is
+   *  why the first pass always pushes: unlike `hiddenTypes`, this is NOT an
+   *  `addCityModel` option, so a handle built while a filter is on would
+   *  otherwise draw everything. */
+  visibleObjectIds?: ReadonlySet<string> | null;
+  /** The EFFECTIVE rule array last compiled into `handle.setStyle`, by
+   *  IDENTITY — `undefined` means "this handle has never been styled".
+   *  `effectiveRules` returns one memoised array per (rules identity, colorBy,
+   *  singleColor, unmatchedColor), so reference equality is an exact "did the
+   *  colouring change?" test — covering the unmatched and single colours,
+   *  which are not rule edits at all — and costs nothing per frame. */
   styledRules?: ReadonlyArray<Rule>;
-  /** The `rulesEnabled` flag that went with {@link styledRules}. */
+  /** The `effectiveRulesEnabled` flag that went with {@link styledRules}. */
   styledRulesEnabled?: boolean;
   /** The scene theme's `ThemeStyle` last pushed, by IDENTITY —
    *  `sceneThemePolicy` hands out one frozen object per theme, so reference
@@ -55,6 +72,16 @@ export interface LiveLayer {
    *  (`DEFAULT_THEME_STYLE`). Pushing is NOT cheap: `setThemeStyle` re-extracts
    *  every structural edge of the layer. */
   themeStyle?: ThemeStyle;
+  /** The appearance theme last pushed (or seeded at add time), compared by
+   *  VALUE — the store may hand out a fresh but equal object on restore.
+   *  Unset reads as `null` (plain colours), the mesh's own default. */
+  appearance?: AppearanceTheme | null;
+  /** The `model` last pushed, by IDENTITY. Seeded (not pushed) on the add
+   *  path: `registry.add` builds the mesh from exactly this model.
+   *  `layerStore.mergeAttributes` produces a NEW model whenever a processing
+   *  tool writes computed attributes back, and that identity change is the
+   *  only thing `setModel` is pushed on — it repaints the whole layer. */
+  model?: CityModel;
 }
 
 /**
@@ -83,9 +110,18 @@ export interface CityModelRegistry {
  *   changed. A LoD or hidden-types change is `handle.setLod`/`setHiddenTypes`,
  *   which rebuilds the geometry in place — the handle (and therefore its mesh
  *   registration, style and highlight) is never recreated;
+ * - the visible-object-id set is pushed on the FIRST pass as well as on every
+ *   change, because — unlike `hiddenTypes` — it is NOT an `addCityModel`
+ *   option, so a handle built while a filter is on would otherwise draw
+ *   everything. The first push is free in the common case: it sends `null`,
+ *   which is already the mesh's own state, and the mesh drops it without
+ *   rebuilding. See {@link LiveLayer.visibleObjectIds};
  * - the active scene theme's mesh style is pushed on the same beat, so a layer
  *   added while a theme is on comes up themed rather than photoreal for a
  *   frame. See {@link LiveLayer.themeStyle} for why it is compared by identity.
+ * - a changed `model` IDENTITY is pushed to `handle.setModel` — the write-back
+ *   seam for computed attributes (`layerStore.mergeAttributes`). Seeded at add
+ *   time, so the first pass pushes nothing.
  *
  * `themeStyle` is optional and `undefined` means "this caller has no theme to
  * push" — which is what photoreal amounts to for a handle that has never been
@@ -120,6 +156,10 @@ export function syncLayers(
           lod: layer.selectedLod,
           visible: layer.visible,
           hiddenTypes: layer.hiddenTypes,
+          // Seeded, not pushed: `registry.add` builds the handle already
+          // drawing this theme, from exactly this model.
+          appearance: layer.selectedAppearance,
+          model: layer.model,
         };
         live.set(layer.id, entry);
         handle.setVisible(layer.visible);
@@ -137,9 +177,25 @@ export function syncLayers(
       entry.visible = layer.visible;
       entry.handle.setVisible(layer.visible);
     }
+    // ATTRIBUTES only (`layerStore.mergeAttributes`): the mesh repaints its
+    // rule colours against the new model and keeps its geometry, so this is
+    // safe to push on a mere identity change but must never carry a model
+    // whose GEOMETRY differs — that is a layer replacement, not a merge.
+    if (entry.model !== layer.model) {
+      entry.model = layer.model;
+      entry.handle.setModel(layer.model);
+    }
     if (entry.hiddenTypes !== layer.hiddenTypes) {
       entry.hiddenTypes = layer.hiddenTypes;
       entry.handle.setHiddenTypes(layer.hiddenTypes);
+    }
+    if (entry.visibleObjectIds !== layer.visibleObjectIds) {
+      entry.visibleObjectIds = layer.visibleObjectIds;
+      entry.handle.setVisibleObjectIds(layer.visibleObjectIds);
+    }
+    if (!appearanceThemesEqual(entry.appearance, layer.selectedAppearance)) {
+      entry.appearance = layer.selectedAppearance;
+      entry.handle.setAppearance(layer.selectedAppearance);
     }
     if (themeStyle !== undefined && entry.themeStyle !== themeStyle) {
       entry.themeStyle = themeStyle;
@@ -158,9 +214,12 @@ export function syncLayers(
  * or the fit token, and an added layer must be styled only after its handle
  * exists. Call it right after `syncLayers`.
  *
- * Memoised on `(rules identity, rulesEnabled)`: `handle.setStyle` repaints
- * every vertex of the layer, so pushing on an unrelated store change (another
- * layer's visibility toggle, a selection) would be a full recolor per
+ * What is pushed is `effectiveRules(layer)` — the layer's "Color by" answer,
+ * which is the user's rules plus a trailing unmatched catch-all, one catch-all
+ * for a single colour, or nothing at all for the semantic palette. Memoised on
+ * that array's identity (so on all five of its inputs): `handle.setStyle`
+ * repaints every vertex of the layer, so pushing on an unrelated store change
+ * (another layer's visibility toggle, a selection) would be a full recolor per
  * keystroke.
  *
  * Two deliberate skips:
@@ -169,9 +228,11 @@ export function syncLayers(
  *   streaming handle (Shared Interface Contract -> Streaming styling). Task
  *   C13 gives them `setRules(rules, enabled)` instead;
  * - **the first push when nothing would be painted** — a layer with no rules
- *   (or `rulesEnabled: false`) leaves a freshly added handle untouched
- *   instead of calling `setStyle(null)` on a mesh that is already unstyled.
- *   The equivalent of the old `hasRules ? buildRuleColors(...) : null`.
+ *   (`colorBy: "surface"`) leaves a freshly added handle untouched instead of
+ *   calling `setStyle(null)` on a mesh that is already unstyled. The
+ *   equivalent of the old `hasRules ? buildRuleColors(...) : null`. Note the
+ *   skip is FIRST-PUSH only: switching a styled layer back to "surface" does
+ *   push `setStyle(null)`, which is what clears the rule colours off it.
  */
 export function syncStyles(
   layers: readonly Layer[],
@@ -184,18 +245,22 @@ export function syncStyles(
     // when it does, `styledRules` is undefined on the new entry and the style
     // is pushed then.
     if (!entry) continue;
-    if (
-      entry.styledRules === layer.rules &&
-      entry.styledRulesEnabled === layer.rulesEnabled
-    ) {
+    // The EFFECTIVE list, not `layer.rules`: what a layer paints is the mode's
+    // answer (`features/rules/colorBy.ts`), and the two are always read
+    // together. `effectiveRules` is memoised on all five inputs, so this stays
+    // the same cheap identity test it has always been — and it now also catches
+    // a changed unmatched or single colour, which no rule edit would.
+    const rules = effectiveRules(layer);
+    const enabled = effectiveRulesEnabled(layer);
+    if (entry.styledRules === rules && entry.styledRulesEnabled === enabled) {
       continue;
     }
 
     const neverStyled = entry.styledRules === undefined;
-    entry.styledRules = layer.rules;
-    entry.styledRulesEnabled = layer.rulesEnabled;
+    entry.styledRules = rules;
+    entry.styledRulesEnabled = enabled;
 
-    const evaluator = compileRuleEvaluator(layer.rules, layer.rulesEnabled);
+    const evaluator = compileRuleEvaluator(rules, enabled);
     if (evaluator === null && neverStyled) continue;
     entry.handle.setStyle(evaluator);
   }
@@ -252,6 +317,9 @@ export interface StreamInteractionHandle extends InteractionHandle {
   /** First-level object groups to stream without geometry. Forces a commit,
    *  so every affected cell is refetched — the same cost as a LoD change. */
   setHiddenTypes(types: ReadonlyArray<string>): void;
+  /** Bakes the theme into every resident cell on the next commit (a swap,
+   *  like a hidden-type change); `null` for plain colours. */
+  setAppearance(theme: AppearanceTheme | null): void;
   /** Fires after each cell commit; returns its own unsubscribe. Cells arrive
    *  long after any store change, so this — not a React dependency — is what
    *  tells the app to re-count triangles and re-apply the highlight. */
@@ -289,6 +357,8 @@ export interface StreamSyncMemo {
   /** The scene theme's style last pushed, by identity — see
    *  {@link LiveLayer.themeStyle}. */
   themeStyle?: ThemeStyle;
+  /** Compared by VALUE, like the static path's `LiveLayer.appearance`. */
+  appearance?: AppearanceTheme | null;
 }
 
 /**
@@ -328,10 +398,15 @@ export function syncStreamState(
     memos.set(layer.id, memo);
   }
 
-  if (memo.rules !== layer.rules || memo.rulesEnabled !== layer.rulesEnabled) {
-    memo.rules = layer.rules;
-    memo.rulesEnabled = layer.rulesEnabled;
-    handle.setRules(layer.rules, layer.rulesEnabled);
+  // The same effective list the static path compiles, for the same reason: a
+  // streamed cell and a resident mesh must be coloured from one answer, and the
+  // memo has to notice a colour that is not in any user rule.
+  const rules = effectiveRules(layer);
+  const rulesEnabled = effectiveRulesEnabled(layer);
+  if (memo.rules !== rules || memo.rulesEnabled !== rulesEnabled) {
+    memo.rules = rules;
+    memo.rulesEnabled = rulesEnabled;
+    handle.setRules(rules, rulesEnabled);
   }
   if (
     memo.lodMode !== layer.lodMode ||
@@ -352,6 +427,10 @@ export function syncStreamState(
   if (memo.hiddenTypes !== layer.hiddenTypes) {
     memo.hiddenTypes = layer.hiddenTypes;
     handle.setHiddenTypes(layer.hiddenTypes);
+  }
+  if (!appearanceThemesEqual(memo.appearance, layer.selectedAppearance)) {
+    memo.appearance = layer.selectedAppearance;
+    handle.setAppearance(layer.selectedAppearance);
   }
   // Same optional-means-"no theme to push" contract as `syncLayers`, and the
   // same identity comparison: one frozen style object per theme.
@@ -445,9 +524,10 @@ export function layerHeightOffset(
  * engine pick — `PickedFeature.properties` is null for custom meshes, Task B7
  * review), and finally the engine's own `layerId` field.
  *
- * Unwired in Part B by design: `PICK_PATH = "own-raycast"` (Task B1), so no
- * `view.on("pick")` listener exists and clicks travel the screen-point path
- * above. It is kept — and tested — because it is the contract Task C10b's
+ * Unwired in Part B by design: `PICK_PATH = "own-raycast"` (Task B1), so the
+ * viewport's `view.on("featureClick")` listener never commits a CITY pick (it
+ * only stashes geo picks) and clicks travel the screen-point path above. It is
+ * kept — and tested — because it is the contract Task C10b's
  * streaming router and any future per-triangle-batch-id engine plug into.
  */
 export function resolvePickedFeature(

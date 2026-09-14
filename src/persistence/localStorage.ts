@@ -11,8 +11,8 @@ import type {
   SnapshotSummary,
 } from "./types";
 
-const STORAGE_PREFIX = "urbis:snapshot:";
-const INDEX_KEY = "urbis:snapshot-index";
+const STORAGE_PREFIX = "roofy:snapshot:";
+const INDEX_KEY = "roofy:snapshot-index";
 
 /** Snapshot ID + summary stored in the index. */
 interface IndexEntry {
@@ -58,6 +58,25 @@ export class LocalStorageProjectStateStore implements ProjectStateStore {
     }
 
     return id;
+  }
+
+  async update(id: string, snapshot: ProjectSnapshot): Promise<void> {
+    const key = STORAGE_PREFIX + id;
+    const previous = localStorage.getItem(key);
+    if (previous === null) throw new Error("Workspace no longer exists.");
+    localStorage.setItem(key, JSON.stringify(snapshot));
+    try {
+      writeIndex(
+        readIndex().map((entry) =>
+          entry.id === id
+            ? { id, label: snapshot.label, savedAt: snapshot.savedAt }
+            : entry,
+        ),
+      );
+    } catch (error) {
+      localStorage.setItem(key, previous);
+      throw error;
+    }
   }
 
   async load(id: string): Promise<ProjectSnapshot | null> {

@@ -1,6 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import "./app.css";
+import { ensureDelftLandUse } from "../features/walkthrough/delftLandUse";
+import { Walkthrough } from "../ui/walkthrough/Walkthrough";
+import {
+  walkthroughStore,
+  useWalkthroughStore,
+} from "../features/walkthrough/walkthroughStore";
+import { useDrawStore } from "../features/drawing/drawStore";
+import { DrawOverlay } from "../ui/viewport/DrawOverlay";
+import { saveWorkspace } from "../persistence/saveWorkspace";
+import {
+  captureBasemap,
+  restoreBasemap,
+} from "../features/basemap/basemapPersistence";
+import { WorkspacesPage } from "../ui/workspaces/WorkspacesPage";
+import { captureTablePresentation } from "../features/query/tablePresentation";
+import { useQueryStore } from "../features/query/queryStore";
+import { type TablePresentation } from "../features/query/tablePresentation";
+import {
+  normalizeAttributeOrders,
+  type AttributeOrders,
+} from "../features/attributes/attributeOrder";
+import type { AppearanceTheme, CityModelEncoding } from "@cityjson/navara-core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./brand.css";
+import "./app.css";
+import "./workspace.css";
+import "./flatControls.css";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
 import {
   loadFromUrl,
@@ -21,38 +45,70 @@ import {
   UnsupportedSnapshotVersionError,
 } from "../persistence/types";
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
-import { captureSnapshot } from "../persistence/captureSnapshot";
-import { restoreSnapshot } from "../persistence/restoreSnapshot";
-import { readShareHash, buildShareUrl } from "../persistence/urlShare";
-import type { ShareableViewState } from "../persistence/urlShare";
 import {
-  initDuckDB,
-  getDuckDBStatus,
-  loadModelIntoDuckDB,
-  loadCityModelFromMemory,
-  loadResidentObjectsIntoDuckDB,
-  shouldUseSourceUrlPath,
-} from "../analytics/duckdb";
-import type { DuckDBStatus } from "../analytics/duckdb";
+  captureColorBy,
+  captureSnapshot,
+} from "../persistence/captureSnapshot";
+import { restoreSnapshot } from "../persistence/restoreSnapshot";
+import { derivedNotSavedNote, snapshotLayers } from "./snapshotLayers";
+import { readShareHash, buildShareUrl } from "../persistence/urlShare";
+import type { ColorBy } from "../features/rules/colorBy";
+import type { ShareableViewState } from "../persistence/urlShare";
+import { useDuckDBStatus } from "../insights/useDuckDBStatus";
+import { retryEngine } from "../insights/layerTables";
 import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
 import { NavaraViewport } from "../scene/NavaraViewport";
 import type { CitySceneHandle } from "../scene/NavaraViewport";
 import { useViewModeStore } from "../features/viewMode/viewModeStore";
 import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
-import { suppressAutoFit } from "../scene/autoFitSuppression";
+import {
+  isAutoFitSuppressed,
+  suppressAutoFit,
+} from "../scene/autoFitSuppression";
 import { useSelectionStore } from "../features/selection/selectionStore";
+import type { Selection } from "../domain/selection/types";
 import { useLayerStore } from "../features/layers/layerStore";
-import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
+import {
+  useGeoLayerStore,
+  type GeoLayer,
+} from "../features/geoLayers/geoLayerStore";
+import { refreshedGeoSelection } from "../features/geoLayers/geoSelectionRefresh";
+import { installGeoJsonPreparation } from "../features/geoLayers/geoJsonPreparation";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
+import { installLayerTableLifecycle } from "../features/layers/layerTableLifecycle";
+import {
+  installEngineWatcher,
+  installStaleWatcher,
+  installTargetRemovalWatcher,
+} from "../features/processing/runQueue";
+import { installMapFilterSync } from "../features/query/mapFilterSync";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
+import {
+  addCityLayer,
+  modelTableSource,
+  urlSourceProvider,
+} from "../features/layers/addCityLayer";
 import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet";
 import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
+import { useEscapeClearsSelection } from "../features/selection/useEscapeClearsSelection";
+import {
+  useActiveCityLayer,
+  useActiveLayer,
+  resolveActiveLayer,
+  unifiedLayerOrder,
+  type ActiveLayer,
+} from "../features/workspace/activeLayer";
+import {
+  activateLayer,
+  installWorkspaceInvariants,
+} from "../features/workspace/layerCoordination";
+import { installRuleDraftInvariants } from "../features/rules/ruleDraftStore";
+import { useWorkspaceStore } from "../features/workspace/workspaceStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
-import { getResidentModel } from "../features/streaming/residentModel";
 import {
   closeAllStreamingLayers,
   openStreamingLayer,
@@ -62,23 +118,55 @@ import {
   requireStreamPlugin,
   type StreamPlugin,
 } from "../features/streaming/streamPlugin";
-import { useTheme } from "../features/theme/useTheme";
 import { useSolarStore } from "../features/solar/solarStore";
-import { InspectorPanel } from "../ui/inspector/InspectorPanel";
-import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
-import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
-import { SourcePicker } from "../ui/layers/SourcePicker";
-import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
+import { useSceneSheetStore } from "../features/sceneSheet/sceneSheetStore";
+import { DetailsPanel } from "../ui/details/DetailsPanel";
+import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
+import { exportScene } from "../features/export/browserSceneExport";
+import { LeftPanel } from "../ui/sidebar/LeftPanel";
+import { AddLayerDialog } from "../ui/layers/AddLayerDialog";
+import { addGeoSourceFromFile } from "../features/geoLayers/addGeoSource";
+import {
+  detectSourceFromName,
+  type DetectedSource,
+} from "../features/layers/detectSource";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
-import { ThemeToggleButton } from "../ui/ThemeToggleButton";
+import { ViewerShell } from "../ui/shell/ViewerShell";
+import { installShellListeners, useShellStore } from "../ui/shell/shellStore";
+import { LeftRail } from "../ui/shell/LeftRail";
+import { installThemeListener } from "../features/theme/themeStore";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
-import { AttributePanel } from "../ui/viewport/AttributePanel";
-import { RenderingPanel } from "../ui/viewport/RenderingPanel";
-import { TablePanel } from "../ui/table/TablePanel";
-import type { CityObject } from "../domain/citymodel/types";
+import { FilterChip } from "../ui/viewport/FilterChip";
+import { HoverTooltip } from "../ui/viewport/HoverTooltip";
+import { SceneButtons } from "../ui/viewport/SceneButtons";
+import { SceneSettingsSheet } from "../ui/viewport/SceneSettingsSheet";
+import { SunShadeSheet } from "../ui/viewport/SunShadeSheet";
+import { SelectModeControl } from "../ui/viewport/SelectModeControl";
+import { AddressSearch } from "../ui/viewport/AddressSearch";
+import { ToolsButton } from "../ui/processing/ToolsButton";
+import { ProcessingPanel } from "../ui/processing/ProcessingPanel";
+import { useProcessingStore } from "../features/processing/processingStore";
+import { CameraCluster } from "../ui/viewport/CameraCluster";
+import { selectedGeoJsonBounds } from "../features/geoLayers/geoLayerBounds";
+import { useGeoFeatureVisibilityStore } from "../features/geoLayers/geoFeatureVisibilityStore";
+import type { FlyToTarget } from "../scene/geographicCamera";
+import { DataDrawer } from "../ui/drawer/DataDrawer";
 import type { Rule } from "../features/rules/types";
+
+/**
+ * The loader's encoding override, from what the Add Layer dialog detected.
+ *
+ * Only a CITY source has one: a geospatial layer never reaches this loading
+ * path (the dialog and the landing page write it to `geoLayerStore`
+ * themselves), and an unknown format is never added at all.
+ */
+function cityEncoding(
+  detected: DetectedSource | undefined,
+): CityModelEncoding | undefined {
+  return detected?.kind === "city" ? detected.encoding : undefined;
+}
 
 const defaultStore = new LocalStorageProjectStateStore();
 const SAMPLE_DATA_URL =
@@ -96,6 +184,26 @@ const SAMPLE_DATA_URL =
  * settles.
  */
 export const ENGINE_BOOT_TIMEOUT_MS = 15_000;
+
+/**
+ * What the collapsed-details pill names. One object reads as its id, tail
+ * first (a CityJSON id is a long common prefix and a short distinguishing
+ * suffix); several read as a count; a picked geo feature has no city-object
+ * identity to print.
+ */
+function selectionTitle(
+  selections: ReadonlyArray<Selection>,
+  hasGeoSelection: boolean,
+): string {
+  if (selections.length > 1) return `${selections.length} selected`;
+  const one = selections[0];
+  if (one !== undefined) {
+    return one.objectId.length > 12
+      ? `…${one.objectId.slice(-12)}`
+      : one.objectId;
+  }
+  return hasGeoSelection ? "Feature" : "Selection";
+}
 
 /** How long an explanatory message stays up. Longer than a status toast: these
  *  are full sentences the user has to read, not a "saved" acknowledgement. */
@@ -118,6 +226,16 @@ function streamSourceSnapshot(
  *  reload — no Blob/File is ever persisted. Rendered as a persistent
  *  (not auto-dismissing) prompt, distinct from the transient `toast`, so
  *  the user can re-select the file rather than the layer silently vanishing. */
+/** A snapshot's `appearance` field, or `undefined` for anything malformed. */
+function readAppearanceTheme(raw: unknown): AppearanceTheme | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw !== "object") return undefined;
+  const { kind, name } = raw as { kind?: unknown; name?: unknown };
+  return (kind === "texture" || kind === "material") && typeof name === "string"
+    ? { kind, name }
+    : undefined;
+}
+
 interface UnavailableLayer {
   readonly id: string;
   readonly name: string;
@@ -126,11 +244,16 @@ interface UnavailableLayer {
    *  restores them instead of silently reverting to defaults — see
    *  handleResolveUnavailableLayer. */
   readonly rules: ReadonlyArray<Rule>;
-  readonly rulesEnabled: boolean;
+  readonly colorBy: ColorBy;
+  readonly singleColor: string;
+  readonly unmatchedColor: string;
   readonly visible: boolean;
   readonly lodMode: "auto" | "manual";
   readonly selectedLod: string | null;
   readonly hiddenTypes: readonly string[];
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
+  readonly appearance: AppearanceTheme | null | undefined;
 }
 
 interface AppProps {
@@ -142,33 +265,34 @@ export function App({
   persistenceStore = defaultStore,
   platform = browserPlatform,
 }: AppProps) {
-  const [triangleCount, setTriangleCount] = useState(0);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
-  const [leftSidebarWidth, setLeftSidebarWidth] = useState(240);
+  const drawActive = useDrawStore((state) => state.active);
+  const drawLayerId = useDrawStore((state) => state.layerId);
+  const [pathname, setPathname] = useState(window.location.pathname);
+  const savedIdRef = useRef<string | null>(null);
+  const partialRestoreRef = useRef(false);
+  const navigate = (path: string) => {
+    window.history.pushState(null, "", path);
+    setPathname(path);
+  };
+  useEffect(() => {
+    const sync = () => setPathname(window.location.pathname);
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
   const [unavailableLayers, setUnavailableLayers] = useState<
     ReadonlyArray<UnavailableLayer>
   >([]);
-  const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({
-    state: "uninitialized",
-  });
-  const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
-  const [duckdbTableLoaded, setDuckdbTableLoaded] = useState(false);
-  const [tableOpen, setTableOpen] = useState(false);
-  const [tableHeight, setTableHeight] = useState(250);
+  const duckdbStatus = useDuckDBStatus();
   const [toast, setToast] = useState<string | null>(null);
-  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
-  /**
-   * The LANDING page's catalog dialog — the viewer shell reaches the same
-   * browser through the Add Layer dialog's "Catalog" tab instead.
-   *
-   * INVARIANT, enforced by an effect below rather than by this declaration:
-   * false whenever the viewer shell is up. `App` is not remounted across the
-   * two branches, so nothing about the flag's lifetime is implied by the
-   * branch that renders it — it is plain state that outlives its own UI.
-   */
-  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [viewportAttribution, setViewportAttribution] = useState<
+    readonly string[]
+  >([]);
+  const [addLayerOpen, setAddLayerOpen] = useState(false);
+  const tourIndex = useWalkthroughStore((state) => state.index);
+  const tourSeen = useWalkthroughStore((state) => state.seen);
+  const tourPhase = useWalkthroughStore((state) => state.phase);
+  const [restoringWorkspace, setRestoringWorkspace] = useState(false);
   /** The minted share link currently on display, or null. Non-null IS the
    *  dialog's open state: the URL is a snapshot of the view at the moment
    *  Share was clicked, so a new click mints a new one rather than reopening
@@ -179,6 +303,9 @@ export function App({
     readonly [number, number, number] | null
   >(null);
   const sceneRef = useRef<CitySceneHandle | null>(null);
+  // Retain the viewpoint while a local-only workspace waits for its files.
+  const pendingRestoredCameraRef = useRef<GeographicCamera | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   /**
    * A `.fcb` open is in flight and needs the 3D engine, so the viewer shell
    * (and with it `NavaraViewport`, and with that the FlatCityBuf plugin) must
@@ -197,12 +324,16 @@ export function App({
    *  the first one to finish unmount the engine under the second. */
   const bootHoldsRef = useRef(0);
 
-  const { theme, toggleTheme } = useTheme();
-
   // A file dropped anywhere OTHER than a drop zone must do nothing — the
   // browser's default is to navigate to it, which would throw the whole
   // session away. See useFileDropGuard.
   useFileDropGuard();
+
+  // Escape drops the selection. Installed at the top level rather than inside
+  // the viewer branch — a hook cannot be conditional — which costs nothing on
+  // the landing page, where there is no selection to clear. See the hook for
+  // who else listens for Escape and in what order.
+  useEscapeClearsSelection();
 
   /** The dismissal timer of the toast currently on screen, so a NEW message
    *  cannot be wiped by the OLD one's expiry — an 8 s explanation raised one
@@ -234,27 +365,65 @@ export function App({
 
   // Layer store
   const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
-  const hasLayers = layers.length > 0;
+  /** The workspace's one active layer, when it is a city model. The shell's
+   *  streaming readout and its save label are CITY facts, so a geo layer being
+   *  active reads here as "none" rather than as some other layer's. */
+  const activeCityLayer = useActiveCityLayer();
+  const activeLayer = useActiveLayer();
+  const activeCityLayerId = activeCityLayer?.id ?? null;
+  /** The user's geospatial overlays. Read HERE, above the branch, because they
+   *  are half of what a workspace is (Task 22, M12.2) — the selection panels
+   *  below read the same store again for their own reasons. */
+  const geoLayers = useGeoLayerStore((s) => s.layers);
+  /**
+   * Anything at all in the workspace, of EITHER kind.
+   *
+   * This used to be `layers.length > 0` — city models only — which made a
+   * GeoJSON added from the landing page write a row into a store nobody could
+   * see: the page stayed on the drop zone, and the overlay only appeared once
+   * a city model was opened beside it. A workspace with geospatial content in
+   * it is a workspace, and it belongs in the viewer.
+   */
+  const hasWorkspace = layers.length > 0 || geoLayers.length > 0;
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const attribution = viewport?.querySelector(".attribution-overlay");
+    if (viewport === null || !(attribution instanceof HTMLElement)) return;
+    const update = () =>
+      viewport.style.setProperty(
+        "--attribution-height",
+        `${attribution.offsetHeight}px`,
+      );
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(attribution);
+    return () => {
+      observer.disconnect();
+      viewport.style.removeProperty("--attribution-height");
+    };
+  }, [engineBooting, hasWorkspace]);
 
   /**
-   * Close the catalog on ANY transition into the viewer shell — the one place
-   * that enforces "`catalogOpen` is false whenever the shell is up".
-   *
-   * Resetting on the way OUT instead does not work: there is more than one way
-   * back to the landing page (the toolbar's Close file, and removing the last
-   * layer from the sidebar, which calls `removeLayer` directly), and fixing
-   * them one at a time is how the second one got missed. This condition is the
-   * same one the render branch below uses, `engineBooting` included, so a
-   * `.fcb` open that boots the shell and then FAILS also returns to a landing
-   * page with no modal over it.
-   *
-   * Nothing user-visible changes: the landing branch — dialog and all — is
-   * already unmounted by the time this runs.
+   * How many rows the workspace held when the fit effect below last ran, so it
+   * can see the 0 → 1 edge rather than a level. Declared up here because
+   * `handleRestore` marks it too — a restore's rows are not the first content
+   * of a scene.
+   */
+  const previousWorkspaceSizeRef = useRef(0);
+
+  /**
+   * A retained empty viewer is still a new workspace. It must not retain
+   * panels that describe the layer which was just removed, whether that was
+   * through the header's "New workspace" action or the final row's menu.
    */
   useEffect(() => {
-    if (hasLayers || engineBooting) setCatalogOpen(false);
-  }, [hasLayers, engineBooting]);
+    if (hasWorkspace || engineBooting) return;
+    useShellStore.getState().closeDrawer();
+    useSceneSheetStore.getState().setSheet(null);
+    useSelectionStore.getState().clear();
+    activateLayer(null);
+  }, [hasWorkspace, engineBooting]);
 
   // Active layer's streaming state, if any. Selected as individual
   // primitive fields (not the whole `StreamState` object) so this component
@@ -262,14 +431,14 @@ export function App({
   // doc comment on why a commit only ever touches `streams`, never
   // `layers`, and why consumers that DO need to react to one select
   // narrowly rather than subscribing to the whole entry.
-  const activeStreamVersion = useStreamStore((s) =>
-    activeLayerId ? s.streams[activeLayerId]?.version : undefined,
-  );
   const activeStreamStatus = useStreamStore((s) =>
-    activeLayerId ? s.streams[activeLayerId]?.status : undefined,
+    activeCityLayerId ? s.streams[activeCityLayerId]?.status : undefined,
+  );
+  const activeStream = useStreamStore((s) =>
+    activeCityLayerId ? s.streams[activeCityLayerId] : undefined,
   );
   const activeStreamMessage = useStreamStore((s) =>
-    activeLayerId ? s.streams[activeLayerId]?.message : undefined,
+    activeCityLayerId ? s.streams[activeCityLayerId]?.message : undefined,
   );
 
   /** Static layers' parsed objects PLUS streaming layers' resident features —
@@ -414,6 +583,40 @@ export function App({
   );
 
   /**
+   * The scene handle, once ITS engine has come up — or `null` if none did.
+   *
+   * Not simply `await scene.ready`, and this is the whole of Task 22's live
+   * defect. `NavaraViewport`'s lifecycle cleanup SETTLES the ready gate its
+   * mount owned — rejecting it, since the engine had not finished starting —
+   * and re-arms a fresh one for the mount that follows. StrictMode does
+   * exactly that to every newly mounted viewport, immediately. An effect that
+   * runs in the very commit that mounts the viewport therefore reads the
+   * handle, awaits the gate that is a moment away from being thrown out, and
+   * watches its work disappear into a catch: in the browser the viewer came up
+   * with the geo row active and the camera never moved.
+   *
+   * So a rejected gate is read for what it means — "that mount is gone" — and
+   * the wait is made again against whichever viewport is mounted NOW, whose
+   * `ready` getter answers with the live gate. Bounded at one retry: an engine
+   * that genuinely cannot start rejects both times and gives up quietly,
+   * rather than spinning against a viewport that will never be ready.
+   */
+  const awaitSceneReady =
+    useCallback(async (): Promise<CitySceneHandle | null> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const scene = sceneRef.current ?? (await awaitSceneHandle());
+        try {
+          await scene.ready;
+          return scene;
+        } catch {
+          // No viewport left at all: nothing to wait for a second time.
+          if (sceneRef.current === null) return null;
+        }
+      }
+      return null;
+    }, [awaitSceneHandle]);
+
+  /**
    * Run a layer open with the 3D engine mounted, when the source needs it.
    *
    * `.fcb` only: streaming is the one format whose layer cannot exist before
@@ -427,8 +630,18 @@ export function App({
    * layer keeps the shell mounted on its own.
    */
   const withEngineBooting = useCallback(
-    async <T,>(source: string, open: () => Promise<T>): Promise<T> => {
-      if (detectEncoding(source) !== "flatcitybuf") return await open();
+    async <T,>(
+      source: string,
+      open: () => Promise<T>,
+      encoding?: CityModelEncoding,
+    ): Promise<T> => {
+      // The OVERRIDE first, when the caller has one: the Add Layer dialog lets
+      // a user correct a `.json` that is really FlatCityBuf, and a boot gate
+      // that re-derived the format from the name would leave that add waiting
+      // for an engine nobody started.
+      if ((encoding ?? detectEncoding(source)) !== "flatcitybuf") {
+        return await open();
+      }
       bootHoldsRef.current += 1;
       setEngineBooting(true);
       try {
@@ -450,37 +663,26 @@ export function App({
     error: loadError,
     lastError,
     clearError,
+    pending,
+    failed,
+    dismissFailed,
   } = useLayerFileLoader({ resolveStreamPlugin });
 
-  /** The message already put on screen, so a re-render cannot raise the same
-   *  toast twice — and so a REPEAT of the same failure still does (every entry
-   *  point calls `clearError()` first, which resets this through the `null`
-   *  branch below). */
-  const toastedLoadErrorRef = useRef<string | null>(null);
-
-  /**
-   * A failed load has ONE surface, and the viewer shell is not the landing
-   * page.
+  /*
+   * A failed load has ONE surface, and since 12.2 it is a ROW.
    *
-   * `loadError` is rendered inline as `.error-message` — in the landing
-   * branch only. Once the shell is up, an add that fails has nowhere to be
-   * seen: the Add Layer dialog closes on the way out and takes the only
-   * remaining surface with it, so a folder with no CityParquet object tables,
-   * or a 404, simply did nothing. Toast it there, exactly as a layer the
-   * ENGINE refuses already is (`handleLayerError`), and leave the landing
-   * page's inline paragraph as the only report on that side — two reports of
-   * one failure is its own bug.
+   * `useLayerFileLoader` books every add: a failure leaves a `failed` entry
+   * carrying its own sentence and its own retry, and `LeftPanel` renders it
+   * as an error row in the layer list, exactly where the layer would have
+   * appeared. That is why there is no toast here any more — this used to
+   * raise one inside the viewer, because the Add Layer dialog closed on the
+   * way out and took the only other surface with it. Two reports of one
+   * failure is its own bug, and the row is the better of the two: it names
+   * the source, it does not time out, and it can be retried.
+   *
+   * The landing page has no list to put a row in, so `loadError` is still
+   * rendered inline there as `.error-message` — its one report on that side.
    */
-  useEffect(() => {
-    if (loadError === null) {
-      toastedLoadErrorRef.current = null;
-      return;
-    }
-    if (!hasLayers && !engineBooting) return;
-    if (toastedLoadErrorRef.current === loadError) return;
-    toastedLoadErrorRef.current = loadError;
-    showToast(loadError, EXPLANATION_TOAST_MS);
-  }, [loadError, hasLayers, engineBooting, showToast]);
 
   const selections = useSelectionStore((s) => s.selections);
   const mode = useSelectionStore((s) => s.mode);
@@ -490,17 +692,27 @@ export function App({
   const clearSelection = useSelectionStore((s) => s.clear);
   const geoSelection = useSelectionStore((s) => s.geoSelection);
   const selectGeoFeature = useSelectionStore((s) => s.selectGeoFeature);
-  const geoLayers = useGeoLayerStore((s) => s.layers);
-  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
+  /** Spec §4.2: with the toolbox open the right panel is the toolbox, and the
+   *  details become one of its tabs rather than the whole panel. */
+  const toolboxOpen = useProcessingStore((s) => s.open);
 
-  // The inspector follows viewport picks on both sides: a picked geo feature
-  // selects its layer; a picked city object hands the panel back.
-  useEffect(() => {
-    if (geoSelection) setActiveGeoLayer(geoSelection.geoLayerId);
-  }, [geoSelection, setActiveGeoLayer]);
-  useEffect(() => {
-    if (selections.length > 0) setActiveGeoLayer(null);
-  }, [selections, setActiveGeoLayer]);
+  // The shell's layout state (what `inspectorOpen`, `leftSidebarCollapsed`,
+  // `leftSidebarWidth`, `tableOpen` and `tableHeight` used to be). `App` reads
+  // only the two facts its own render forks on: which component the left
+  // column gets and whether the drawer is mounted. The details panel's own
+  // collapse (`rightCollapsed`) is read and written entirely by `ViewerShell`
+  // and `WorkspaceHeader` — closing the panel itself clears the selection
+  // instead (see the `right` prop's comment below). The SIZES belong to
+  // `ViewerShell` and to the panels that own their own edges — `LeftPanel`
+  // writes `leftWidth` itself, which is why there is no `onWidthChange` to
+  // thread through any more.
+  const leftCollapsed = useShellStore((s) => s.leftCollapsed);
+  const drawerOpen = useShellStore((s) => s.drawerOpen);
+
+  // The two effects that used to steer the geo store's own active id from the
+  // selection are gone: `installWorkspaceInvariants` holds that rule now (a
+  // pick activates the layer it landed on, whichever kind it is), for every
+  // way a selection can be made rather than only the ones this shell saw.
 
   /** The `config` the selected geo layer had when the feature was picked.
    *  Captured rather than derived because the comparison below has to be
@@ -517,22 +729,51 @@ export function App({
   }, [geoSelection]);
 
   /**
-   * Drop a geo selection whose subject can no longer be trusted.
+   * Drop a geo selection whose subject can no longer be trusted — and REFRESH
+   * one whose properties have merely changed.
    *
-   * Two ways that happens: the layer is REMOVED, or its `config` identity
-   * changed (a re-link or any source replacement). The second matters because
+   * The layer being REMOVED, or its document replaced, still drops it:
    * `geoLayerSync` rebuilds the engine pair on config identity and batch ids
-   * are minted globally — the retained `batchId` would then name a different
-   * feature entirely, and the panel would show one feature's properties under
-   * another's highlight.
+   * are minted globally, so the retained `batchId` would name a different
+   * feature entirely. But §7.6's run replaces the config over the SAME
+   * document, and §8 says the picked feature then shows its computed values —
+   * so the rule is `refreshedGeoSelection`'s, not this effect's.
    */
   useEffect(() => {
     if (geoSelection === null) return;
     const layer = geoLayers.find((l) => l.id === geoSelection.geoLayerId);
-    if (layer === undefined || layer.config !== geoSelectionConfigRef.current) {
+    const next = refreshedGeoSelection({
+      selection: geoSelection,
+      layer,
+      previousConfig: geoSelectionConfigRef.current,
+    });
+    if (next === null) {
       selectGeoFeature(null);
+      return;
     }
+    if (next === geoSelection) return;
+    // A run's results (or its Undo) landed on the picked feature: same feature,
+    // new properties, and the ref moves with it so this does not re-fire.
+    geoSelectionConfigRef.current = layer?.config ?? null;
+    selectGeoFeature(next);
   }, [geoLayers, geoSelection, selectGeoFeature]);
+
+  const geoVisibleIds = useGeoFeatureVisibilityStore((s) => s.visible);
+  useEffect(() => {
+    if (geoSelection?.stableFeatureId === undefined) return;
+    const allowed = geoVisibleIds[geoSelection.geoLayerId];
+    if (
+      allowed !== null &&
+      allowed !== undefined &&
+      !allowed.has(geoSelection.stableFeatureId)
+    ) {
+      selectGeoFeature(null);
+      showToast(
+        "Selected vector feature is excluded by the filter.",
+        EXPLANATION_TOAST_MS,
+      );
+    }
+  }, [geoSelection, geoVisibleIds, selectGeoFeature, showToast]);
 
   const refreshSnapshots = useCallback(async () => {
     const list = await persistenceStore.list();
@@ -543,104 +784,135 @@ export function App({
     void refreshSnapshots();
   }, [refreshSnapshots]);
 
-  // Initialize DuckDB-wasm on mount
+  /**
+   * The workspace's coordination rules, installed ONCE.
+   *
+   * Declared above every effect that can populate a store — the share-hash
+   * read, the DuckDB boot's table lifecycle — because effects run in body
+   * order: a first layer that landed before this ran would never be activated,
+   * and a restored selection would have nothing holding it to its layer.
+   */
+  useEffect(() => installWorkspaceInvariants(), []);
+
+  /**
+   * Drops a layer's unsaved rule-editor draft the moment that layer leaves
+   * `useLayerStore` — same installed-once shape as the invariants above.
+   * Without it a removed layer's draft would sit in `useRuleDraftStore`
+   * forever: unreachable (its `layerId` never renders again), but never
+   * freed. See `features/rules/ruleDraftStore.ts`.
+   */
+  useEffect(() => installRuleDraftInvariants(), []);
+
+  /**
+   * Spec §6.1: removing a layer while a run of its own is queued or executing
+   * fails that run with "Layer removed" instead of letting it compute against
+   * — and write onto — a layer the user has thrown away. Same installed-once
+   * shape as the invariants above.
+   */
+  useEffect(() => installTargetRemovalWatcher(), []);
+  /** Spec §6.1: a DuckDB worker that dies fails every run that was counting on
+   *  it, and takes every Undo with it. Same single-live-installer shape. */
+  useEffect(() => installEngineWatcher(), []);
+  useEffect(() => installGeoJsonPreparation(), []);
+
+  useEffect(
+    () =>
+      installMapFilterSync((count) =>
+        showToast(
+          `${count} selected ${count === 1 ? "building was" : "buildings were"} excluded by the filter`,
+          EXPLANATION_TOAST_MS,
+        ),
+      ),
+    [showToast],
+  );
+
+  /**
+   * Spec §6.2: a finished run's first line is repeated as a toast, so the
+   * acknowledgement reaches a user who has already moved on from the tool
+   * form (or closed the toolbox).
+   *
+   * It keys off `noticeSeq`, not `notice`: two identical runs push the same
+   * text, and a plain equality check would silently swallow the second.
+   * `subscribe` returns its own unsubscribe, which is the cleanup.
+   */
+  useEffect(
+    () =>
+      useProcessingStore.subscribe((s, prev) => {
+        if (s.noticeSeq !== prev.noticeSeq && s.notice !== null)
+          showToast(s.notice, STATUS_TOAST_MS);
+      }),
+    [showToast],
+  );
+
+  /**
+   * The interface appearance, installed ONCE — the same shape as the
+   * invariants above, and for the same reason: it is a subscription to
+   * something outside React (the OS's colour-scheme query), not per-render
+   * state.
+   *
+   * It stamps `<html data-theme>` immediately and re-stamps whenever the OS
+   * flips while the preference is "System". Nothing else may write that
+   * attribute.
+   */
+  useEffect(() => installThemeListener(), []);
+
+  /**
+   * Keeps the drawer height and the two side panels inside their own
+   * bounds across a window resize — a maximize/restore, a monitor change,
+   * DevTools opening — the same shape as the two installs above: a
+   * subscription to something outside React, installed once.
+   */
+  useEffect(() => installShellListeners(), []);
+
+  // Initialize DuckDB-wasm on mount, and subscribe the layer-table registry to
+  // the stores. One install, torn down with the app: the subscriptions are
+  // module-level machinery, not per-render state.
   useEffect(() => {
-    void initDuckDB().then(() => {
-      setDuckdbStatus(getDuckDBStatus());
-    });
+    // `retryEngine`, not `initDuckDB`: it awaits the same (memoised) boot and
+    // then rebuilds any table that was refused while the engine was still
+    // coming up. A layer added during the boot — a restored snapshot, a share
+    // link, a quick drop — must not need the user to notice and re-add it.
+    //
+    // Nothing sets the status here any more: `doInit` publishes `initializing`
+    // synchronously on the first call and `ready`/`failed` when it lands, and
+    // `useDuckDBStatus` renders each of them. The old optimistic
+    // `setDuckdbStatus({ state: "initializing" })` was also WRONG on the Retry
+    // path — `initDuckDB` does not re-run a boot that already succeeded, so a
+    // Retry aimed at a failed TABLE made a healthy engine read "Loading".
+    void retryEngine();
+    const stopLifecycle = installLayerTableLifecycle();
+    // A rebuilt table has none of a run's computed columns, so the processing
+    // panel's result cards have to hear about it (spec §7). Installed next to
+    // the lifecycle because it watches the same store.
+    const stopStaleWatcher = installStaleWatcher();
+    return () => {
+      stopLifecycle();
+      stopStaleWatcher();
+    };
   }, []);
 
-  // Load active layer's model into DuckDB (URL via extension, file via
-  // in-memory, streaming via resident cells — see shouldUseSourceUrlPath).
-  useEffect(() => {
-    let cancelled = false;
-
-    if (duckdbStatus.state !== "ready") return;
-
-    // Reset synchronously so table doesn't show stale data during load
-    setDuckdbModelLoaded(false);
-    setDuckdbTableLoaded(false);
-
-    const activeLayer = layers.find((l) => l.id === activeLayerId);
-    if (!activeLayer) return;
-
-    const extensionLoaded =
-      "extensionLoaded" in duckdbStatus && duckdbStatus.extensionLoaded;
-
-    void (async () => {
-      let loaded = false;
-
-      if (activeLayer.isStreaming) {
-        // shouldUseSourceUrlPath refuses the extension path here — it would
-        // open a second, complete read of the remote file just to populate
-        // `city_objects`, exactly what viewport streaming exists to avoid.
-        // Feed the table from whatever cells are actually resident instead,
-        // so Stats/Table only ever report what the UI itself claims to show.
-        const resident = getResidentModel(
-          activeLayer.id,
-          activeStreamVersion ?? 0,
-        );
-        loaded = await loadResidentObjectsIntoDuckDB(
-          Object.values(resident.objects),
-        );
-      } else {
-        // Try extension reader for URL models. CityGML and CityParquet are not
-        // readable by the DuckDB cityjson extension, so they skip straight to
-        // the in-memory fallback below.
-        if (
-          shouldUseSourceUrlPath(
-            activeLayer.modelRef,
-            activeLayer.isStreaming,
-          ) &&
-          extensionLoaded
-        ) {
-          const encoding = detectEncoding(activeLayer.modelRef.url);
-          // The MODEL is the authority on a CityParquet layer, not its URL: a
-          // `gs://` bucket or an https package directory has no extension, so
-          // `detectEncoding` calls it "cityjson" and `read_cityjson` would be
-          // handed a URL it can never open — a wasted query and a console
-          // error on every selection. `sourceEncoding` cannot drift from
-          // whatever the URL classifier decided at load time. The extension
-          // tests stay because they are what NARROWS `encoding` to the union
-          // `loadModelIntoDuckDB` accepts.
-          if (
-            activeLayer.model.sourceEncoding !== "cityparquet" &&
-            encoding !== "citygml" &&
-            encoding !== "cityparquet"
-          ) {
-            loaded = await loadModelIntoDuckDB(
-              activeLayer.modelRef.url,
-              encoding,
-            );
-          }
-        }
-
-        // Fall back to in-memory loading (works for file and URL models)
-        if (!loaded) {
-          loaded = await loadCityModelFromMemory(activeLayer.model);
-        }
-      }
-
-      if (!cancelled) {
-        setDuckdbModelLoaded(
-          !activeLayer.isStreaming &&
-            activeLayer.modelRef.type === "url" &&
-            extensionLoaded &&
-            loaded,
-        );
-        setDuckdbTableLoaded(loaded);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [duckdbStatus, activeLayerId, layers, activeStreamVersion]);
+  /**
+   * Retry a failed DuckDB init.
+   *
+   * `retryEngine` awaits `initDuckDB` — which clears its memo on failure, so
+   * this really re-runs rather than handing back the rejected-once promise —
+   * and then REBUILDS every table that failed only because the engine was not
+   * running. A Retry that fixed the status but left every table still reading
+   * "The analytics engine is not running" would look like it had done nothing.
+   */
+  const handleRetryDuckDB = useCallback(() => {
+    void retryEngine();
+  }, []);
 
   const handleFile = useCallback(
-    async (file: File) => {
+    async (file: File, override?: DetectedSource) => {
       clearError();
-      await withEngineBooting(file.name, () => addLayerFromFile(file));
+      const encoding = cityEncoding(override);
+      await withEngineBooting(
+        file.name,
+        () => addLayerFromFile(file, encoding ? { encoding } : undefined),
+        encoding,
+      );
     },
     [addLayerFromFile, clearError, withEngineBooting],
   );
@@ -653,9 +925,10 @@ export function App({
    * `loadError`, exactly as for {@link handleFile}.
    */
   const handleFiles = useCallback(
-    async (files: File[]) => {
+    async (files: File[], override?: DetectedSource) => {
       clearError();
-      await addLayerFromFiles(files);
+      const encoding = cityEncoding(override);
+      await addLayerFromFiles(files, encoding ? { encoding } : undefined);
     },
     [addLayerFromFiles, clearError],
   );
@@ -669,15 +942,28 @@ export function App({
    * Layer dialog, where `loadError` is rendered nowhere at all.
    */
   const handleUrl = useCallback(
-    async (url: string): Promise<boolean> => {
+    async (url: string, override?: DetectedSource): Promise<boolean> => {
       clearError();
-      const layerId = await withEngineBooting(url, () => addLayerFromUrl(url));
+      const encoding = cityEncoding(override);
+      const layerId = await withEngineBooting(
+        url,
+        () => addLayerFromUrl(url, encoding ? { encoding } : undefined),
+        encoding,
+      );
       return layerId !== null;
     },
     [addLayerFromUrl, clearError, withEngineBooting],
   );
 
-  const handleSave = useCallback(async () => {
+  /**
+   * Save, answering whether a snapshot was really written.
+   *
+   * The boolean is not for the caller's convenience: the header's
+   * "Saved · just now" note hangs off it, and a note shown on a click that
+   * hit the transiently-null camera (or a store that refused) would be a
+   * confirmation of something that did not happen.
+   */
+  const handleSave = useCallback(async (): Promise<boolean> => {
     const cameraState = sceneRef.current?.getCameraState();
     // Null is a REAL state, not a defensive check: the engine's
     // `positionGeographic` throws until its first rendered frame (Task B11a),
@@ -689,64 +975,108 @@ export function App({
         "The 3D view is still starting — try saving again in a moment.",
         STATUS_TOAST_MS,
       );
-      return;
+      return false;
     }
 
-    const { datetime } = useSolarStore.getState();
+    const { datetime, timeZone } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
     const { mode: viewMode } = useViewModeStore.getState();
     const { theme: sceneTheme } = useSceneThemeStore.getState();
 
-    const activeLayer =
-      allLayers.find((l) => l.id === activeLayerId) ?? allLayers[0];
-    const label = activeLayer?.name ?? "Untitled";
+    const allGeoLayers = useGeoLayerStore.getState().layers;
+    // The WORKSPACE names its own snapshot — it has a name, the user can
+    // edit it in the header, and the list of saved workspaces is the one
+    // place that name is read back. It used to be the active layer's name,
+    // which meant two workspaces built on the same file were indistinguishable
+    // in that list and renaming the workspace changed nothing about it.
+    const label = useWorkspaceStore.getState().name;
+    // §8: a derived layer is omitted from the snapshot ENTIRELY, and the
+    // active-layer reference is a per-kind INDEX into the arrays written
+    // beside it (see `ProjectSnapshot.activeLayer`) — so the filter and the
+    // index are one decision, made in one pure place. `undefined` — nothing
+    // active, an id that resolves to neither list, or an active layer that is
+    // itself derived — omits the field, and a restore then falls back to the
+    // first layer.
+    const selection = snapshotLayers({
+      layers: allLayers,
+      geoLayers: allGeoLayers,
+      activeLayerId: useWorkspaceStore.getState().activeLayerId,
+    });
+    const activeLayerRef = selection.activeLayer;
 
     const snapshot = captureSnapshot({
+      basemap: captureBasemap(),
       label,
-      layers: allLayers.map((l) => ({
+      layers: selection.layers.map((l) => ({
         name: l.name,
         modelRef: l.modelRef,
         rules: [...l.rules],
-        rulesEnabled: l.rulesEnabled,
+        // The mode and its two colours, with `rulesEnabled` derived from the
+        // mode — one place decides what a layer's colouring looks like on disk.
+        ...captureColorBy(l),
         visible: l.visible,
         selectedLod: l.selectedLod,
         lodMode: l.lodMode,
         hiddenTypes: [...l.hiddenTypes],
+        attributeOrders: l.attributeOrders,
+        tablePresentation: captureTablePresentation(
+          useQueryStore.getState().queries[l.id],
+        ),
+        appearance: l.selectedAppearance,
         ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
       })),
       // Stripped of anything that cannot survive a reload — an inline GeoJSON
       // document above all; see `geoLayerSnapshot`.
-      geoLayers: useGeoLayerStore.getState().layers.map(geoLayerSnapshot),
+      geoLayers: selection.geoLayers.map(geoLayerSnapshot),
       camera: cameraState,
       datetime,
+      timeZone,
       pickMode,
       viewMode,
       sceneTheme,
+      activeLayer: activeLayerRef,
     });
 
     try {
-      await persistenceStore.save(snapshot);
+      savedIdRef.current = await saveWorkspace(
+        persistenceStore,
+        savedIdRef.current,
+        snapshot,
+      );
       await refreshSnapshots();
       // Success used to be silent, which is indistinguishable from a button
       // that does nothing. The message also has a fact to teach — saved
       // workspaces are listed on the landing page on the next visit, and
       // nobody discovers that by guessing — so it gets the explanatory
       // duration, not the 3 s status one.
+      // §8's extra sentence, appended rather than replacing: the save DID
+      // happen, and the note is about what it could not carry.
+      const note = derivedNotSavedNote(selection.derivedCount);
+      const saved = partialRestoreRef.current
+        ? "Loaded layers saved as a new workspace. The original save still contains the layers that could not be restored."
+        : "Workspace saved — you'll find it here next time you open Roofy.";
       showToast(
-        "Workspace saved — you'll find it here next time you open Urbis.",
+        note === null ? saved : `${saved} ${note}`,
         EXPLANATION_TOAST_MS,
       );
+      partialRestoreRef.current = false;
+      return true;
     } catch (e) {
       showToast(
         e instanceof Error ? e.message : "Failed to save workspace.",
         STATUS_TOAST_MS,
       );
+      return false;
     }
-  }, [activeLayerId, persistenceStore, refreshSnapshots, showToast]);
+  }, [persistenceStore, refreshSnapshots, showToast]);
 
   const handleRestore = useCallback(
     async (id: string) => {
+      useDrawStore.getState().finish();
+      pendingRestoredCameraRef.current = null;
+      setRestoringWorkspace(true);
+      setAddLayerOpen(false);
       clearError();
       // A restore adds layers and then applies the camera it saved. The
       // viewport fits to any newly added layer, so without this the fit and
@@ -760,7 +1090,9 @@ export function App({
           return;
         }
 
-        const viewState = restoreSnapshot(snapshot);
+        const { viewState, activeLayer: savedActiveLayer } =
+          restoreSnapshot(snapshot);
+        pendingRestoredCameraRef.current = viewState.camera;
         // BEFORE the layers and the camera. Entering a mode flies the camera,
         // and the viewport suppresses that flight for a mode that is already
         // set when it mounts — which is exactly this case. Setting it after
@@ -772,6 +1104,11 @@ export function App({
         useSceneThemeStore
           .getState()
           .setSceneTheme(viewState.sceneTheme ?? "photoreal");
+        // The snapshot's label IS the workspace's name — that is what it was
+        // saved as — so restoring one restores the name the header shows.
+        useWorkspaceStore.getState().setName(snapshot.label);
+        savedIdRef.current = null;
+        partialRestoreRef.current = true;
 
         // Remove all existing layers — the streaming ones first, so their
         // workers and cell meshes die with them rather than outliving the
@@ -787,9 +1124,32 @@ export function App({
         // so its name, visibility and opacity are not lost — and the panel
         // offers to re-link it, exactly as the city-model prompt below does.
         useGeoLayerStore.getState().removeAllGeoLayers();
-        for (const geoLayer of normalizeGeoLayers(snapshot.geoLayers)) {
-          useGeoLayerStore.getState().addGeoLayer(geoLayer);
+        // Index-ALIGNED with `snapshot.geoLayers`, `null` where a row could
+        // not be used: the saved `activeLayer.index` points into the SNAPSHOT,
+        // so a dropped row must leave a hole rather than shift its successors.
+        // That is also why the entries are normalised ONE at a time —
+        // `normalizeGeoLayers` drops what it cannot use, and a batch call
+        // would compact the very positions this array exists to preserve.
+        const addedGeoIds: (string | null)[] = [];
+        for (const raw of snapshot.geoLayers ?? []) {
+          const [input] = normalizeGeoLayers([raw]);
+          addedGeoIds.push(
+            input === undefined
+              ? null
+              : useGeoLayerStore.getState().addGeoLayer(input),
+          );
         }
+        const hasGeoLayer = addedGeoIds.some(Boolean);
+        // The first-content fit is keyed on the workspace going from empty to
+        // one row, and a restore's rows are not "the first content of a scene"
+        // — they are a scene the user already framed and saved. The
+        // suppression scope below says so too, but it is released in a
+        // `finally` that can, for a workspace that awaits nothing, run before
+        // React has flushed the effect that reads it. Moving the mark here
+        // makes the answer independent of that ordering.
+        previousWorkspaceSizeRef.current =
+          useLayerStore.getState().layers.length +
+          useGeoLayerStore.getState().layers.length;
 
         // Restore layers from snapshot. A v1 single-model save (`modelRef`
         // at the top level, no `layers`) is not handled here: it is a v1
@@ -816,21 +1176,33 @@ export function App({
         let hasUrlLayer = false;
         let failedCount = 0;
         const newUnavailable: UnavailableLayer[] = [];
+        /** The city half of the same aligned mapping as `addedGeoIds`: one
+         *  entry per SNAPSHOT layer, `null` for an unavailable placeholder or
+         *  a load that failed. The `finally` below is what guarantees the one
+         *  entry per iteration, whichever way the body leaves. */
+        const addedCityIds: (string | null)[] = [];
         for (const sl of normalized) {
+          let addedId: string | null = null;
           try {
             const name = (sl.name as string | undefined) ?? "Untitled layer";
             const modelRef = sl.modelRef as CityModelReference | undefined;
             if (!modelRef) continue; // malformed saved entry — nothing to restore
 
             const rules = (sl.rules as Rule[] | undefined) ?? [];
-            const rulesEnabled =
-              (sl.rulesEnabled as boolean | undefined) ?? true;
+            // Already validated and derived by `normalizeLayers`.
+            const { colorBy, singleColor, unmatchedColor } = sl;
             const visible = (sl.visible as boolean | undefined) ?? true;
             const lodMode =
               (sl.lodMode as "auto" | "manual" | undefined) ?? "auto";
             const selectedLod = (sl.selectedLod as string | null) ?? null;
             // Already defaulted to [] by `normalizeLayers`.
             const hiddenTypes = sl.hiddenTypes;
+            const tablePresentation = sl.tablePresentation;
+            const attributeOrders = normalizeAttributeOrders(
+              sl.attributeOrders,
+            );
+            // `undefined` (older snapshot) lets the load default decide.
+            const appearance = readAppearanceTheme(sl.appearance);
 
             if (modelRef.type === "file" || sl.unavailable) {
               const fileName =
@@ -840,11 +1212,16 @@ export function App({
                 name,
                 fileName,
                 rules,
-                rulesEnabled,
+                colorBy,
+                singleColor,
+                unmatchedColor,
                 visible,
                 lodMode,
                 selectedLod,
                 hiddenTypes,
+                attributeOrders,
+                tablePresentation,
+                appearance,
               });
               continue;
             }
@@ -860,9 +1237,14 @@ export function App({
                   name,
                   modelRef,
                   rules,
-                  rulesEnabled,
+                  colorBy,
+                  singleColor,
+                  unmatchedColor,
                   visible,
                   hiddenTypes,
+                  attributeOrders,
+                  tablePresentation,
+                  selectedAppearance: appearance,
                 }),
               );
             } else if (isCityParquetUrl(modelRef.url)) {
@@ -873,39 +1255,95 @@ export function App({
               // caught by this loop's per-layer `catch` and counted.
               const parsed = await loadCityParquetFromUrl(modelRef.url);
               await ensureModelCrsLoadable(parsed);
-              layerId = useLayerStore.getState().addLayer({
+              layerId = addCityLayer({
                 name,
                 model: parsed,
                 modelRef,
                 visible,
                 rules,
-                rulesEnabled,
+                colorBy,
+                singleColor,
+                unmatchedColor,
                 hiddenTypes,
+                attributeOrders,
+                tablePresentation,
+                selectedAppearance: appearance,
+                duckdb: { kind: "model", model: parsed },
               });
             } else {
               const parsed = await loadFromUrl(modelRef.url);
-              await ensureModelCrsLoadable(parsed);
-              layerId = useLayerStore.getState().addLayer({
+              await ensureModelCrsLoadable(parsed.model);
+              layerId = addCityLayer({
                 name,
-                model: parsed,
+                model: parsed.model,
                 modelRef,
                 visible,
                 rules,
-                rulesEnabled,
+                colorBy,
+                singleColor,
+                unmatchedColor,
                 hiddenTypes,
+                attributeOrders,
+                tablePresentation,
+                selectedAppearance: appearance,
+                duckdb: modelTableSource({
+                  model: parsed.model,
+                  bytes: parsed.bytes,
+                  encoding: parsed.encoding,
+                  refetch: urlSourceProvider(modelRef.url),
+                }),
               });
             }
             if (lodMode === "manual") {
               useLayerStore.getState().setLodMode(layerId, "manual");
             }
+            addedId = layerId;
           } catch {
             // Skip this one layer; keep restoring the rest of the workspace.
             failedCount++;
+          } finally {
+            addedCityIds.push(addedId);
           }
         }
+        const complete =
+          addedCityIds.length === snapshotLayers.length &&
+          addedCityIds.every(Boolean) &&
+          addedGeoIds.every(Boolean);
+        savedIdRef.current = complete ? id : null;
+        partialRestoreRef.current = !complete;
         setUnavailableLayers(newUnavailable);
 
-        if (!hasUrlLayer && newUnavailable.length === 0 && failedCount === 0) {
+        // The layer the workspace comes up looking at, and the reason this is
+        // explicit rather than left to the invariants: the geo layers went in
+        // BEFORE the city loop, so `installWorkspaceInvariants` has already
+        // handed the active id to the first geo layer. Resolve the saved
+        // per-kind index against the aligned arrays; a slot that is `null`
+        // (nothing landed there) or an absent field — a v3 document, or a
+        // workspace saved with nothing active — falls back to the first layer
+        // that DID land, in unified order (city first, then geo).
+        const savedId =
+          savedActiveLayer === undefined
+            ? null
+            : ((savedActiveLayer.kind === "city" ? addedCityIds : addedGeoIds)[
+                savedActiveLayer.index
+              ] ?? null);
+        activateLayer(
+          savedId ??
+            [...addedCityIds, ...addedGeoIds].find((id) => id !== null) ??
+            null,
+        );
+
+        // "Drop file(s)" is the prompt for a workspace that restored its rows
+        // but has nothing on screen — every city layer file-backed, so the
+        // viewer is empty until the user re-links one. A geospatial layer that
+        // came back complete IS on screen (`hasGeoLayer`), so asking for a
+        // file would be asking for something nothing is waiting on.
+        if (
+          !hasUrlLayer &&
+          !hasGeoLayer &&
+          newUnavailable.length === 0 &&
+          failedCount === 0
+        ) {
           showToast(
             "Workspace restored. Drop file(s) to view the model.",
             STATUS_TOAST_MS,
@@ -928,9 +1366,20 @@ export function App({
         // for it — but only when a layer actually landed: a workspace of
         // nothing but unavailable local files mounts no viewport at all, and
         // there is no camera to restore into an empty drop zone.
-        if (useLayerStore.getState().layers.length > 0) {
+        //
+        // EITHER kind of layer counts (Task 22, M12.2). A geo-only workspace
+        // mounts a viewport now, so it has somewhere to put its saved camera —
+        // and this await is also what holds the auto-fit suppression open
+        // across the render that mounts that viewport, so the first-content fit
+        // above sees a suppressed scope and drops its flight rather than
+        // replacing the viewpoint the user saved.
+        if (
+          useLayerStore.getState().layers.length > 0 ||
+          useGeoLayerStore.getState().layers.length > 0
+        ) {
           try {
             await applyCameraWhenReady(viewState.camera);
+            pendingRestoredCameraRef.current = null;
           } catch (e) {
             showToast(
               `Workspace restored, but the 3D view could not start: ${
@@ -950,6 +1399,7 @@ export function App({
             : STATUS_TOAST_MS,
         );
       } finally {
+        setRestoringWorkspace(false);
         releaseAutoFit();
       }
     },
@@ -961,14 +1411,6 @@ export function App({
       applyCameraWhenReady,
       showToast,
     ],
-  );
-
-  const handleDeleteSnapshot = useCallback(
-    async (id: string) => {
-      await persistenceStore.remove(id);
-      await refreshSnapshots();
-    },
-    [persistenceStore, refreshSnapshots],
   );
 
   /** The dialog's clipboard seam. Wrapped in a stable callback rather than
@@ -992,23 +1434,42 @@ export function App({
       return;
     }
 
-    const { datetime } = useSolarStore.getState();
+    const { datetime, timeZone } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
 
     const state: ShareableViewState = {
+      basemap: captureBasemap(),
       v: 3,
-      layers: allLayers
-        .filter((l) => l.modelRef.type === "url")
+      // §8's exclusion reaches the SHARE link through the same decision the
+      // save uses. The URL filter below does NOT stand in for it: a derived
+      // city layer inherits its parent's `modelRef`, so it passes that filter
+      // and the link would restore the whole parent under the copy's name
+      // (the two filters commute; this one just has to be here). A share hash
+      // carries no active reference and no geo layers (`ShareableViewState`
+      // is a lightweight subset and stays one), so only `layers` is read.
+      layers: snapshotLayers({
+        layers: allLayers,
+        geoLayers: [],
+        activeLayerId: null,
+      })
+        .layers.filter((l) => l.modelRef.type === "url")
         .map((l) => ({
           name: l.name,
           modelUrl: (l.modelRef as { type: "url"; url: string }).url,
           rules: [...l.rules],
-          rulesEnabled: l.rulesEnabled,
+          // The USER's rules plus the mode; the synthetic catch-alls are
+          // rebuilt on the other side, never sent.
+          ...captureColorBy(l),
           visible: l.visible,
+          attributeOrders: l.attributeOrders,
+          tablePresentation: captureTablePresentation(
+            useQueryStore.getState().queries[l.id],
+          ),
         })),
       cam: cameraState,
       dt: datetime.toISOString(),
+      tz: timeZone,
       pm: pickMode,
     };
 
@@ -1061,7 +1522,9 @@ export function App({
         try {
           const name = sl.name ?? fileNameFromUrl(sl.modelUrl);
           const rules = (sl.rules ?? []) as (typeof layers)[number]["rules"];
-          const rulesEnabled = sl.rulesEnabled ?? true;
+          // `readShareHash` has already validated the three, and derived a
+          // mode for a link minted before they existed.
+          const { colorBy, singleColor, unmatchedColor } = sl;
           const visible = sl.visible ?? true;
 
           if (detectEncoding(sl.modelUrl) === "flatcitybuf") {
@@ -1073,8 +1536,12 @@ export function App({
                 name,
                 modelRef: { type: "url", url: modelUrl },
                 rules,
-                rulesEnabled,
+                colorBy,
+                singleColor,
+                unmatchedColor,
                 visible,
+                attributeOrders: sl.attributeOrders,
+                tablePresentation: sl.tablePresentation,
               }),
             );
           } else if (isCityParquetUrl(sl.modelUrl)) {
@@ -1083,24 +1550,39 @@ export function App({
             // `JSON.parse`. Failures are counted by this loop's `catch`.
             const parsed = await loadCityParquetFromUrl(sl.modelUrl);
             await ensureModelCrsLoadable(parsed);
-            useLayerStore.getState().addLayer({
+            addCityLayer({
               name,
               model: parsed,
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
+              attributeOrders: sl.attributeOrders,
+              tablePresentation: sl.tablePresentation,
               rules,
-              rulesEnabled,
+              colorBy,
+              singleColor,
+              unmatchedColor,
+              duckdb: { kind: "model", model: parsed },
             });
           } else {
             const parsed = await loadFromUrl(sl.modelUrl);
-            await ensureModelCrsLoadable(parsed);
-            useLayerStore.getState().addLayer({
+            await ensureModelCrsLoadable(parsed.model);
+            addCityLayer({
               name,
-              model: parsed,
+              model: parsed.model,
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
+              attributeOrders: sl.attributeOrders,
+              tablePresentation: sl.tablePresentation,
               rules,
-              rulesEnabled,
+              colorBy,
+              singleColor,
+              unmatchedColor,
+              duckdb: modelTableSource({
+                model: parsed.model,
+                bytes: parsed.bytes,
+                encoding: parsed.encoding,
+                refetch: urlSourceProvider(sl.modelUrl),
+              }),
             });
           }
         } catch {
@@ -1113,9 +1595,11 @@ export function App({
         selections: [],
         hovered: null,
       });
+      restoreBasemap(shared.basemap);
       const dt = new Date(shared.dt);
       if (!isNaN(dt.getTime())) {
         useSolarStore.getState().setDatetime(dt);
+        useSolarStore.getState().setTimeZone(shared.tz);
       }
 
       // Said BEFORE the camera wait, so the news is on screen while the
@@ -1152,28 +1636,46 @@ export function App({
     // viewport is the boot gate rather than a re-run on some readiness state.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** The landing page's picker and the Add Layer dialog both hand a plain
-   *  `File`/`string` back; the promise is fire-and-forget either way, exactly
-   *  as it was when these were inline handlers (errors land in `loadError`). */
+  /**
+   * A dropped or browsed file, from the landing page's picker or the Add Layer
+   * dialog. The promise is fire-and-forget either way, exactly as it was when
+   * these were inline handlers (errors land in `loadError`).
+   *
+   * DETECTED here, which the landing page's half was missing: the URL field
+   * has routed a `.geojson` to the geo store since Task 21, but a `.geojson`
+   * DROPPED on the hero went to the city loader and came back as "Invalid
+   * CityJSON" — one file, two answers, depending on which door it came
+   * through. The dialog's File tab has always made this choice for itself
+   * (`AddLayerDialog.addStaged`), so its `override` — always a city format by
+   * the time it reaches here — passes through untouched.
+   *
+   * ONLY GeoJSON: an XYZ template and a 3D Tiles tileset are remote sources
+   * the engine walks, not documents this app can read out of a local file, so
+   * a file named like one keeps going to the loader and fails there, as today.
+   * A refusal (a CityJSON file named `.geojson`, malformed JSON) is raised as
+   * a toast — the landing page renders one, and its inline `.error-message`
+   * belongs to the loader's own state.
+   */
   const handlePickedFile = useCallback(
-    (file: File) => {
-      void handleFile(file);
+    (file: File, override?: DetectedSource) => {
+      const detected = override ?? detectSourceFromName(file.name);
+      if (detected.kind === "geo" && detected.geoKind === "geojson") {
+        clearError();
+        void addGeoSourceFromFile(file).then((result) => {
+          if (!result.ok) showToast(result.error, EXPLANATION_TOAST_MS);
+        });
+        return;
+      }
+      void handleFile(file, override);
     },
-    [handleFile],
+    [clearError, handleFile, showToast],
   );
 
   const handlePickedFiles = useCallback(
-    (files: File[]) => {
-      void handleFiles(files);
+    (files: File[], override?: DetectedSource) => {
+      void handleFiles(files, override);
     },
     [handleFiles],
-  );
-
-  const handlePickedUrl = useCallback(
-    (url: string) => {
-      void handleUrl(url);
-    },
-    [handleUrl],
   );
 
   /** The catalog's version of the same path: the caller WANTS the outcome —
@@ -1181,8 +1683,8 @@ export function App({
    *  `lastError()` the moment the add resolves rather than the (async) error
    *  state. */
   const handleAddUrl = useCallback(
-    async (url: string): Promise<AddUrlResult> => {
-      const landed = await handleUrl(url);
+    async (url: string, override?: DetectedSource): Promise<AddUrlResult> => {
+      const landed = await handleUrl(url, override);
       if (landed) return { ok: true };
       return {
         ok: false,
@@ -1193,26 +1695,27 @@ export function App({
   );
 
   const handleClose = useCallback(() => {
+    useDrawStore.getState().finish();
+    pendingRestoredCameraRef.current = null;
     closeAllStreamingLayers(getStreamPlugin());
     useLayerStore.getState().removeAllLayers();
-    // No `setCatalogOpen(false)` here: the effect above already guarantees the
-    // flag is false for as long as the shell is up, and this is only one of
-    // the exits back to the landing page. Two half-rules for one invariant is
-    // what let the sidebar's remove-last-layer path slip through.
-    setTriangleCount(0);
-    setDuckdbModelLoaded(false);
-    setDuckdbTableLoaded(false);
-    setTableOpen(false);
+    useShellStore.getState().closeDrawer();
     setFps(undefined);
     setCursorPosition(null);
     setUnavailableLayers([]);
     clearSelection();
-    // Geo layers SURVIVE "Close file" (only city layers are removed), but the
-    // active geo layer is what the inspector shows: leaving it set means the
-    // next city model opens onto the geospatial view of a layer nobody just
-    // picked. Clearing the selection alone does not cover it — the active geo
-    // layer is also set by clicking a row, which no selection state records.
-    useGeoLayerStore.getState().setActiveGeoLayer(null);
+    useGeoLayerStore.getState().removeAllGeoLayers();
+    // Last, and after both removals: the invariants hand the active id over to
+    // whatever survives each one, and nothing survives this.
+    activateLayer(null);
+    // "New workspace" in the header is this same exit, and a new workspace
+    // does not inherit the old one's name.
+    useWorkspaceStore.getState().resetName();
+    setAddLayerOpen(true);
+    savedIdRef.current = null;
+    partialRestoreRef.current = false;
+    restoreBasemap(undefined);
+    useSceneSheetStore.getState().setSheet(null);
   }, [clearSelection]);
 
   // Re-selecting a file for an "unavailable" (restored-but-file-backed)
@@ -1227,32 +1730,93 @@ export function App({
       const entry = unavailableLayers.find((u) => u.id === entryId);
       setUnavailableLayers((prev) => prev.filter((u) => u.id !== entryId));
       clearError();
-      void withEngineBooting(file.name, () =>
-        addLayerFromFile(
-          file,
-          entry
-            ? {
-                rules: entry.rules,
-                rulesEnabled: entry.rulesEnabled,
-                visible: entry.visible,
-                lodMode: entry.lodMode,
-                selectedLod: entry.selectedLod,
-                hiddenTypes: entry.hiddenTypes,
-              }
-            : undefined,
-        ),
-      );
+      const pendingCamera = pendingRestoredCameraRef.current;
+      const releaseAutoFit = pendingCamera ? suppressAutoFit() : () => {};
+      void (async () => {
+        try {
+          const layerId = await withEngineBooting(file.name, () =>
+            addLayerFromFile(
+              file,
+              entry
+                ? {
+                    rules: entry.rules,
+                    colorBy: entry.colorBy,
+                    singleColor: entry.singleColor,
+                    unmatchedColor: entry.unmatchedColor,
+                    visible: entry.visible,
+                    lodMode: entry.lodMode,
+                    selectedLod: entry.selectedLod,
+                    hiddenTypes: entry.hiddenTypes,
+                    attributeOrders: entry.attributeOrders,
+                    tablePresentation: entry.tablePresentation,
+                    selectedAppearance: entry.appearance,
+                  }
+                : undefined,
+            ),
+          );
+          if (
+            layerId &&
+            pendingCamera &&
+            pendingRestoredCameraRef.current === pendingCamera
+          ) {
+            await applyCameraWhenReady(pendingCamera);
+            pendingRestoredCameraRef.current = null;
+          }
+        } catch (error) {
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "Could not restore the saved view.",
+            EXPLANATION_TOAST_MS,
+          );
+        } finally {
+          releaseAutoFit();
+        }
+      })();
     },
-    [unavailableLayers, addLayerFromFile, clearError, withEngineBooting],
+    [
+      unavailableLayers,
+      addLayerFromFile,
+      clearError,
+      withEngineBooting,
+      applyCameraWhenReady,
+      showToast,
+    ],
   );
 
   const handleDismissUnavailableLayer = useCallback((entryId: string) => {
     setUnavailableLayers((prev) => prev.filter((u) => u.id !== entryId));
   }, []);
 
-  const handleFitAll = useCallback(() => {
-    sceneRef.current?.fitAll();
-  }, []);
+  /**
+   * The unavailable entries as LIST ROWS.
+   *
+   * Inside the shell they are no longer a banner floating over the map: a
+   * layer that is waiting for its file is still one of the workspace's
+   * layers, so it takes a row in the list beside the ones that loaded, and
+   * re-linking it is a button on that row. The landing page keeps the banner
+   * — it has no list to put a row in.
+   *
+   * Re-linking drops the entry as the add STARTS (`handleResolveUnavailableLayer`
+   * removes it before calling `addLayerFromFile`, in the same event as the
+   * loader's own `setPending`), so the "Needs re-link" row is replaced by the
+   * "Loading…" one rather than sitting beside it.
+   */
+  const unavailableRows = useMemo(
+    () =>
+      unavailableLayers.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        kind: "unavailable" as const,
+        onRelink: (file: File) => handleResolveUnavailableLayer(entry.id, file),
+        onDismiss: () => handleDismissUnavailableLayer(entry.id),
+      })),
+    [
+      unavailableLayers,
+      handleResolveUnavailableLayer,
+      handleDismissUnavailableLayer,
+    ],
+  );
 
   /** Zoom to a GEO layer: its extent is the app's to compute (the engine has
    *  no bounds API for these), and may live behind a URL — hence async, with
@@ -1285,9 +1849,160 @@ export function App({
     [showToast],
   );
 
+  const workspaceSize = unifiedLayerOrder(layers, geoLayers).length;
+
+  /**
+   * The first content of a SCENE is framed once, whatever its kind.
+   *
+   * The viewport does this for city models (static rows through
+   * `previousLayerCountRef`, streams through the row predicate beside it), and
+   * it cannot do it for a geospatial layer: Navara exposes no bounds API for
+   * one, so the extent is the app's to compute (`resolveGeoLayerBounds`) —
+   * which is also why this is here rather than there. Without it a geo-only
+   * workspace opens on a whole-globe camera with the user's data somewhere
+   * over the horizon, and the only way to find it is "Zoom to layer".
+   *
+   * The EDGE, not the level: exactly one row, arriving where there were none.
+   * A geo layer added beside anything else does not fit, for the same reason a
+   * second city model does not — the camera the user has arranged outranks the
+   * new row. When that one row is a CITY layer this stands aside: the viewport
+   * frames its own.
+   *
+   * Suppressed by a restore, like every other automatic fit: a restore is
+   * nothing but new layers arriving and it carries its own camera
+   * (`autoFitSuppression.ts`, Task C26). The scope is held across the restore's
+   * `applyCameraWhenReady`, which is what keeps it open while this effect runs.
+   *
+   * Cancellation is a re-READ of the store after the waits, not the effect's
+   * cleanup: this effect re-runs on every size change, so a cleanup would
+   * cancel a legitimate pending fit the moment a second layer landed. What must
+   * be dropped is a fit whose LAYER is gone — the user removed it while the
+   * engine was still coming up — and the store is the authority on that.
+   *
+   * Failures are silent, deliberately: nobody asked for this flight. A source
+   * that will not load is reported when the user asks for it by hand
+   * ({@link handleFlyToGeoLayer}), and an engine that never starts has louder
+   * symptoms than a camera that stayed put.
+   */
+  useEffect(() => {
+    const previous = previousWorkspaceSizeRef.current;
+    previousWorkspaceSizeRef.current = workspaceSize;
+    if (previous !== 0 || workspaceSize !== 1) return;
+    const geoLayer = useGeoLayerStore.getState().layers[0];
+    if (!geoLayer || useLayerStore.getState().layers.length > 0) return;
+    if (isAutoFitSuppressed()) return;
+    const geoLayerId = geoLayer.id;
+    /** The workspace this fit was computed for must still be the one on
+     *  screen: the SAME single geo row, and nothing else. A row removed,
+     *  replaced, or joined by another while the engine was coming up is a
+     *  different scene, and the camera belongs to whatever framed that one. */
+    const stillTheOnlyRow = (): GeoLayer | null => {
+      const geo = useGeoLayerStore.getState().layers;
+      if (useLayerStore.getState().layers.length > 0) return null;
+      if (geo.length !== 1 || geo[0]!.id !== geoLayerId) return null;
+      return geo[0]!;
+    };
+    void (async () => {
+      try {
+        const scene = await awaitSceneReady();
+        if (scene === null) return;
+        const layer = stillTheOnlyRow();
+        if (layer === null) return;
+        const bounds = await resolveGeoLayerBounds(layer);
+        // A raster tile template names no extent, and neither does an
+        // unlinked GeoJSON row: nothing to frame, so nothing happens.
+        if (!bounds) return;
+        // Asked again after the fetch, which is a wait of its own.
+        if (stillTheOnlyRow() === null) return;
+        // Through the handle, which brackets every camera move in the
+        // streaming plugin's settle suppression.
+        sceneRef.current?.fitBounds(bounds);
+      } catch {
+        // See the doc comment: an unasked-for fit fails quietly.
+      }
+    })();
+  }, [workspaceSize, awaitSceneReady]);
+
+  /** Zoom to whichever layer the left panel asks about. Stable, and that
+   *  matters here: `App` re-renders on every cursor-position update from the
+   *  viewport, and an inline arrow would hand `LeftPanel` a new prop — and
+   *  every row a new render — on every mouse move over the map. */
+  const handleZoomToLayer = useCallback(
+    (item: ActiveLayer) => {
+      if (item.kind === "city") sceneRef.current?.fitLayer(item.layer.id);
+      else handleFlyToGeoLayer(item.layer.id);
+    },
+    [handleFlyToGeoLayer],
+  );
+
   /** A layer the engine refused (the CRS gate — no reference system, or a
    *  non-metric one). Stable identity on purpose: `NavaraViewport`'s layer-sync
    *  effect lists it as a dependency. */
+  const handleFlyToAddress = useCallback((target: FlyToTarget) => {
+    sceneRef.current?.flyTo(target);
+  }, []);
+
+  const handleFitActiveLayer = useCallback(() => {
+    if (activeLayer !== null) handleZoomToLayer(activeLayer);
+  }, [activeLayer, handleZoomToLayer]);
+
+  // §6.2's "Zoom to layer" on a New-layer result card. The scene handle lives
+  // here and nowhere else, so the toolbox asks through the shell store and this
+  // effect consumes the request and clears it — the same shape
+  // `ActiveLayerPanel` uses for `requestedSection`. `handleZoomToLayer` takes
+  // an `ActiveLayer`, not an id, so the id is resolved against both stores.
+  const requestedZoom = useShellStore((s) => s.requestedZoom);
+  useEffect(() => {
+    if (requestedZoom === null) return;
+    const target = resolveActiveLayer(requestedZoom, layers, geoLayers);
+    if (target !== null) handleZoomToLayer(target);
+    useShellStore.getState().requestZoom(null);
+  }, [requestedZoom, layers, geoLayers, handleZoomToLayer]);
+
+  const selectedObjectIds = useMemo(
+    () =>
+      activeLayer?.kind === "city"
+        ? [
+            ...new Set(
+              selections
+                .filter(
+                  (selection) => selection.layerId === activeLayer.layer.id,
+                )
+                .map((selection) => selection.objectId),
+            ),
+          ]
+        : [],
+    [activeLayer, selections],
+  );
+  const selectedGeoBounds = useMemo(
+    () =>
+      activeLayer?.kind === "geo" &&
+      activeLayer.layer.kind === "geojson" &&
+      geoSelection?.geoLayerId === activeLayer.layer.id &&
+      geoSelection.stableFeatureId !== undefined
+        ? selectedGeoJsonBounds(
+            activeLayer.layer.config.preparedData,
+            new Set([geoSelection.stableFeatureId]),
+          )
+        : null,
+    [activeLayer, geoSelection],
+  );
+  const handleFitSelection = useCallback(() => {
+    if (activeLayer?.kind === "city" && selectedObjectIds.length > 0) {
+      sceneRef.current?.fitObjects(activeLayer.layer.id, selectedObjectIds);
+      return;
+    }
+    if (
+      activeLayer?.kind === "geo" &&
+      activeLayer.layer.kind === "geojson" &&
+      geoSelection?.geoLayerId === activeLayer.layer.id &&
+      geoSelection.stableFeatureId !== undefined
+    ) {
+      if (selectedGeoBounds !== null)
+        sceneRef.current?.fitBounds(selectedGeoBounds);
+    }
+  }, [activeLayer, geoSelection, selectedGeoBounds, selectedObjectIds]);
+
   const handleLayerError = useCallback(
     (layerId: string, message: string) => {
       showToast(`Layer ${layerId}: ${message}`, EXPLANATION_TOAST_MS);
@@ -1296,156 +2011,304 @@ export function App({
   );
 
   const handleLoadSample = useCallback(() => {
-    void handleUrl(SAMPLE_DATA_URL);
+    void handleUrl(SAMPLE_DATA_URL).then((id) => {
+      if (id) ensureDelftLandUse();
+    });
   }, [handleUrl]);
 
-  // Resolve selected objects for attribute panel
-  const selectedObjects: CityObject[] = [];
-  /** The selected layer's object map, so the attribute panel can resolve the
-   *  attributes a picked BuildingPart inherits from its parent Building. */
-  let selectedObjectsById: Readonly<Record<string, CityObject>> = {};
-  if (selections.length > 0) {
-    const sel0 = selections[0]!;
-    const layer = layers.find((l) => l.id === sel0.layerId);
-    if (layer) {
-      selectedObjectsById = layer.model.objects;
-      for (const sel of selections) {
-        const obj = layer.model.objects[sel.objectId];
-        if (obj) selectedObjects.push(obj);
-      }
-    }
-  }
+  // Keep the viewport mounted across empty workspaces and workspace management.
+  const workspacePage =
+    pathname === "/workspaces" ? (
+      <WorkspacesPage
+        store={persistenceStore}
+        onRename={(id, name) => {
+          if (savedIdRef.current === id)
+            useWorkspaceStore.getState().setName(name);
+        }}
+        onBack={() => {
+          navigate("/");
+          void refreshSnapshots();
+        }}
+        onOpen={(id) => {
+          navigate("/");
+          void handleRestore(id);
+        }}
+      />
+    ) : null;
+  const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
-  /** The picked geo feature, joined with its layer for the panel's title. A
-   *  selection whose layer has vanished resolves to null — the invalidation
-   *  effect clears the store right behind it, but the render in between must
-   *  not name a layer that is gone. */
-  const selectedGeoLayer =
-    geoSelection === null
-      ? undefined
-      : geoLayers.find((l) => l.id === geoSelection.geoLayerId);
-  const geoFeature =
-    geoSelection !== null && selectedGeoLayer !== undefined
-      ? {
-          layerName: selectedGeoLayer.name,
-          properties: geoSelection.properties,
+  /* The right column follows the SELECTION: there is no inspector toggle
+       any more, and the `right` prop below is null exactly when both
+       `selections` and `geoSelection` are empty. The header's chevron
+       (`rightCollapsed`) still collapses the panel without touching what is
+       selected — the pill on the map's edge brings it back — but the
+       panel's OWN close button clears the selection outright, same as
+       Escape (`useEscapeClearsSelection`): two different affordances for two
+       different intents, "hide this" versus "I'm done with this".
+
+       With the toolbox open the panel is the toolbox and this node becomes its
+       Details TAB (spec §4.2), which is why the title and the "is anything
+       selected" answer are named once here and handed to both. */
+  const hasSelection = selections.length > 0 || geoSelection !== null;
+  const detailsNode = hasSelection ? (
+    <DetailsPanel onClose={clearSelection} />
+  ) : null;
+  const detailsTitle = selectionTitle(selections, geoSelection !== null);
+
+  return (
+    <>
+      {workspacePage}
+      <div
+        className={
+          workspacePage ? "viewer-route viewer-route-inactive" : "viewer-route"
         }
-      : null;
-
-  // Viewer state. `engineBooting` puts the shell up with ZERO layers for the
-  // duration of a `.fcb` open — the engine has to be running before a
-  // streaming layer can exist at all, so this is the only way a `.fcb` can be
-  // the first thing opened. Everything below already reads `activeLayer`
-  // optional-chained, so an empty workspace renders an empty globe rather than
-  // throwing.
-  if (hasLayers || engineBooting) {
-    const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
-    const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
-
-    const shellClasses = [
-      "viewer-shell",
-      !inspectorOpen && "panel-collapsed",
-      leftSidebarCollapsed && "left-collapsed",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    const gridStyle = {
-      "--left-panel-w": `${leftSidebarWidth}px`,
-      ...(tableOpen ? { "--table-h": `${tableHeight}px` } : {}),
-    } as React.CSSProperties;
-
-    return (
-      <div className={shellClasses} style={gridStyle}>
-        <ViewerToolbar
-          pickMode={mode}
-          toolMode={toolMode}
-          onSetPickMode={setMode}
-          onSetToolMode={setToolMode}
-          onClose={handleClose}
-          onToggleInspector={() => setInspectorOpen((o) => !o)}
-          onToggleLeftSidebar={() => setLeftSidebarCollapsed((o) => !o)}
-          onFitAll={handleFitAll}
-          onSave={handleSave}
-          onShare={handleShare}
-          canShare={hasUrlLayers}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          advancedSettingsOpen={advancedSettingsOpen}
-          onToggleAdvancedSettings={() => setAdvancedSettingsOpen((o) => !o)}
-        />
-
-        <LeftSidebar
-          width={leftSidebarWidth}
-          onWidthChange={setLeftSidebarWidth}
-          collapsed={leftSidebarCollapsed}
-          onAddFile={handlePickedFile}
-          onAddFiles={handlePickedFiles}
-          onAddUrl={handleAddUrl}
-          loading={loading}
-          onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
-          onFlyToGeoLayer={handleFlyToGeoLayer}
-        />
-
-        <div className="viewport">
-          <NavaraViewport
-            ref={attachScene}
-            onTriangleCount={setTriangleCount}
-            onFps={setFps}
-            onCursorPosition={setCursorPosition}
-            onLayerError={handleLayerError}
-          />
-          <LegendOverlay />
-          <AttributePanel
-            objects={selectedObjects}
-            objectsById={selectedObjectsById}
-            geoFeature={geoFeature}
-          />
-          {advancedSettingsOpen && (
-            <RenderingPanel onClose={() => setAdvancedSettingsOpen(false)} />
-          )}
-        </div>
-
-        {inspectorOpen && (
-          <InspectorPanel
-            selections={selections}
-            onClose={() => setInspectorOpen(false)}
-            duckdbModelLoaded={duckdbModelLoaded}
-          />
-        )}
-
-        {tableOpen && (
-          <TablePanel
-            duckdbTableLoaded={duckdbTableLoaded}
-            onCollapse={() => setTableOpen(false)}
-            onHeightChange={setTableHeight}
-          />
-        )}
-
-        <StatusBar
-          objectCount={totalObjects}
-          triangleCount={triangleCount}
-          selectedCount={selections.length}
-          duckdbStatus={duckdbStatus}
-          fps={fps}
-          cursorPosition={cursorPosition}
-          tableOpen={tableOpen}
-          onToggleTable={() => setTableOpen((o) => !o)}
-          streamStatus={
-            activeLayer?.isStreaming ? (activeStreamStatus ?? "idle") : null
+        inert={workspacePage ? true : undefined}
+        aria-hidden={workspacePage ? true : undefined}
+      >
+        <ViewerShell
+          header={
+            <WorkspaceHeader
+              onExportScene={(format) =>
+                exportScene(format, () => {
+                  const scene = sceneRef.current;
+                  if (!scene)
+                    return Promise.reject(
+                      new Error("The scene is not ready to capture."),
+                    );
+                  return scene.captureImage(viewportAttribution);
+                })
+              }
+              onSave={handleSave}
+              onShare={handleShare}
+              canShare={hasUrlLayers}
+              /* "New workspace" is what "Close file" was: it empties the
+                 workspace (and resets its name) and hands the user back to
+                 the landing page. */
+              onNewWorkspace={handleClose}
+              onOpenWorkspace={(id) => void handleRestore(id)}
+              snapshots={savedSnapshots}
+            />
           }
-          streamMessage={
-            activeLayer?.isStreaming ? (activeStreamMessage ?? null) : null
+          /* The rail is not a collapsed panel: it is a different component
+             for a 40px column (the shell already narrows the track), which
+             is why the choice is made here rather than inside the panel. */
+          left={
+            leftCollapsed ? (
+              /* The same three row sources the panel gets: the rail's badge
+                 counts what the list WOULD show, not what the stores hold. */
+              <LeftRail
+                extraRows={unavailableRows}
+                pending={pending}
+                failed={failed}
+                failedCount={failed.length}
+              />
+            ) : (
+              <LeftPanel
+                onLoadSample={
+                  tourPhase === "active" &&
+                  tourIndex === 0 &&
+                  !layers.some(
+                    (layer) =>
+                      layer.modelRef.type === "url" &&
+                      layer.modelRef.url === SAMPLE_DATA_URL,
+                  )
+                    ? handleLoadSample
+                    : undefined
+                }
+                onRequestAdd={() => setAddLayerOpen(true)}
+                addDialogOpen={addLayerOpen}
+                onAddFile={handlePickedFile}
+                onAddFiles={handlePickedFiles}
+                onAddUrl={handleAddUrl}
+                loading={loading}
+                /* The one thing only `App` can answer: a city layer is flown
+                   to through the scene handle, a geospatial one through an
+                   extent this app computes for itself. */
+                onZoomToLayer={handleZoomToLayer}
+                extraRows={unavailableRows}
+                pending={pending}
+                failed={failed}
+                dismissFailed={dismissFailed}
+              />
+            )
+          }
+          map={
+            <div className="viewport" ref={viewportRef}>
+              {addLayerOpen && pathname !== "/workspaces" && (
+                <AddLayerDialog
+                  onClose={() => setAddLayerOpen(false)}
+                  onAddFile={handlePickedFile}
+                  onAddFiles={handlePickedFiles}
+                  onAddUrl={handleAddUrl}
+                  loading={loading}
+                />
+              )}
+              {loadError && !hasWorkspace && failed.length === 0 && (
+                <p className="empty-workspace-error error-message" role="alert">
+                  {loadError}
+                </p>
+              )}
+              {!hasWorkspace &&
+                !tourSeen &&
+                !loading &&
+                !restoringWorkspace &&
+                (tourPhase === "idle" || tourPhase === "welcome") && (
+                  <section
+                    className="empty-workspace-start"
+                    aria-label="Get started"
+                  >
+                    <button
+                      type="button"
+                      className="empty-workspace-close"
+                      aria-label="Close welcome"
+                      onClick={() => walkthroughStore.getState().dismiss()}
+                    >
+                      ×
+                    </button>
+                    <h2>Explore Delft</h2>
+                    <p>
+                      Try the example city model to explore roofs, attributes
+                      and analysis.
+                    </p>
+                    <button
+                      type="button"
+                      className="empty-workspace-load"
+                      onClick={handleLoadSample}
+                    >
+                      Load Delft sample
+                    </button>
+                    {tourPhase === "idle" && (
+                      <button
+                        type="button"
+                        onClick={() => walkthroughStore.getState().start()}
+                      >
+                        Start walkthrough
+                      </button>
+                    )}
+                  </section>
+                )}
+              <NavaraViewport
+                ref={attachScene}
+                onTriangleCount={() => {}}
+                onFps={setFps}
+                onCursorPosition={setCursorPosition}
+                onLayerError={handleLayerError}
+                onAttributionChange={setViewportAttribution}
+              />
+              <CameraCluster
+                onZoomIn={() => sceneRef.current?.zoomIn()}
+                onZoomOut={() => sceneRef.current?.zoomOut()}
+                onResetNorth={() => sceneRef.current?.resetNorth()}
+                onFit={handleFitActiveLayer}
+                fitDisabled={activeLayer === null}
+                fitTitle={
+                  activeLayer === null
+                    ? "Choose a layer to fit"
+                    : "Fit active layer"
+                }
+                onFitSelection={handleFitSelection}
+                selectionPresent={
+                  selectedObjectIds.length > 0 || geoSelection !== null
+                }
+                selectionDisabled={
+                  selectedObjectIds.length === 0 && selectedGeoBounds === null
+                }
+                selectionTitle={
+                  geoSelection !== null
+                    ? selectedGeoBounds === null
+                      ? "Selected geo feature has no coordinates"
+                      : "Zoom to selected geo feature"
+                    : "Zoom to selection"
+                }
+              />
+              {drawActive && <DrawOverlay scene={sceneRef} />}
+              <LegendOverlay />
+              <FilterChip />
+              <HoverTooltip />
+            </div>
+          }
+          toolbar={
+            <div
+              className="map-tool-header"
+              role="toolbar"
+              aria-label="Map tools"
+            >
+              <div className="map-tool-header__editing">
+                <SelectModeControl
+                  mode={mode}
+                  toolMode={toolMode}
+                  cityActive={activeCityLayer !== null}
+                  onSetMode={setMode}
+                  onSetToolMode={setToolMode}
+                  drawActive={drawActive}
+                  canDraw={
+                    activeLayer?.layer.id === drawLayerId &&
+                    activeLayer?.kind === "geo"
+                  }
+                  onDraw={() => useDrawStore.getState().start()}
+                  onPick={() => useDrawStore.getState().stop()}
+                />
+                <ToolsButton />
+                <AddressSearch onFlyTo={handleFlyToAddress} />
+              </div>
+              <SceneButtons
+                renderSun={(onClose) => <SunShadeSheet onClose={onClose} />}
+                renderSettings={(onClose) => (
+                  <SceneSettingsSheet onClose={onClose} />
+                )}
+              />
+            </div>
+          }
+          canOpenTable={
+            activeLayer?.kind === "city" ||
+            (activeLayer?.kind === "geo" &&
+              activeLayer.layer.kind === "geojson")
+          }
+          drawer={
+            drawerOpen ? (
+              <DataDrawer
+                duckdbStatus={duckdbStatus}
+                onRetryDuckDB={handleRetryDuckDB}
+              />
+            ) : null
+          }
+          right={
+            toolboxOpen ? (
+              <ProcessingPanel
+                details={detailsNode}
+                detailsTitle={detailsTitle}
+              />
+            ) : (
+              detailsNode
+            )
+          }
+          rightTitle={detailsTitle}
+          rightMode={toolboxOpen ? "tools" : "details"}
+          hasSelection={hasSelection}
+          attributionLines={viewportAttribution}
+          status={
+            <StatusBar
+              objectCount={totalObjects}
+              fps={fps}
+              cursorPosition={cursorPosition}
+              streamStatus={
+                activeCityLayer?.isStreaming
+                  ? (activeStreamStatus ?? "idle")
+                  : null
+              }
+              streamMessage={
+                activeCityLayer?.isStreaming
+                  ? (activeStreamMessage ?? null)
+                  : null
+              }
+              residentCellCount={
+                activeCityLayer?.isStreaming
+                  ? activeStream?.handle.getResidentModel().cellCount
+                  : undefined
+              }
+            />
           }
         />
-
-        {unavailableLayers.length > 0 && (
-          <UnavailableLayersBanner
-            layers={unavailableLayers}
-            onResolve={handleResolveUnavailableLayer}
-            onDismiss={handleDismissUnavailableLayer}
-          />
-        )}
 
         {/* Keyed on the URL so a second Share click while the dialog is open
             remounts it — the auto-copy effect must run again for the NEW
@@ -1459,265 +2322,16 @@ export function App({
           />
         )}
 
+        {!workspacePage && (
+          <Walkthrough
+            externalLoadControl
+            onLoadSample={handleLoadSample}
+            loading={loading}
+            loadError={loadError}
+          />
+        )}
         {toast && <div className="toast">{toast}</div>}
       </div>
-    );
-  }
-
-  // Landing / drop zone
-  return (
-    <main className="app-shell">
-      <div className="landing-theme-toggle">
-        <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
-      </div>
-
-      <div className="hero">
-        {/* The same lockup the toolbar wears, one size up — see the LANDING
-            section of app.css for the `--urbis-mark-size` override. The
-            `.eyebrow` wrapper stays so the hero's grid rhythm is unchanged. */}
-        <p className="eyebrow">
-          <span className="urbis-lockup">
-            <svg className="urbis-mark" viewBox="0 0 48 48" aria-hidden="true">
-              <path
-                className="urbis-mark-u"
-                d="M14 12 V25 a10 10 0 0 0 20 0 V16"
-                fill="none"
-                strokeWidth="9"
-                strokeLinecap="round"
-              />
-              <path
-                className="urbis-mark-pitch"
-                d="M34 16 L41 9"
-                fill="none"
-                strokeWidth="9"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span className="urbis-wordmark">Urbis</span>
-          </span>
-        </p>
-        <h1>Your city, in 3D.</h1>
-        <p className="summary">
-          Drop a city model or pick one from the open catalog.
-        </p>
-      </div>
-
-      {unavailableLayers.length > 0 && (
-        <UnavailableLayersBanner
-          layers={unavailableLayers}
-          onResolve={handleResolveUnavailableLayer}
-          onDismiss={handleDismissUnavailableLayer}
-        />
-      )}
-
-      {/* The page's one fork: bring your own data, or take one out of the
-          published catalog. Two doors, equal weight. */}
-      <div className="entry-section">
-        <div className="entry-paths">
-          <section className="entry-path">
-            <h2 className="entry-path-title">Open your data</h2>
-            {/* The same component the sidebar's Add Layer dialog renders — one
-                drop zone, one URL field, one set of words for both entry
-                points. Its format hint is the page's ONLY list of extensions,
-                so it stays on. */}
-            <SourcePicker
-              variant="hero"
-              onFile={handlePickedFile}
-              onFiles={handlePickedFiles}
-              onUrl={handlePickedUrl}
-              loading={loading}
-            />
-          </section>
-
-          <section className="entry-path">
-            <h2 className="entry-path-title">Browse the catalog</h2>
-            <div className="catalog-entry">
-              <svg
-                viewBox="0 0 24 24"
-                width="24"
-                height="24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <circle cx="11" cy="11" r="7" />
-                <line x1="16.5" y1="16.5" x2="21" y2="21" />
-              </svg>
-              <p>Pick a city model from the Open3D City catalog.</p>
-              <button
-                type="button"
-                className="catalog-entry-btn"
-                onClick={() => setCatalogOpen(true)}
-                disabled={loading}
-              >
-                Browse catalog
-              </button>
-            </div>
-          </section>
-        </div>
-
-        {/* The sample is a demo convenience, not a third door. Its label does
-            not change while loading: `disabled` and the loading indicator
-            below already say so. */}
-        <p className="sample-footnote">
-          or{" "}
-          <button
-            type="button"
-            className="sample-link"
-            onClick={handleLoadSample}
-            disabled={loading}
-          >
-            try the Delft sample
-          </button>
-        </p>
-      </div>
-
-      {savedSnapshots.length > 0 && (
-        <SnapshotList
-          snapshots={savedSnapshots}
-          onRestore={handleRestore}
-          onDelete={handleDeleteSnapshot}
-          loading={loading}
-        />
-      )}
-
-      {loading && (
-        <div className="loading-indicator">
-          <div className="loading-spinner" />
-          <span>Loading model...</span>
-        </div>
-      )}
-
-      {loadError && <p className="error-message">{loadError}</p>}
-
-      {/* The landing page has toasts of its own, and always did: a restore
-          that found no snapshot, a workspace whose layers all need a file
-          re-selected, a share link from an older version. Until Task C20 this
-          slot existed only in the viewer shell, so every one of those
-          messages was raised into a component that was not on screen. */}
-      {toast && <div className="toast">{toast}</div>}
-
-      {/* Adding does not close it, deliberately: the user queues several tiles
-          and watches them arrive. Nothing has to close it either — once the
-          first layer lands, `hasLayers` flips and this whole branch (dialog
-          included) is replaced by the viewer shell. */}
-      {catalogOpen && (
-        <StacBrowserDialog
-          onClose={() => setCatalogOpen(false)}
-          onAddUrl={handleAddUrl}
-        />
-      )}
-    </main>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Unavailable (file-backed, restored-from-a-snapshot) layers — a persistent
-// prompt, not a toast, per the explicit persistence requirement: "such a
-// layer must restore as an explicit unavailable local source state
-// prompting re-selection — not vanish with a toast."
-// ---------------------------------------------------------------------------
-
-function UnavailableLayersBanner({
-  layers,
-  onResolve,
-  onDismiss,
-}: {
-  readonly layers: ReadonlyArray<{
-    readonly id: string;
-    readonly name: string;
-    readonly fileName: string;
-  }>;
-  readonly onResolve: (entryId: string, file: File) => void;
-  readonly onDismiss: (entryId: string) => void;
-}) {
-  return (
-    <div className="unavailable-layers">
-      <div className="unavailable-layers-title">
-        {layers.length} layer{layers.length === 1 ? "" : "s"} need
-        {layers.length === 1 ? "s" : ""} a local file re-selected
-      </div>
-      {layers.map((entry) => (
-        <div key={entry.id} className="unavailable-layer-row">
-          <span className="unavailable-layer-name" title={entry.fileName}>
-            {entry.name}
-          </span>
-          <label className="unavailable-layer-choose">
-            Choose file
-            <input
-              type="file"
-              hidden
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) onResolve(entry.id, file);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="unavailable-layer-dismiss"
-            title="Dismiss"
-            onClick={() => onDismiss(entry.id)}
-          >
-            ×
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Saved workspaces list
-// ---------------------------------------------------------------------------
-
-function SnapshotList({
-  snapshots,
-  onRestore,
-  onDelete,
-  loading,
-}: {
-  readonly snapshots: SnapshotSummary[];
-  readonly onRestore: (id: string) => void;
-  readonly onDelete: (id: string) => void;
-  readonly loading: boolean;
-}) {
-  return (
-    <div className="snapshot-list">
-      <div className="snapshot-list-title">Saved Workspaces</div>
-      {snapshots.map((s) => (
-        <div key={s.id} className="snapshot-row">
-          <div className="snapshot-info">
-            <span className="snapshot-label">{s.label}</span>
-            <span className="snapshot-date">
-              {new Date(s.savedAt).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-          </div>
-          <div className="snapshot-actions">
-            <button
-              className="snapshot-btn"
-              onClick={() => onRestore(s.id)}
-              disabled={loading}
-            >
-              Restore
-            </button>
-            <button
-              className="snapshot-btn snapshot-btn-delete"
-              onClick={() => onDelete(s.id)}
-              disabled={loading}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
+    </>
   );
 }

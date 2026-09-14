@@ -8,7 +8,9 @@
  *
  * Snapshot v3 stores the camera geographically
  * (`{lng, lat, height, heading, pitch, roll}`); v1/v2 snapshots carried two
- * scene-space 3-tuples and are rejected outright rather than migrated.
+ * scene-space 3-tuples and are rejected outright rather than migrated. v4
+ * adds the active layer and migrates v3 forward — see snapshotV4.test.ts;
+ * `restoreSnapshot` hands back `{ viewState, activeLayer }` since.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -79,7 +81,7 @@ describe("captureSnapshot", () => {
       pickMode: "surface",
     });
 
-    expect(snapshot.version).toBe("3");
+    expect(snapshot.version).toBe("4");
     expect(snapshot.label).toBe("Test");
     expect(snapshot.layers).toHaveLength(1);
     expect(snapshot.layers![0]!.name).toBe("delft");
@@ -122,7 +124,7 @@ describe("restoreSnapshot", () => {
       selections: [{ kind: "object", layerId: "layer-1", objectId: "b1" }],
     });
 
-    const viewState = restoreSnapshot(snapshot);
+    const { viewState } = restoreSnapshot(snapshot);
 
     expect(useSelectionStore.getState().mode).toBe("object");
     expect(useSelectionStore.getState().selections).toEqual([]);
@@ -202,7 +204,7 @@ describe("restoreSnapshot", () => {
       pickMode: "surface",
     });
 
-    const viewState = restoreSnapshot(
+    const { viewState } = restoreSnapshot(
       JSON.parse(JSON.stringify(snapshot)) as typeof snapshot,
     );
 
@@ -329,7 +331,7 @@ describe("view mode round trip", () => {
       pickMode: "object",
       viewMode: "2.5d",
     });
-    expect(restoreSnapshot(snapshot).viewMode).toBe("2.5d");
+    expect(restoreSnapshot(snapshot).viewState.viewMode).toBe("2.5d");
   });
 });
 
@@ -356,13 +358,19 @@ describe("scene theme round trip", () => {
 
   it("hands the saved theme back to the caller on restore", () => {
     const snapshot = captureSnapshot({ ...base, sceneTheme: "wireframe" });
-    expect(restoreSnapshot(snapshot).sceneTheme).toBe("wireframe");
+    expect(restoreSnapshot(snapshot).viewState.sceneTheme).toBe("wireframe");
   });
 
   it("reads a snapshot written before themes existed as photoreal", () => {
-    const snapshot = captureSnapshot(base);
+    const snapshot = captureSnapshot({
+      label: "Legacy timezone",
+      layers: [],
+      camera: CAM,
+      datetime: new Date("2026-07-15T12:00:00Z"),
+      pickMode: "object",
+    });
     expect(snapshot.viewState.sceneTheme).toBeUndefined();
-    expect(restoreSnapshot(snapshot).sceneTheme).toBe("photoreal");
+    expect(restoreSnapshot(snapshot).viewState.sceneTheme).toBe("photoreal");
   });
 
   it("reads a hand-edited or truncated theme as photoreal", () => {
@@ -375,6 +383,39 @@ describe("scene theme round trip", () => {
       ...snapshot,
       viewState: { ...snapshot.viewState, sceneTheme: "neon-dreams" },
     };
-    expect(restoreSnapshot(tampered as never).sceneTheme).toBe("photoreal");
+    expect(restoreSnapshot(tampered as never).viewState.sceneTheme).toBe(
+      "photoreal",
+    );
+  });
+});
+
+describe("snapshot timezone", () => {
+  it("captures and restores a timezone without changing the instant", () => {
+    const snapshot = captureSnapshot({
+      label: "Timezone",
+      layers: [],
+      camera: CAM,
+      datetime: new Date("2026-07-15T12:00:00Z"),
+      pickMode: "object",
+      timeZone: "UTC",
+    });
+    useSolarStore.setState({ timeZone: "Europe/Amsterdam" });
+    restoreSnapshot(snapshot);
+    expect(useSolarStore.getState().timeZone).toBe("UTC");
+  });
+
+  it("defaults legacy v4 snapshots and normalizes invalid zones", () => {
+    const snapshot = captureSnapshot({
+      label: "Legacy timezone",
+      layers: [],
+      camera: CAM,
+      datetime: new Date("2026-07-15T12:00:00Z"),
+      pickMode: "object",
+    });
+    restoreSnapshot({
+      ...snapshot,
+      viewState: { ...snapshot.viewState, timeZone: "invalid" as never },
+    });
+    expect(useSolarStore.getState().timeZone).toBe("Europe/Amsterdam");
   });
 });

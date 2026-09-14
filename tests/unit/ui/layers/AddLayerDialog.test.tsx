@@ -1,15 +1,31 @@
 /**
- * The "+ Add Layer" modal: how it opens, how it closes, and that both of its
- * affordances reach the app's ONE loading path.
+ * The Add Layer dialog: WHERE the source is, then WHAT it is.
  *
- * The button used to unfold a cramped inline form inside a 240 px sidebar.
- * What is checked here is the contract that replaced it — a real dialog with
- * a drop zone and a URL field, wired to the same `onAddFile` / `onAddUrl`
- * handlers the landing page uses.
+ * The dialog used to ask the user to pick a family first — "City model" or
+ * "Geospatial" — and then guessed the format silently inside it. Its tabs are
+ * now the three PLACES a source can come from (File, URL, Catalog), and the
+ * format is detected, shown, and correctable before anything is loaded.
+ *
+ * What is pinned here:
+ *  - the detection line and its correction select, on both the File and the
+ *    URL tab, and that a pick alone adds NOTHING (the user confirms);
+ *  - that the correction reaches the caller as the `override` argument of
+ *    `onAddFile` / `onAddFiles` / `onAddUrl` — the loader's encoding override;
+ *  - that a geospatial result never goes near the city loader: the dialog
+ *    writes it to `geoLayerStore` itself and activates it;
+ *  - the modal chrome that was here before (Escape, backdrop, focus).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import type { AddUrlResult } from "../../../../src/ui/stac/StacBrowser";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 
 const CATALOG_URL = "https://catalog.test/tile.city.json";
 
@@ -27,231 +43,315 @@ vi.mock("../../../../src/ui/stac/StacBrowser", () => ({
   ),
 }));
 
-import { LayerPanel } from "../../../../src/ui/layers/LayerPanel";
+import { AddLayerDialog } from "../../../../src/ui/layers/AddLayerDialog";
+import type { DetectedSource } from "../../../../src/features/layers/detectSource";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
+import { useGeoLayerStore } from "../../../../src/features/geoLayers/geoLayerStore";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 const noop = () => {};
-/** The URL path now reports whether a layer landed. */
 const noopUrl = async () => ({ ok: true }) as const;
 
-function renderPanel(
-  overrides: {
-    onAddFile?: (file: File) => void;
-    onAddFiles?: (files: File[]) => void;
-    onAddUrl?: (url: string) => Promise<AddUrlResult>;
-    loading?: boolean;
-  } = {},
-) {
-  return render(
-    <LayerPanel
-      onAddFile={overrides.onAddFile ?? noop}
-      onAddFiles={overrides.onAddFiles ?? noop}
-      onAddUrl={overrides.onAddUrl ?? noopUrl}
-      loading={overrides.loading ?? false}
-    />,
+interface Handlers {
+  onAddFile?: (file: File, override?: DetectedSource) => void;
+  onAddFiles?: (files: File[], override?: DetectedSource) => void;
+  onAddUrl?: (url: string, override?: DetectedSource) => Promise<AddUrlResult>;
+  loading?: boolean;
+}
+
+/** The dialog's real host is a button that opens it and takes focus back when
+ *  it closes; this is that, and nothing else. */
+function Harness(props: Handlers) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        + Add layer
+      </button>
+      {open && (
+        <AddLayerDialog
+          onClose={() => setOpen(false)}
+          onAddFile={props.onAddFile ?? noop}
+          onAddFiles={props.onAddFiles ?? noop}
+          onAddUrl={props.onAddUrl ?? noopUrl}
+          loading={props.loading ?? false}
+        />
+      )}
+    </>
   );
 }
 
-function openDialog(): HTMLElement {
-  fireEvent.click(screen.getByRole("button", { name: "+ Add Layer" }));
+function openDialog(handlers: Handlers = {}): HTMLElement {
+  render(<Harness {...handlers} />);
+  fireEvent.click(screen.getByRole("button", { name: "+ Add layer" }));
   return screen.getByRole("dialog");
 }
 
-/** The shared button opens the dialog on the GEOSPATIAL tab (AddLayerDialog's
- *  `SourceTab` says why), so a test about the city-model affordances has to
- *  ask for that tab before it can drive them. */
-function openCityTab(): HTMLElement {
-  const dialog = openDialog();
-  fireEvent.click(screen.getByRole("tab", { name: /city model/i }));
+function openUrlTab(handlers: Handlers = {}): HTMLElement {
+  const dialog = openDialog(handlers);
+  fireEvent.click(screen.getByRole("tab", { name: "URL" }));
   return dialog;
 }
 
-/** A drop event carrying a file, the way a browser delivers one. jsdom has no
+/**
+ * The tab panel on screen.
+ *
+ * The File and URL panels are both MOUNTED (the inactive one `hidden`), so a
+ * URL typed on one tab survives a look at another — which means a query by
+ * label or test id can match a control in the panel that is not showing.
+ * Role queries already ignore a hidden subtree; these are scoped by hand.
+ */
+const panel = (): HTMLElement =>
+  document.querySelector<HTMLElement>('[role="tabpanel"]:not([hidden])')!;
+
+/** A drop event carrying files, the way a browser delivers one. jsdom has no
  *  real `DataTransfer`, so the shape the handler reads is supplied directly. */
-function fileDrop(file: File) {
-  return {
-    dataTransfer: { files: [file], types: ["Files"], dropEffect: "" },
-  };
+function drop(...files: File[]): void {
+  fireEvent.drop(within(panel()).getByTestId("source-picker-drop-zone"), {
+    dataTransfer: { files, types: ["Files"], dropEffect: "" },
+  });
 }
 
-describe("AddLayerDialog — opening and closing", () => {
-  it("is closed until the Add Layer button is clicked", () => {
-    renderPanel();
-    expect(screen.queryByRole("dialog")).toBeNull();
+/** Type a URL and ask for it to be classified, the way a user leaving the
+ *  field does. */
+function typeUrl(url: string): void {
+  const field = urlField();
+  fireEvent.change(field, { target: { value: url } });
+  fireEvent.blur(field);
+}
 
-    const dialog = openDialog();
-    expect(dialog.getAttribute("aria-modal")).toBe("true");
-    // By ROLE: the geospatial tab it opens on has a submit button reading
-    // "Add layer" too, so a bare text query now matches two nodes.
-    expect(screen.getByRole("heading", { name: "Add layer" })).toBeTruthy();
-  });
+const urlField = () =>
+  within(panel()).getByLabelText("Source URL") as HTMLInputElement;
 
-  it("moves focus into the dialog and restores it to the trigger on close", () => {
-    renderPanel();
-    const trigger = screen.getByRole("button", { name: "+ Add Layer" });
-    trigger.focus();
+const addLayerButton = () =>
+  screen.getByRole("button", { name: "Add layer" }) as HTMLButtonElement;
 
-    const dialog = openDialog();
-    expect(document.activeElement).toBe(dialog);
+/** JUST the format name. The line's own `textContent` would include every
+ *  option of the correction select, which makes "contains CityJSON" true of
+ *  almost any state. */
+const detectionLine = () =>
+  within(panel()).getByTestId("detected-format").textContent;
 
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(trigger);
-  });
+const changeSelect = () =>
+  within(panel()).getByLabelText("Change…") as HTMLSelectElement;
 
-  it("closes on Escape", () => {
-    renderPanel();
+function geoFile(name: string, body: unknown): File {
+  return new File([JSON.stringify(body)], name, { type: "application/json" });
+}
+
+const geoLayers = () => useGeoLayerStore.getState().layers;
+
+describe("AddLayerDialog — the three places a source comes from", () => {
+  it("offers File, URL and Catalog, and opens on File", () => {
     openDialog();
 
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("closes on a backdrop click but not on a click inside the dialog", () => {
-    renderPanel();
-    const dialog = openDialog();
-
-    fireEvent.mouseDown(dialog);
-    expect(screen.queryByRole("dialog")).not.toBeNull();
-
-    fireEvent.mouseDown(screen.getByTestId("add-layer-backdrop"));
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("locks the page behind it from scrolling while open, and unlocks on close", () => {
-    renderPanel();
-    openDialog();
-    expect(document.body.style.overflow).toBe("hidden");
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(document.body.style.overflow).not.toBe("hidden");
-  });
-});
-
-describe("AddLayerDialog — loading a source", () => {
-  it("submits a pasted URL to onAddUrl and closes", () => {
-    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
-    renderPanel({ onAddUrl });
-    openCityTab();
-
-    fireEvent.change(screen.getByLabelText("Or load from URL:"), {
-      target: { value: "  https://example.com/model.city.json  " },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Load" }));
-
-    // Trimmed, and handed over exactly once.
-    expect(onAddUrl.mock.calls).toEqual([
-      ["https://example.com/model.city.json"],
-    ]);
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("ignores an empty URL — the Load button is disabled", () => {
-    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
-    renderPanel({ onAddUrl });
-    openCityTab();
-
-    const load = screen.getByRole("button", {
-      name: "Load",
-    }) as HTMLButtonElement;
-    expect(load.disabled).toBe(true);
-    fireEvent.click(load);
-    expect(onAddUrl).not.toHaveBeenCalled();
-  });
-
-  it("passes a dropped file to onAddFile and closes", () => {
-    const onAddFile = vi.fn();
-    renderPanel({ onAddFile });
-    openCityTab();
-
-    const zone = screen.getByTestId("source-picker-drop-zone");
-    const file = new File(["{}"], "delft.city.json", {
-      type: "application/json",
-    });
-    fireEvent.drop(zone, fileDrop(file));
-
-    expect(onAddFile).toHaveBeenCalledTimes(1);
-    expect((onAddFile.mock.calls[0]![0] as File).name).toBe("delft.city.json");
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("passes a multi-file drop to onAddFiles as one group and closes", () => {
-    const onAddFile = vi.fn();
-    const onAddFiles = vi.fn();
-    renderPanel({ onAddFile, onAddFiles });
-    openCityTab();
-
-    const table = new File(["{}"], "building.parquet");
-    const meta = new File(["{}"], "metadata.json");
-    fireEvent.drop(screen.getByTestId("source-picker-drop-zone"), {
-      dataTransfer: { files: [table, meta], types: ["Files"], dropEffect: "" },
-    });
-
-    expect(onAddFiles.mock.calls).toEqual([[[table, meta]]]);
-    expect(onAddFile).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("highlights the drop zone while a file is dragged over it", () => {
-    renderPanel();
-    openCityTab();
-
-    const zone = screen.getByTestId("source-picker-drop-zone");
-    expect(zone.className).not.toContain("is-dragging");
-
-    fireEvent.dragEnter(zone, { dataTransfer: { types: ["Files"] } });
-    expect(zone.className).toContain("is-dragging");
-    expect(screen.getByText("Release to load this file")).toBeTruthy();
-
-    fireEvent.dragLeave(zone, { dataTransfer: { types: ["Files"] } });
-    expect(zone.className).not.toContain("is-dragging");
-  });
-
-  it("states the supported formats", () => {
-    renderPanel();
-    openCityTab();
-    expect(
-      screen.getByText(".city.json · .city.jsonl · .fcb · .gml · .parquet"),
-    ).toBeTruthy();
-  });
-
-  it("offers the catalog as a third tab, wide, and adding from it keeps the dialog open", () => {
-    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
-    renderPanel({ onAddUrl });
-    const dialog = openDialog();
-
-    // Three source families, in that order; the geospatial one is the tab the
-    // dialog opened on.
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
-      "City model",
-      "Geospatial",
+      "File",
+      "URL",
       "Catalog",
+      "Draw",
     ]);
-    expect(dialog.className).not.toContain("modal-wide");
+    expect(screen.getByRole("tab", { name: "File" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByTestId("source-picker-drop-zone")).toBeTruthy();
+  });
+
+  it("opens on the tab named by initialTab", () => {
+    render(
+      <AddLayerDialog
+        initialTab="url"
+        onClose={noop}
+        onAddFile={noop}
+        onAddFiles={noop}
+        onAddUrl={noopUrl}
+        loading={false}
+      />,
+    );
+
+    expect(screen.getByRole("tab", { name: "URL" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("keeps the catalog on the raw handler, so adding does not close it", () => {
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
+    const dialog = openDialog({ onAddUrl });
 
     fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
-
-    expect(screen.getByText("stub catalog add")).toBeTruthy();
-    // Without the wide variant the collection grid collapses to one column.
-    expect(screen.getByRole("dialog").className).toContain("modal-wide");
+    expect(dialog.className).toContain("modal-wide");
 
     fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
 
     expect(onAddUrl.mock.calls).toEqual([[CATALOG_URL]]);
-    // MULTI-ADD: the catalog panel gets the raw handler, not the closing
-    // wrapper the URL field uses, so the user can queue several tiles.
     expect(screen.queryByRole("dialog")).not.toBeNull();
   });
+});
 
-  it("disables both affordances while a load is in flight", () => {
-    renderPanel({ loading: true });
-    openCityTab();
+describe("AddLayerDialog — the File tab", () => {
+  it("does not add on the drop: it names the format and waits to be told", () => {
+    const onAddFile = vi.fn();
+    openDialog({ onAddFile });
+
+    const file = new File(["{}"], "delft.city.json");
+    drop(file);
+
+    expect(onAddFile).not.toHaveBeenCalled();
+    expect(detectionLine()).toContain("CityJSON");
+    expect(screen.getByText("delft.city.json")).toBeTruthy();
+
+    fireEvent.click(addLayerButton());
+
+    expect(onAddFile.mock.calls).toEqual([
+      [file, { kind: "city", encoding: "cityjson", label: "CityJSON" }],
+    ]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("hands over the CORRECTED format when the user changes it", () => {
+    const onAddFile = vi.fn();
+    openDialog({ onAddFile });
+
+    drop(new File(["{}"], "tile.json"));
+    expect(detectionLine()).toContain("CityJSON");
+
+    fireEvent.change(changeSelect(), { target: { value: "city:cityjsonseq" } });
+    expect(detectionLine()).toContain("CityJSONSeq");
+    fireEvent.click(addLayerButton());
+
+    expect(onAddFile.mock.calls[0]![1]).toEqual({
+      kind: "city",
+      encoding: "cityjsonseq",
+      label: "CityJSONSeq",
+    });
+  });
+
+  it("says so — and refuses to add — when it cannot tell what a file is", () => {
+    openDialog();
+
+    drop(new File(["hello"], "notes.txt"));
+
+    expect(detectionLine()).toContain("Unknown format");
+    expect(addLayerButton().disabled).toBe(true);
+  });
+
+  it("takes a multi-file drop as ONE CityParquet package", () => {
+    const onAddFiles = vi.fn();
+    const onAddFile = vi.fn();
+    openDialog({ onAddFile, onAddFiles });
+
+    const table = new File(["{}"], "building.parquet");
+    const meta = new File(["{}"], "metadata.json");
+    drop(table, meta);
+
+    expect(detectionLine()).toContain("CityParquet");
+    fireEvent.click(addLayerButton());
+
+    expect(onAddFiles.mock.calls[0]![0]).toEqual([table, meta]);
+    expect(onAddFile).not.toHaveBeenCalled();
+  });
+
+  it("adds a dropped GeoJSON file INLINE, never through the city loader", async () => {
+    const onAddFile = vi.fn();
+    openDialog({ onAddFile });
+
+    drop(
+      geoFile("parcels.geojson", { type: "FeatureCollection", features: [] }),
+    );
+    expect(detectionLine()).toContain("GeoJSON");
+    fireEvent.click(addLayerButton());
+
+    await waitFor(() => expect(geoLayers()).toHaveLength(1));
+    expect(geoLayers()[0]).toMatchObject({
+      name: "parcels.geojson",
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [] } },
+    });
+    expect(onAddFile).not.toHaveBeenCalled();
+    // The layer the user just added is the one the panels describe.
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(geoLayers()[0]!.id);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("refuses a CityJSON file corrected to GeoJSON, and stays open to say why", async () => {
+    openDialog();
+
+    drop(
+      geoFile("delft.city.json", {
+        type: "CityJSON",
+        version: "2.0",
+        CityObjects: {},
+      }),
+    );
+    fireEvent.change(changeSelect(), { target: { value: "geo:geojson" } });
+    fireEvent.click(addLayerButton());
+
+    await waitFor(() => expect(screen.getByText(/not GeoJSON/i)).toBeTruthy());
+    expect(geoLayers()).toHaveLength(0);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("does not offer the two formats a FILE cannot be", () => {
+    openDialog();
+
+    drop(new File(["{}"], "tile.json"));
+
+    const options = Array.from(changeSelect().options).map((o) => o.value);
+    // A tile template and a tileset are remote by definition; offering them
+    // for a local pick would be a choice this tab could not honour.
+    expect(options).toContain("geo:geojson");
+    expect(options).not.toContain("geo:raster-xyz");
+    expect(options).not.toContain("geo:3d-tiles");
+  });
+
+  it("will not pretend a dropped tileset.json is a 3D Tiles layer", () => {
+    openDialog();
+
+    // The name says 3D Tiles, but a tileset is a URL the engine walks, not a
+    // file it reads. Saying "3D Tiles" here and then refusing to add it would
+    // be the line and the button disagreeing, so the honest answer is that we
+    // do not know what this FILE is.
+    drop(new File(["{}"], "tileset.json"));
+
+    expect(detectionLine()).toContain("Unknown format");
+    expect(changeSelect().value).toBe("unknown");
+    expect(addLayerButton().disabled).toBe(true);
+
+    fireEvent.change(changeSelect(), { target: { value: "city:cityjson" } });
+    expect(addLayerButton().disabled).toBe(false);
+  });
+
+  it("clears a refusal when the user corrects the format again", async () => {
+    openDialog();
+
+    drop(
+      geoFile("delft.city.json", {
+        type: "CityJSON",
+        version: "2.0",
+        CityObjects: {},
+      }),
+    );
+    fireEvent.change(changeSelect(), { target: { value: "geo:geojson" } });
+    fireEvent.click(addLayerButton());
+    await waitFor(() => expect(screen.getByText(/not GeoJSON/i)).toBeTruthy());
+
+    // The complaint was about the LAST attempt. Correcting the format is the
+    // answer to it, so it must not sit under the new choice.
+    fireEvent.change(changeSelect(), { target: { value: "city:cityjson" } });
+    expect(screen.queryByText(/not GeoJSON/i)).toBeNull();
+  });
+
+  it("disables browsing while a load is in flight", () => {
+    openDialog({ loading: true });
 
     expect(
       (
@@ -260,8 +360,281 @@ describe("AddLayerDialog — loading a source", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
-    expect(
-      (screen.getByLabelText("Or load from URL:") as HTMLInputElement).disabled,
-    ).toBe(true);
   });
+});
+
+describe("AddLayerDialog — the URL tab", () => {
+  it("detects on blur and hands the URL and its format to onAddUrl", () => {
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
+    openUrlTab({ onAddUrl });
+
+    typeUrl("  https://example.com/model.city.json  ");
+
+    expect(detectionLine()).toContain("CityJSON");
+    fireEvent.click(addLayerButton());
+
+    expect(onAddUrl.mock.calls).toEqual([
+      [
+        "https://example.com/model.city.json",
+        { kind: "city", encoding: "cityjson", label: "CityJSON" },
+      ],
+    ]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("detects on Enter too, and honours a correction to FlatCityBuf", () => {
+    // Parameters declared, so `mock.calls[0]` is the two-element tuple this
+    // assertion destructures rather than the empty one a bare fake implies.
+    const onAddUrl = vi.fn(
+      async (_url: string, _override?: DetectedSource) =>
+        ({ ok: true }) as const,
+    );
+    openUrlTab({ onAddUrl });
+
+    fireEvent.change(screen.getByLabelText("Source URL"), {
+      target: { value: "https://example.com/model.json" },
+    });
+    fireEvent.submit(screen.getByTestId("url-source-form"));
+    expect(detectionLine()).toContain("CityJSON");
+
+    fireEvent.change(changeSelect(), { target: { value: "city:flatcitybuf" } });
+    fireEvent.click(addLayerButton());
+
+    expect(onAddUrl.mock.calls[0]![1]).toMatchObject({
+      kind: "city",
+      encoding: "flatcitybuf",
+    });
+  });
+
+  it("keeps a correction through a re-blur of the untouched field", () => {
+    const onAddUrl = vi.fn(
+      async (_url: string, _override?: DetectedSource) =>
+        ({ ok: true }) as const,
+    );
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://example.com/model.json");
+    fireEvent.change(changeSelect(), { target: { value: "city:flatcitybuf" } });
+
+    // Back into the field and out again, without editing it: re-detecting
+    // there would silently undo what the user just told us.
+    const field = screen.getByLabelText("Source URL");
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    expect(detectionLine()).toContain("FlatCityBuf");
+
+    fireEvent.click(addLayerButton());
+    expect(onAddUrl.mock.calls[0]![1]).toMatchObject({
+      encoding: "flatcitybuf",
+    });
+  });
+
+  it("re-detects when the URL itself changes", () => {
+    openUrlTab();
+
+    typeUrl("https://example.com/model.json");
+    fireEvent.change(changeSelect(), { target: { value: "city:flatcitybuf" } });
+
+    typeUrl("https://example.com/tile.city.jsonl");
+    expect(detectionLine()).toContain("CityJSONSeq");
+  });
+
+  it("classifies an XYZ template, adds it to the geo store and activates it", () => {
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://tile.example/{z}/{x}/{y}.png");
+    expect(detectionLine()).toContain("XYZ raster tiles");
+    fireEvent.click(addLayerButton());
+
+    expect(geoLayers()).toHaveLength(1);
+    expect(geoLayers()[0]).toMatchObject({
+      kind: "raster-xyz",
+      config: { urlTemplate: "https://tile.example/{z}/{x}/{y}.png" },
+    });
+    expect(onAddUrl).not.toHaveBeenCalled();
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(geoLayers()[0]!.id);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("classifies a tileset.json as 3D Tiles", () => {
+    openUrlTab();
+
+    typeUrl("https://tiles.example/paris/tileset.json");
+    expect(detectionLine()).toContain("3D Tiles");
+    fireEvent.click(addLayerButton());
+
+    expect(geoLayers()[0]).toMatchObject({
+      kind: "3d-tiles",
+      config: { url: "https://tiles.example/paris/tileset.json" },
+    });
+  });
+
+  it("routes an unrecognised URL corrected to GeoJSON into the geo store", () => {
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://example.com/features.txt");
+    expect(detectionLine()).toContain("Unknown format");
+    expect(addLayerButton().disabled).toBe(true);
+
+    fireEvent.change(changeSelect(), { target: { value: "geo:geojson" } });
+    fireEvent.click(addLayerButton());
+
+    expect(geoLayers()[0]).toMatchObject({
+      kind: "geojson",
+      config: { url: "https://example.com/features.txt" },
+    });
+    expect(onAddUrl).not.toHaveBeenCalled();
+  });
+
+  it("offers an optional name for a geospatial layer", () => {
+    openUrlTab();
+
+    typeUrl("https://tile.example/{z}/{x}/{y}.png");
+    fireEvent.change(screen.getByLabelText("Layer name"), {
+      target: { value: "Aerial 2024" },
+    });
+    fireEvent.click(addLayerButton());
+
+    expect(geoLayers()[0]!.name).toBe("Aerial 2024");
+  });
+
+  it("has no name field for a city model — the file name is the name", () => {
+    openUrlTab();
+
+    typeUrl("https://example.com/model.city.json");
+
+    expect(screen.queryByLabelText("Layer name")).toBeNull();
+  });
+
+  it("refuses a URL that is not one, and stays open", () => {
+    openUrlTab();
+
+    typeUrl("not a url");
+    fireEvent.change(changeSelect(), { target: { value: "geo:geojson" } });
+    fireEvent.click(addLayerButton());
+
+    expect(geoLayers()).toHaveLength(0);
+    expect(screen.getByText(/not a valid url/i)).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("adds a .geojson URL to the geo store, never to the city loader", () => {
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://example.com/parcels.geojson");
+    expect(detectionLine()).toContain("GeoJSON");
+    fireEvent.click(addLayerButton());
+
+    expect(geoLayers()).toHaveLength(1);
+    expect(geoLayers()[0]).toMatchObject({
+      kind: "geojson",
+      config: { url: "https://example.com/parcels.geojson" },
+    });
+    expect(onAddUrl).not.toHaveBeenCalled();
+  });
+
+  it("keeps the typed URL and its correction across a look at another tab", () => {
+    openUrlTab();
+
+    typeUrl("https://example.com/model.json");
+    fireEvent.change(changeSelect(), { target: { value: "city:flatcitybuf" } });
+
+    fireEvent.click(screen.getByRole("tab", { name: "File" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
+    fireEvent.click(screen.getByRole("tab", { name: "URL" }));
+
+    // Retyping a URL because you glanced at another tab is the kind of small
+    // loss that makes a dialog feel hostile.
+    expect(urlField().value).toBe("https://example.com/model.json");
+    expect(detectionLine()).toContain("FlatCityBuf");
+  });
+
+  it("ignores Detect while a correction stands, and re-arms on an edit", () => {
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://example.com/features.txt");
+    fireEvent.change(changeSelect(), { target: { value: "geo:geojson" } });
+
+    // Enter, on a URL the user has already corrected: re-classifying it would
+    // throw the correction away for the second time in one field.
+    fireEvent.submit(within(panel()).getByTestId("url-source-form"));
+    expect(detectionLine()).toContain("GeoJSON");
+    expect(geoLayers()).toHaveLength(0);
+
+    // A DIFFERENT URL is a different question.
+    fireEvent.change(urlField(), {
+      target: { value: "https://example.com/features.txt2" },
+    });
+    fireEvent.submit(within(panel()).getByTestId("url-source-form"));
+    expect(detectionLine()).toContain("Unknown format");
+  });
+
+  it("cannot add before anything has been detected", () => {
+    openUrlTab();
+
+    expect(screen.queryByTestId("detected-source")).toBeNull();
+    expect(addLayerButton().disabled).toBe(true);
+  });
+});
+
+describe("AddLayerDialog — modal chrome", () => {
+  it("moves focus into the dialog and restores it to the trigger on close", () => {
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "+ Add layer" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes on Escape and on a backdrop click, but not on a click inside", () => {
+    const dialog = openDialog();
+
+    fireEvent.mouseDown(dialog);
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+
+    fireEvent.mouseDown(screen.getByTestId("add-layer-backdrop"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add layer" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("never hands Tab to a control in the tab panel that is hidden", () => {
+    const dialog = openDialog();
+    // Shift+Tab from the dialog itself wraps to the LAST focusable control,
+    // which must be one the user can see — the URL panel is mounted behind
+    // this one so its field survives a tab switch, and a focus trap that
+    // counted it would strand the keyboard on an invisible input.
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+
+    const active = document.activeElement as HTMLElement;
+    expect(dialog.contains(active)).toBe(true);
+    expect(active.closest("[hidden]")).toBeNull();
+  });
+
+  it("locks the page behind it from scrolling while open", () => {
+    openDialog();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
+});
+
+it("creates an empty draw layer and closes the dialog", () => {
+  openDialog();
+  fireEvent.click(screen.getByRole("tab", { name: "Draw" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add draw layer" }));
+  expect(useGeoLayerStore.getState().layers.at(-1)?.name).toBe("Draw layer");
+  expect(screen.queryByRole("dialog")).toBeNull();
 });

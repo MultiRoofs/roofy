@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Roofy — Motion studies</title
+  ><style>
+    @font-face {
+      font-family: Source;
+      src: url("/node_modules/@fontsource/source-sans-3/files/source-sans-3-latin-400-normal.woff2");
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #f6f7f2;
+      color: #14181e;
+      font:
+        16px Source,
+        "Arial",
+        sans-serif;
+    }
+    main {
+      max-width: 1320px;
+      margin: auto;
+      padding: 48px 32px;
+    }
+    h1 {
+      font-size: 38px;
+      letter-spacing: -0.025em;
+      margin: 0 0 12px;
+    }
+    p {
+      line-height: 1.55;
+      color: #5c636e;
+      max-width: 700px;
+    }
+    nav {
+      display: flex;
+      gap: 10px;
+      margin: 26px 0 38px;
+    }
+    button,
+    a {
+      font: inherit;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 16px;
+      background: #e5ecdd;
+      color: inherit;
+      cursor: pointer;
+    }
+    button:focus-visible,
+    a:focus-visible {
+      outline: 2px solid #4a7a0f;
+      outline-offset: 4px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+    }
+    .stage {
+      height: 270px;
+      background: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      border-radius: 12px;
+    }
+    .stage img {
+      width: 140px;
+      height: 140px;
+    }
+    .wordmark {
+      font-weight: 600;
+      font-size: 48px;
+      letter-spacing: -1.3px;
+    }
+    h2 {
+      font-size: 22px;
+      margin: 22px 0 8px;
+    }
+    .detail {
+      min-height: 76px;
+      font-size: 15px;
+    }
+    .actions {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+    a {
+      color: #486f2c;
+      font-size: 14px;
+    }
+    .timing {
+      font-size: 13px;
+      color: #5c636e;
+    }
+    .dark {
+      background: #0b0e13;
+      color: #f2f4ef;
+    }
+    .dark .stage {
+      background: #12161e;
+    }
+    .dark p,
+    .dark .timing {
+      color: #a4ada4;
+    }
+    .dark button {
+      background: #28332b;
+    }
+    .dark a {
+      color: #cdf176;
+    }
+    footer {
+      margin-top: 42px;
+      border-top: 1px solid #adb5a655;
+      padding-top: 18px;
+      font-size: 14px;
+    }
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      .detail {
+        min-height: 0;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .motion-note {
+        display: block;
+      }
+    }
+  </style>
+  <main>
+    <h1>Roofy, in motion.</h1>
+    <p>
+      Three brand signatures, built from the existing four-color mark. Each
+      plays once, then holds. The wordmark stays still so the name remains easy
+      to read.
+    </p>
+    <nav>
+      <button id="replay">Replay all</button
+      ><button id="theme">Dark background</button>
+    </nav>
+    <div class="grid">
+      <article>
+        <div class="stage">
+          <img
+            data-motion="build"
+            src="roofy-build-light.svg"
+            alt="Animated Roofy mark"
+          /><span class="wordmark">Roofy</span>
+        </div>
+        <h2>A · Build, roof by roof</h2>
+        <p class="detail">
+          The foundation arrives first, then each roof plane settles into place.
+        </p>
+        <p class="timing">1.8s · plays once</p>
+        <div class="actions">
+          <button data-replay="build">Replay</button
+          ><a data-download="build" href="roofy-build-light.svg" download
+            >Download SVG</a
+          >
+        </div>
+      </article>
+      <article>
+        <div class="stage">
+          <img
+            data-motion="horizon"
+            src="roofy-horizon-light.svg"
+            alt="Animated Roofy mark"
+          /><span class="wordmark">Roofy</span>
+        </div>
+        <h2>B · Horizon reveal</h2>
+        <p class="detail">
+          A clean upward reveal moves from the blue foundation to the rooftop
+          peak.
+        </p>
+        <p class="timing">1.6s · plays once</p>
+        <div class="actions">
+          <button data-replay="horizon">Replay</button
+          ><a data-download="horizon" href="roofy-horizon-light.svg" download
+            >Download SVG</a
+          >
+        </div>
+      </article>
+      <article>
+        <div class="stage">
+          <img
+            data-motion="unfold"
+            src="roofy-unfold-light.svg"
+            alt="Animated Roofy mark"
+          /><span class="wordmark">Roofy</span>
+        </div>
+        <h2>C · Open possibilities</h2>
+        <p class="detail">
+          The four colored planes expand from their meeting edges into the
+          finished mark.
+        </p>
+        <p class="timing">2.0s · plays once</p>
+        <div class="actions">
+          <button data-replay="unfold">Replay</button
+          ><a data-download="unfold" href="roofy-unfold-light.svg" download
+            >Download SVG</a
+          >
+        </div>
+      </article>
+    </div>
+    <footer>
+      <p>
+        <strong>My recommendation: A · Build, roof by roof.</strong> It
+        expresses the city-model idea and gives each rooftop function its own
+        moment. B is the quietest option for presentations; C has a more
+        expressive, playful rhythm.
+      </p>
+      <p>
+        Transparent SVG assets are saved in light and dark palettes. Motion
+        respects “Reduce motion.” These are brand studies; the app logo is
+        unchanged.
+      </p>
+    </footer>
+  </main>
+  <script>
+    let dark = false;
+    function replay(key) {
+      document.querySelectorAll("img[data-motion]").forEach((img) => {
+        if (!key || img.dataset.motion === key)
+          img.src =
+            "roofy-" +
+            img.dataset.motion +
+            "-" +
+            (dark ? "dark" : "light") +
+            ".svg?replay=" +
+            Date.now();
+      });
+    }
+    document.querySelector("#replay").onclick = () => replay();
+    document
+      .querySelectorAll("[data-replay]")
+      .forEach((b) => (b.onclick = () => replay(b.dataset.replay)));
+    document.querySelector("#theme").onclick = () => {
+      dark = !dark;
+      document.body.classList.toggle("dark", dark);
+      document.querySelector("#theme").textContent = dark
+        ? "Light background"
+        : "Dark background";
+      document
+        .querySelectorAll("[data-download]")
+        .forEach(
+          (a) =>
+            (a.href =
+              "roofy-" +
+              a.dataset.download +
+              "-" +
+              (dark ? "dark" : "light") +
+              ".svg"),
+        );
+      replay();
+    };
+  </script>
+</html>

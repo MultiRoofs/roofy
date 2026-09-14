@@ -49,6 +49,11 @@ import type {
 } from "../../../src/persistence/types";
 import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
 import type { PlatformServices } from "../../../src/platform/types";
+import {
+  useWorkspaceStore,
+  DEFAULT_WORKSPACE_NAME,
+} from "../../../src/features/workspace/workspaceStore";
+import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -140,13 +145,24 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
 }));
 
 // DuckDB-wasm is irrelevant here and expensive to even import.
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
+  getEngineGeneration: vi.fn(() => 1),
+  onEngineDeath: vi.fn(() => () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
-  loadModelIntoDuckDB: vi.fn(async () => false),
-  loadCityModelFromMemory: vi.fn(async () => false),
-  loadResidentObjectsIntoDuckDB: vi.fn(async () => false),
-  shouldUseSourceUrlPath: vi.fn(() => false),
+  isExtensionLoaded: vi.fn(() => false),
+  ensureExtension: vi.fn(async () => false),
+  formatDuckDBError: (e: unknown) =>
+    e instanceof Error ? e.message : String(e),
+  runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  registerBuffer: vi.fn(async () => false),
+  dropBuffer: vi.fn(async () => {}),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
+  queryParquetBuffer: vi.fn(async () => null),
 }));
 
 /** What `openStreamingLayer` saw, and when. A zero `layersAtCall` is the
@@ -196,11 +212,19 @@ const model = {
   vertexCount: 0,
 };
 
+/** What `loadFromUrl` resolves since Task 15: the model PLUS the decoded
+ *  source bytes and the encoding, for the layer's DuckDB table. */
+const loaded = {
+  model,
+  bytes: new TextEncoder().encode("{}"),
+  encoding: "cityjson" as const,
+};
+
 const SAVED_AT = "2026-08-01T10:00:00.000Z";
 
 function snapshotWithUrlLayer(): ProjectSnapshot {
   return {
-    version: "3",
+    version: "4",
     savedAt: SAVED_AT,
     label: "delft",
     layers: [
@@ -231,8 +255,16 @@ function storeWith(snapshot: ProjectSnapshot | null): ProjectStateStore {
 
 /** Click the snapshot list's Restore button (landing page only). */
 async function clickRestore(): Promise<void> {
-  const button = await screen.findByRole("button", { name: "Restore" });
-  fireEvent.click(button);
+  fireEvent.click(
+    screen.getByRole("button", { name: useWorkspaceStore.getState().name }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+  await waitFor(() =>
+    expect(document.querySelector(".workspace-snapshot")).not.toBeNull(),
+  );
+  fireEvent.click(
+    document.querySelector<HTMLButtonElement>(".workspace-snapshot")!,
+  );
 }
 
 beforeEach(() => {
@@ -245,7 +277,6 @@ beforeEach(() => {
       modelRef: { type: "url", url: FCB_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       isStreaming: true,
     });
     return "stream-1";
@@ -254,8 +285,13 @@ beforeEach(() => {
   setCameraState.mockClear();
   cameraState = CAM;
   loadFromUrl.mockReset();
-  loadFromUrl.mockResolvedValue(model);
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  loadFromUrl.mockResolvedValue(loaded);
+  useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({
+    activeLayerId: null,
+    name: DEFAULT_WORKSPACE_NAME,
+  });
   location.hash = "";
 });
 
@@ -384,8 +420,188 @@ describe("App restore against CitySceneHandle.ready", () => {
         screen.getAllByText(/needs? a local file re-selected/).length,
       ).toBeGreaterThan(0),
     );
-    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(setCameraState).not.toHaveBeenCalled();
+  });
+
+  it("restores the saved camera after a local workspace file is re-selected", async () => {
+    const snapshot = snapshotWithUrlLayer();
+    const localSnapshot: ProjectSnapshot = {
+      ...snapshot,
+      layers: snapshot.layers!.map((layer) => ({
+        ...layer,
+        modelRef: { type: "file", fileName: "delft.city.json" },
+      })),
+    };
+    render(<App persistenceStore={storeWith(localSnapshot)} />);
+    await clickRestore();
+    const input = await screen.findByTestId("relink-input");
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(
+            [
+              JSON.stringify({
+                type: "CityJSON",
+                version: "2.0",
+                CityObjects: {},
+                vertices: [],
+                metadata: { referenceSystem: "EPSG:7415" },
+              }),
+            ],
+            "delft.city.json",
+          ),
+        ],
+      },
+    });
+    await screen.findByTestId("navara-viewport");
+    readyGate.resolve();
+    await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  });
+
+  it("gives a file-backed layer a ROW in the viewer, not a banner over it", async () => {
+    // 12.2: inside the shell a layer waiting for its file is still one of the
+    // workspace's layers, so it takes a row in the list beside the ones that
+    // loaded — the banner that used to float over the map is the LANDING
+    // page's alone (there is no list there to put a row in).
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      layers: [
+        ...snapshotWithUrlLayer().layers!,
+        {
+          name: "houses",
+          modelRef: { type: "file", fileName: "houses.city.json" },
+          rules: [],
+          rulesEnabled: true,
+          visible: true,
+        },
+      ],
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    const row = await waitFor(() => {
+      const el = screen.getByText("houses").closest('[role="listitem"]');
+      if (el === null) throw new Error("no row for the unavailable layer");
+      return el;
+    });
+    expect(row.textContent).toContain("Needs re-link");
+    expect(
+      screen.getByRole("button", { name: "Re-link houses" }),
+    ).toBeInTheDocument();
+    expect(document.querySelector(".unavailable-layers")).toBeNull();
+  });
+});
+
+/**
+ * Which layer a restored workspace comes up looking at (snapshot v4).
+ *
+ * The saved index is per-KIND and refers to the position in the SNAPSHOT, not
+ * to the layers that happened to land — and the restore adds geo layers before
+ * the city loop, so the workspace invariants would otherwise hand the active
+ * id to the first geo layer and leave the city model the user was working on
+ * unselected.
+ */
+function urlLayer(
+  name: string,
+): NonNullable<ProjectSnapshot["layers"]>[number] {
+  return {
+    name,
+    modelRef: { type: "url", url: JSON_URL },
+    rules: [],
+    rulesEnabled: true,
+    visible: true,
+  };
+}
+
+describe("App restore and the active layer", () => {
+  it("activates the layer the snapshot saved, not the first one added", async () => {
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      layers: [urlLayer("delft"), urlLayer("rotterdam")],
+      activeLayer: { kind: "city", index: 1 },
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeLayerId).toBe(
+        useLayerStore.getState().layers[1]!.id,
+      ),
+    );
+  });
+
+  it("restores a v3 snapshot with geo layers with the first CITY layer active", async () => {
+    // No `activeLayer` field at all — a document written before v4. The
+    // fallback is the first layer in UNIFIED order (city first, then geo), and
+    // the geo layer is added FIRST, so this fails the moment the explicit
+    // activation is dropped.
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      version: "3",
+      layers: [urlLayer("delft")],
+      geoLayers: [
+        {
+          name: "parks",
+          kind: "geojson",
+          visible: true,
+          opacity: 1,
+          // Re-linkable row: no URL, so nothing is fetched in jsdom.
+          config: {},
+        },
+      ],
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(1),
+    );
+    expect(useGeoLayerStore.getState().layers).toHaveLength(1);
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeLayerId).toBe(
+        useLayerStore.getState().layers[0]!.id,
+      ),
+    );
+  });
+
+  it("does not let an unavailable placeholder shift the saved index", async () => {
+    // Snapshot index 2 is the THIRD saved layer; the first cannot be reopened
+    // (file-backed) and adds no layer at all. A restore that compacted the
+    // added ids would read index 2 out of range and fall back to the first.
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      layers: [
+        {
+          name: "local",
+          modelRef: { type: "file", fileName: "local.city.json" },
+          rules: [],
+          rulesEnabled: true,
+          visible: true,
+        },
+        urlLayer("delft"),
+        urlLayer("rotterdam"),
+      ],
+      activeLayer: { kind: "city", index: 2 },
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeLayerId).toBe(
+        useLayerStore.getState().layers[1]!.id,
+      ),
+    );
   });
 });
 
@@ -457,7 +673,7 @@ describe("App share-hash restore", () => {
     render(<App persistenceStore={storeWith(null)} />);
 
     await waitFor(() =>
-      expect(screen.getByText(/older version of Urbis/)).toBeInTheDocument(),
+      expect(screen.getByText(/older version of Roofy/)).toBeInTheDocument(),
     );
     // Nothing was opened from a link whose camera cannot be trusted...
     expect(loadFromUrl).not.toHaveBeenCalled();
@@ -485,8 +701,8 @@ describe("App share-hash restore", () => {
       ).toBeInTheDocument(),
     );
     expect(useLayerStore.getState().layers).toHaveLength(0);
-    // No viewport to point, so no camera was pushed and no 15 s wait for one.
-    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    // The retained empty viewer keeps its original engine and shows the failure inline.
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(setCameraState).not.toHaveBeenCalled();
   });
 });
@@ -501,7 +717,6 @@ async function mountShellWithLayer(): Promise<void> {
     modelRef: { type: "url", url: JSON_URL },
     visible: true,
     rules: [],
-    rulesEnabled: true,
   });
   await waitFor(() =>
     expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
@@ -628,9 +843,53 @@ describe("App save success", () => {
     // Silence used to be the only signal that a save had worked.
     await waitFor(() =>
       expect(
-        screen.getByText(/Workspace saved.*next time you open Urbis/),
+        screen.getByText(/Workspace saved.*next time you open Roofy/),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+describe("App save labels the snapshot with the workspace's name", () => {
+  it("writes the workspace name, not the active layer's", async () => {
+    const save = vi.fn(async (_snapshot: ProjectSnapshot) => "snap-2");
+    render(<App persistenceStore={{ ...storeWith(null), save }} />);
+    await mountShellWithLayer();
+    // The layer is called "delft"; the workspace is not. Two workspaces built
+    // on the same file are otherwise indistinguishable in the saved list.
+    act(() => {
+      useWorkspaceStore.getState().setName("Delft rooftop study");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]![0].label).toBe("Delft rooftop study");
+  });
+
+  it("takes the name back from the snapshot on a restore", async () => {
+    render(<App persistenceStore={storeWith(snapshotWithUrlLayer())} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().name).toBe("delft"),
+    );
+  });
+
+  it("resets the name when a new workspace is started", async () => {
+    render(<App persistenceStore={storeWith(null)} />);
+    await mountShellWithLayer();
+    act(() => {
+      useWorkspaceStore.getState().setName("Delft rooftop study");
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delft rooftop study" }),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
+    });
+
+    expect(useWorkspaceStore.getState().name).toBe(DEFAULT_WORKSPACE_NAME);
   });
 });
 
@@ -672,4 +931,46 @@ describe("App toast timers", () => {
     });
     expect(screen.queryByText(/try sharing again/)).toBeNull();
   });
+});
+
+it("does not prompt to add a layer when opening a populated saved workspace from management", async () => {
+  render(<App persistenceStore={storeWith(snapshotWithUrlLayer())} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: useWorkspaceStore.getState().name }),
+  );
+  fireEvent.click(screen.getByRole("link", { name: "Manage workspaces" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+  await waitFor(() => expect(useLayerStore.getState().layers).toHaveLength(1));
+  readyGate.resolve();
+  await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
+  window.history.replaceState(null, "", "/");
+});
+
+it("saves a partial restore as a new workspace instead of overwriting missing layers", async () => {
+  const snapshot = snapshotWithUrlLayer();
+  const partial = {
+    ...snapshot,
+    layers: [
+      ...snapshot.layers!,
+      {
+        ...snapshot.layers![0]!,
+        name: "Local file",
+        modelRef: { type: "file" as const, fileName: "local.city.json" },
+      },
+    ],
+  };
+  const store = {
+    ...storeWith(partial),
+    update: vi.fn(async () => {}),
+    save: vi.fn(async () => "new-save"),
+  };
+  render(<App persistenceStore={store} />);
+  await clickRestore();
+  await waitFor(() => expect(useLayerStore.getState().layers).toHaveLength(1));
+  readyGate.resolve();
+  await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+  await waitFor(() => expect(store.save).toHaveBeenCalled());
+  expect(store.update).not.toHaveBeenCalled();
 });

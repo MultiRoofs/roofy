@@ -17,11 +17,18 @@
  */
 
 import { useState } from "react";
+import { CityObjectIcon } from "./CityObjectIcon";
 import { useLayerStore } from "../../features/layers/layerStore";
 import type { Layer } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
 
-export function LayerTypeToggles({ layer }: { readonly layer: Layer }) {
+export function LayerTypeToggles({
+  layer,
+  expanded = false,
+}: {
+  readonly layer: Layer;
+  readonly expanded?: boolean;
+}) {
   const setHiddenTypes = useLayerStore((s) => s.setHiddenTypes);
   // A streaming layer's groups are discovered from the cells the worker
   // decodes, exactly like its LoD ladder, so they come from the stream store
@@ -36,7 +43,7 @@ export function LayerTypeToggles({ layer }: { readonly layer: Layer }) {
   // A single-group static layer has nothing to choose between, and its list is
   // final. A streaming layer keeps the disclosure however few groups it has
   // seen so far, because that number only grows as the user pans.
-  if (!layer.isStreaming && types.length <= 1) return null;
+  if (!expanded && !layer.isStreaming && types.length <= 1) return null;
 
   const hidden = new Set(layer.hiddenTypes);
 
@@ -53,26 +60,35 @@ export function LayerTypeToggles({ layer }: { readonly layer: Layer }) {
 
   return (
     <>
-      <button
-        className={`layer-types-btn ${open ? "is-open" : ""}`}
-        aria-expanded={open}
-        aria-label="Object types"
-        title="Object types to show in this layer"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-      >
-        <svg viewBox="0 0 24 24" width="10" height="10">
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
+      {!expanded && (
+        <button
+          className={`layer-types-btn ${open ? "is-open" : ""}`}
+          aria-expanded={open}
+          aria-label="Object types"
+          title="Object types to show in this layer"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((v) => !v);
+          }}
+        >
+          <svg viewBox="0 0 24 24" width="10" height="10">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      )}
 
-      {open && (
-        <div className="layer-types-list" onClick={(e) => e.stopPropagation()}>
+      {(expanded || open) && (
+        <div
+          className="layer-types-list"
+          role="group"
+          aria-label="Object types"
+          onClick={(e) => e.stopPropagation()}
+        >
           {types.length === 0 ? (
             <span className="layer-types-empty">
-              Types appear as features stream in
+              {layer.isStreaming
+                ? "Types appear as features stream in"
+                : "No object types in this layer"}
             </span>
           ) : (
             types.map((type) => (
@@ -82,6 +98,7 @@ export function LayerTypeToggles({ layer }: { readonly layer: Layer }) {
                   checked={!hidden.has(type)}
                   onChange={() => toggle(type)}
                 />
+                <CityObjectIcon type={type} />
                 {type}
               </label>
             ))

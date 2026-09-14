@@ -23,10 +23,27 @@
  * (`commitPlanner`'s `resolveLod`).
  */
 
+import { useId } from "react";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
 
-export function StreamingLodControl() {
+export interface StreamingLodControlProps {
+  /** The control's visible label. It defaults to the compact "Streaming LoD"
+   *  the dense layer row wants; the active layer's Details section passes the
+   *  long form, because there the control sits among PER-LAYER settings and
+   *  has to say out loud that it is not one of them. */
+  readonly label?: string;
+}
+
+export function StreamingLodControl({
+  label = "Streaming LoD",
+}: StreamingLodControlProps = {}) {
+  // `useId`, not the literal `"streaming-lod"` it used to hard-code: the
+  // control can be on screen twice at once (the incumbent `LayerPanel` and
+  // the active layer's Details section, until Task 23 removes the first), and
+  // two labels pointing at one id hand the SECOND control's clicks to the
+  // first — and `getByLabelText` to whichever the DOM finds first.
+  const selectId = useId();
   const layers = useLayerStore((s) => s.layers);
   const setLayerLod = useLayerStore((s) => s.setLayerLod);
   const setLodMode = useLayerStore((s) => s.setLodMode);
@@ -72,9 +89,9 @@ export function StreamingLodControl() {
 
   return (
     <div className="streaming-lod-control">
-      <label htmlFor="streaming-lod">Streaming LoD</label>
+      <label htmlFor={selectId}>{label}</label>
       <select
-        id="streaming-lod"
+        id={selectId}
         className="advanced-select"
         value={value}
         title={

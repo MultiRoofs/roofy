@@ -1,3 +1,11 @@
+import {
+  normalizeTablePresentation,
+  type TablePresentation,
+} from "../features/query/tablePresentation";
+import {
+  normalizeAttributeOrders,
+  type AttributeOrders,
+} from "../features/attributes/attributeOrder";
 /**
  * Persistence layer interfaces.
  *
@@ -6,7 +14,9 @@
  * Tauri-native implementations without changing feature-level code.
  */
 
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import type { Rule } from "../features/rules/types";
+import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
 import type { SceneTheme } from "../features/sceneTheme/sceneThemeStore";
@@ -54,8 +64,34 @@ export type StreamSourceSnapshot =
 export interface LayerSnapshot {
   readonly name: string;
   readonly modelRef: CityModelReference;
+  /**
+   * The USER's rules, never the effective list — the catch-alls that carry the
+   * single and unmatched colours are derived from {@link colorBy} and would be
+   * the same fact written twice.
+   */
   readonly rules: ReadonlyArray<Rule>;
+  /**
+   * Written as `colorBy === "rules"` since 12.3, and read back ONLY when
+   * {@link colorBy} is absent — which is exactly what an older document is.
+   * Kept required so a v4 document written by this build is still readable by
+   * one that predates the mode.
+   */
   readonly rulesEnabled: boolean;
+  /**
+   * What the layer's roofs are coloured by, and the two colours the modes that
+   * need them use.
+   *
+   * OPTIONAL, and the version stays "4", on exactly the terms `appearance` and
+   * `style` set: absent means the derived default (`rulesEnabled &&
+   * rules.length > 0 ? "rules" : "surface"`), which is the rendering an older
+   * document was saved from. Both colours are written even when they equal the
+   * current defaults — a saved workspace should keep the colours it was saved
+   * with if a future build retunes `cityColors`. Validated on the way back in
+   * by `normalizeLayers` (enum, `#rrggbb`).
+   */
+  readonly colorBy?: ColorBy;
+  readonly singleColor?: string;
+  readonly unmatchedColor?: string;
   readonly visible: boolean;
   readonly selectedLod?: string | null;
   /** Defaults to "auto" on restore (via `normalizeLayers`) when absent from
@@ -66,6 +102,12 @@ export interface LayerSnapshot {
    *  `availableObjectTypes` is NOT saved: it is derived from the model on
    *  load, and rediscovered cell by cell for a streaming layer. */
   readonly hiddenTypes?: readonly string[];
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
+  /** The appearance theme drawn (texture or material), `null` for plain
+   *  colours. Absent in older snapshots — restore then picks the model's
+   *  load default, exactly like a fresh load. Additive; version stays "3". */
+  readonly appearance?: AppearanceTheme | null;
   /** Present only for a streaming layer. */
   readonly stream?: StreamSourceSnapshot;
 }
@@ -86,6 +128,8 @@ export interface RawLayerSnapshot {
   readonly [key: string]: unknown;
   readonly lodMode?: "auto" | "manual";
   readonly hiddenTypes?: readonly string[];
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   readonly stream?: StreamSourceSnapshot;
 }
 
@@ -97,6 +141,14 @@ export interface RawLayersDocument {
 export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
   readonly lodMode: "auto" | "manual";
   readonly hiddenTypes: readonly string[];
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
+  /** Defaulted and VALIDATED by `normalizeLayers`, so nothing downstream ever
+   *  sees an absent mode, an unknown one or a colour that is not `#rrggbb`.
+   *  See {@link LayerSnapshot.colorBy} for where the default comes from. */
+  readonly colorBy: ColorBy;
+  readonly singleColor: string;
+  readonly unmatchedColor: string;
   /** True when this layer streamed from a local `File`/`Blob` — that byte
    *  source cannot survive a reload, so the layer must be presented as an
    *  explicit "needs re-selection" placeholder rather than silently
@@ -111,10 +163,11 @@ export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
  * defaults `lodMode` to `"auto"` and `hiddenTypes` to `[]` when absent, and
  * marks a file-backed streaming layer `unavailable`.
  *
- * This is NOT a version migration — snapshot v3 rejects every older document
- * outright (see {@link UnsupportedSnapshotVersionError}). It is the
- * per-layer "default what's optional, flag what cannot survive a reload"
- * pass, which a perfectly current v3 document needs too, because `lodMode`
+ * This is NOT a version migration — that lives in `migrateSnapshot`, which
+ * carries v3 forward and rejects everything older (see
+ * {@link UnsupportedSnapshotVersionError}). It is the per-layer "default
+ * what's optional, flag what cannot survive a reload"
+ * pass, which a perfectly current document needs too, because `lodMode`
  * is optional in {@link LayerSnapshot} and a `File`-backed stream source is
  * unreachable after a reload no matter which version wrote it.
  */
@@ -124,9 +177,35 @@ export function normalizeLayers(
   return (raw.layers ?? []).map((l): NormalizedLayerSnapshot => {
     const lodMode = l.lodMode ?? "auto";
     const hiddenTypes = l.hiddenTypes ?? [];
+    const attributeOrders = normalizeAttributeOrders(l.attributeOrders);
+    const tablePresentation = normalizeTablePresentation(l.tablePresentation);
+    // The same validator the share hash and the store use, so one document
+    // cannot restore differently depending on which door it came through.
+    const colorBy = normalizeColorBy({
+      colorBy: l.colorBy,
+      singleColor: l.singleColor,
+      unmatchedColor: l.unmatchedColor,
+      rules: l.rules,
+      rulesEnabled: l.rulesEnabled,
+    });
     return l.stream?.kind === "file"
-      ? { ...l, lodMode, hiddenTypes, unavailable: true }
-      : { ...l, lodMode, hiddenTypes };
+      ? {
+          ...l,
+          lodMode,
+          hiddenTypes,
+          attributeOrders,
+          tablePresentation,
+          ...colorBy,
+          unavailable: true,
+        }
+      : {
+          ...l,
+          lodMode,
+          hiddenTypes,
+          attributeOrders,
+          tablePresentation,
+          ...colorBy,
+        };
   });
 }
 
@@ -311,8 +390,11 @@ export interface GeographicCamera {
 }
 
 export interface ViewState {
+  readonly basemap?: import("../features/basemap/basemapStore").BasemapState;
   readonly camera: GeographicCamera;
   readonly datetime: string; // ISO 8601
+  /** Optional v4 addition; omitted documents use Europe/Amsterdam. */
+  readonly timeZone?: import("../features/solar/solarTimeZone").SolarTimeZone;
   /**
    * The camera policy the workspace was saved in ("2d" | "2.5d" | "3d").
    *
@@ -374,12 +456,17 @@ export function normalizeSceneTheme(theme: SceneTheme | undefined): SceneTheme {
  *
  * v3 (breaking): `viewState.camera` is a {@link GeographicCamera}, replacing
  * v2's `cameraPosition`/`cameraTarget` scene-space tuples.
+ *
+ * v4 (additive): {@link ProjectSnapshot.activeLayer}. A v3 document is a v4
+ * document with that one field absent, which is why `migrateSnapshot` carries
+ * v3 forward rather than rejecting it — and why v1/v2 still cannot be carried
+ * forward at all: their cameras are unconvertible, not merely incomplete.
  */
-export const SNAPSHOT_VERSION = "3";
+export const SNAPSHOT_VERSION = "4";
 
 export interface ProjectSnapshot {
-  /** Always {@link SNAPSHOT_VERSION} when written; anything else is rejected
-   *  on restore. */
+  /** Always {@link SNAPSHOT_VERSION} when written. On restore, `"3"` is
+   *  carried forward by `migrateSnapshot`; anything else is rejected. */
   readonly version: string;
   readonly savedAt: string; // ISO 8601
   readonly label: string;
@@ -396,20 +483,38 @@ export interface ProjectSnapshot {
   readonly geoLayers?: ReadonlyArray<GeoLayerSnapshot>;
   readonly viewState: ViewState;
   readonly pickMode: PickMode;
+  /**
+   * v4: which layer was active. `index` is the position within
+   * `snapshot.layers` when `kind` is "city" and within `snapshot.geoLayers`
+   * when `kind` is "geo". Absent = the first layer in unified order.
+   *
+   * An INDEX rather than an id, for the reason the geo layers regenerate
+   * theirs on restore: a saved id names a live store record, not a saved one.
+   * The index is into the SNAPSHOT, so a layer that could not be reopened (a
+   * file-backed placeholder, a URL that 404s) must not shift it — see
+   * App.tsx's restore loops, which keep their added-id arrays aligned with
+   * these two lists and never compact them.
+   */
+  readonly activeLayer?: {
+    readonly kind: "city" | "geo";
+    readonly index: number;
+  };
 }
 
 /**
- * Thrown by `restoreSnapshot` for any snapshot not written by the current
- * version. There is deliberately no migration shim: v1/v2 stored the camera
- * as Three.js scene coordinates relative to an origin-offset mesh frame that
- * the Navara viewport no longer has, so a "migrated" snapshot could only
- * restore a wrong camera silently. Failing loudly with a re-save instruction
- * is the honest option.
+ * Thrown by `restoreSnapshot` for any snapshot `migrateSnapshot` cannot carry
+ * forward — in practice v1, v2 and a document with no version at all. There
+ * is deliberately no shim for those: v1/v2 stored the camera as Three.js
+ * scene coordinates relative to an origin-offset mesh frame that the Navara
+ * viewport no longer has, so a "migrated" snapshot could only restore a wrong
+ * camera silently. Failing loudly with a re-save instruction is the honest
+ * option — and it is why the message below talks about the camera: every
+ * version this error is raised for is one the camera change stranded.
  */
 export class UnsupportedSnapshotVersionError extends Error {
   constructor(readonly found: string) {
     super(
-      `This saved workspace was created by an older version of Urbis (v${found}) and can no longer be restored. Saved cameras changed from scene coordinates to geographic coordinates; please re-save from the current version.`,
+      `This saved workspace was created by an older version of Roofy (v${found}) and can no longer be restored. Saved cameras changed from scene coordinates to geographic coordinates; please re-save from the current version.`,
     );
     this.name = "UnsupportedSnapshotVersionError";
   }
@@ -427,6 +532,7 @@ export interface SnapshotSummary {
 
 export interface ProjectStateStore {
   save(snapshot: ProjectSnapshot): Promise<string>;
+  update?(id: string, snapshot: ProjectSnapshot): Promise<void>;
   load(id: string): Promise<ProjectSnapshot | null>;
   list(): Promise<SnapshotSummary[]>;
   remove(id: string): Promise<void>;

@@ -18,7 +18,7 @@ import {
 import { DEFAULT_GEO_LAYER_STYLE } from "../../../../src/features/geoLayers/geoLayerStyle";
 
 afterEach(() => {
-  useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
+  useGeoLayerStore.setState({ layers: [] });
 });
 
 const store = () => useGeoLayerStore.getState();
@@ -30,6 +30,10 @@ function addRaster(name = "XYZ"): string {
     config: { urlTemplate: "https://tiles.example/{z}/{x}/{y}.png" },
   });
 }
+
+it("does not carry an active id (the workspace store owns it)", () => {
+  expect("activeGeoLayerId" in useGeoLayerStore.getState()).toBe(false);
+});
 
 describe("addGeoLayer", () => {
   it("appends a layer with a unique id, visible and fully opaque by default", () => {
@@ -246,7 +250,10 @@ describe("relinkGeoJsonLayer", () => {
     store().relinkGeoJsonLayer(id, data);
 
     const layer = store().layers[0]!;
-    expect(layer.config).toEqual({ data });
+    expect(layer.config).toMatchObject({ data, preparation: "ready" });
+    expect(
+      (layer as Extract<GeoLayer, { kind: "geojson" }>).config.preparedData,
+    ).toBeDefined();
     expect(isGeoLayerUnavailable(layer)).toBe(false);
   });
 
@@ -260,41 +267,6 @@ describe("relinkGeoJsonLayer", () => {
   });
 });
 
-describe("activeGeoLayerId", () => {
-  it("starts null and never auto-activates on add", () => {
-    expect(store().activeGeoLayerId).toBeNull();
-    addRaster();
-    expect(store().activeGeoLayerId).toBeNull();
-  });
-
-  it("sets and clears through setActiveGeoLayer", () => {
-    const id = addRaster();
-    store().setActiveGeoLayer(id);
-    expect(store().activeGeoLayerId).toBe(id);
-    store().setActiveGeoLayer(null);
-    expect(store().activeGeoLayerId).toBeNull();
-  });
-
-  it("clears when the active layer is removed, and only then", () => {
-    const a = addRaster();
-    const b = addRaster();
-    store().setActiveGeoLayer(a);
-
-    store().removeGeoLayer(b);
-    expect(store().activeGeoLayerId).toBe(a);
-
-    store().removeGeoLayer(a);
-    expect(store().activeGeoLayerId).toBeNull();
-  });
-
-  it("clears on removeAllGeoLayers", () => {
-    const id = addRaster();
-    store().setActiveGeoLayer(id);
-    store().removeAllGeoLayers();
-    expect(store().activeGeoLayerId).toBeNull();
-  });
-});
-
 describe("isGeoLayerUnavailable", () => {
   const base = {
     id: "g",
@@ -302,6 +274,7 @@ describe("isGeoLayerUnavailable", () => {
     visible: true,
     opacity: 1,
     style: DEFAULT_GEO_LAYER_STYLE,
+    derivedFrom: null,
   } as const;
 
   it("is true only for a GeoJSON layer with neither inline data nor a URL", () => {

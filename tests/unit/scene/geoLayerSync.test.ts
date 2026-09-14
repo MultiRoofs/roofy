@@ -27,7 +27,12 @@ import {
   DEFAULT_GEO_LAYER_STYLE,
   hexColorToNumber,
 } from "../../../src/features/geoLayers/geoLayerStyle";
-import { HIGHLIGHT_COLOR_HEX } from "@cityjson/navara-cityjson";
+import { GEO_STABLE_FEATURE_KEY } from "../../../src/features/geoLayers/geoJsonRecords";
+import {
+  CATEGORY_OTHER_HEX,
+  CATEGORY_PALETTE_HEX,
+  CITY_HIGHLIGHT_COLOR_HEX,
+} from "../../../src/scene/cityColors";
 
 /** A feature-set listener the fake layer handle recorded, so a test can play
  *  the engine and fire `featureCreated`/`featureUpdated` itself. */
@@ -63,18 +68,28 @@ function fakeLayerHandle(
 type FakeLayerHandle = ReturnType<typeof fakeLayerHandle>;
 
 /** One engine `FeatureEvaluator`: records the last callback it was handed so a
- *  test can run it for a given batch id and inspect what the module returns. */
+ *  test can run it for a given batch id (and properties) and inspect what the
+ *  module returns. */
 function fakeEvaluator() {
+  type Info = {
+    readonly batchId: number;
+    readonly properties?: Record<string, unknown>;
+  };
   const evaluator = {
-    evaluate: vi.fn((cb: (info: { readonly batchId: number }) => unknown) => {
+    evaluate: vi.fn((cb: (info: Info) => unknown) => {
       evaluator.lastCb = cb;
     }),
-    lastCb: null as ((info: { readonly batchId: number }) => unknown) | null,
+    lastCb: null as ((info: Info) => unknown) | null,
     /** Run the last callback the module installed, as the engine would per
      *  batch. */
-    run(batchId: number): Record<string, unknown> {
+    run(
+      batchId: number,
+      properties?: Record<string, unknown>,
+    ): Record<string, unknown> {
       if (evaluator.lastCb === null) throw new Error("no callback installed");
-      return evaluator.lastCb({ batchId }) as Record<string, unknown>;
+      return evaluator.lastCb(
+        properties === undefined ? { batchId } : { batchId, properties },
+      ) as Record<string, unknown>;
     },
   };
   return evaluator;
@@ -420,7 +435,7 @@ describe("geoLayerIdForEngineLayerId", () => {
 /** The style's own colour, as the engine number — what a cleared or unselected
  *  feature must be told explicitly, because an omitted key never resets a
  *  previously evaluated override. */
-const OWN_COLOR_HEX = 0xff5a3c;
+const OWN_COLOR_HEX = 0xf2683c;
 
 describe("GEO_HIGHLIGHT_COLOR_HEX", () => {
   it("is the SAME accent the city meshes highlight a surface with", () => {
@@ -430,7 +445,9 @@ describe("GEO_HIGHLIGHT_COLOR_HEX", () => {
     // silently leave a picked GeoJSON polygon a different orange. The import is
     // engine-free (`@cityjson/navara-cityjson`'s main barrel is Node-safe by
     // construction), and the submodule spells the value as a CSS hex string.
-    expect(GEO_HIGHLIGHT_COLOR_HEX).toBe(hexColorToNumber(HIGHLIGHT_COLOR_HEX));
+    expect(GEO_HIGHLIGHT_COLOR_HEX).toBe(
+      hexColorToNumber(CITY_HIGHLIGHT_COLOR_HEX),
+    );
   });
 });
 
@@ -465,6 +482,64 @@ describe("syncGeoHighlight", () => {
       expect(evaluator.run(8)).toEqual({ color: { hex: OWN_COLOR_HEX } });
     }
     expect(handle.forceUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches a stable feature after engine batches are reminted", () => {
+    const { live, handle, points } = highlightable();
+    syncGeoHighlight(
+      { geoLayerId: "g1", stableFeatureId: "id:string:roof-a" },
+      live,
+      makeColor,
+    );
+
+    expect(
+      points.run(7, {
+        [GEO_STABLE_FEATURE_KEY]: {
+          stableId: "id:string:roof-a",
+          hasOriginal: false,
+        },
+      }),
+    ).toEqual({
+      color: { hex: GEO_HIGHLIGHT_COLOR_HEX },
+    });
+    // An update recreates a feature set and batch IDs; identity stays with
+    // the prepared feature property rather than the transient batch.
+    const reminted = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", reminted, 3n);
+    expect(
+      reminted.run(91, {
+        [GEO_STABLE_FEATURE_KEY]: {
+          stableId: "id:string:roof-a",
+          hasOriginal: false,
+        },
+      }),
+    ).toEqual({
+      color: { hex: GEO_HIGHLIGHT_COLOR_HEX },
+    });
+  });
+
+  it("does not fall back to a matching batch when a stable identity is present", () => {
+    const { live, points } = highlightable();
+    syncGeoHighlight(
+      { geoLayerId: "g1", batchId: 7, stableFeatureId: "index:0" },
+      live,
+      makeColor,
+    );
+
+    expect(
+      points.run(7, {
+        [GEO_STABLE_FEATURE_KEY]: { stableId: "index:1", hasOriginal: false },
+      }),
+    ).toEqual({
+      color: { hex: OWN_COLOR_HEX },
+    });
+    expect(
+      points.run(22, {
+        [GEO_STABLE_FEATURE_KEY]: { stableId: "index:0", hasOriginal: false },
+      }),
+    ).toEqual({
+      color: { hex: GEO_HIGHLIGHT_COLOR_HEX },
+    });
   });
 
   it("costs nothing when the same selection is re-applied", () => {
@@ -531,6 +606,196 @@ describe("syncGeoHighlight", () => {
       syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor),
     ).not.toThrow();
     expect(live.get("g1")!.highlightedBatchId).toBe(7);
+  });
+});
+
+/** A layer coloured by `use`: the store's whole-object style carries the
+ *  computed categories, and the sync paints each feature by its own value. */
+const ZONED_STYLE: GeoLayer["style"] = {
+  ...DEFAULT_GEO_LAYER_STYLE,
+  colorByAttribute: {
+    attribute: "use",
+    categories: [
+      { value: "residential", color: "#8fd020" },
+      { value: "retail", color: "#4b8ef7" },
+      { value: null, color: "#8a93a0" }, // the OTHER bucket
+    ],
+  },
+};
+
+const RESIDENTIAL_HEX = 0x8fd020;
+const RETAIL_HEX = 0x4b8ef7;
+const OTHER_HEX = 0x8a93a0;
+
+describe("syncGeoHighlight — Color by attribute", () => {
+  /** One categorized layer with a feature set registered on its pair. */
+  function categorized() {
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson({ style: ZONED_STYLE })], live);
+    const handle = layers[0]!;
+    const evaluator = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", evaluator, 1n);
+    return { view, live, layers, handle, evaluator };
+  }
+
+  it("paints each feature its category colour, and the OTHER bucket for a value that matches no entry", () => {
+    const { live, handle } = categorized();
+    // Nothing is painted at ADD time: the subscription fired with no colour
+    // factory yet. The first highlight pass (even an empty one) paints.
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+    syncGeoHighlight(null, live, makeColor);
+
+    const evaluator = [...live.get("g1")!.evaluators.values()][0] as ReturnType<
+      typeof fakeEvaluator
+    >;
+    expect(evaluator.evaluate).toHaveBeenCalled();
+    expect(evaluator.run(1, { use: "residential" })).toEqual({
+      color: { hex: RESIDENTIAL_HEX },
+    });
+    expect(evaluator.run(2, { use: "retail" })).toEqual({
+      color: { hex: RETAIL_HEX },
+    });
+    // A value the category list does not know is, by construction, overflow
+    // (with <= 8 distinct values every observed value IS in the list).
+    expect(evaluator.run(3, { use: "industrial" })).toEqual({
+      color: { hex: OTHER_HEX },
+    });
+    // Missing/null and an absent properties bag are the missing bucket.
+    expect(evaluator.run(4, {})).toEqual({ color: { hex: OTHER_HEX } });
+    expect(evaluator.run(5)).toEqual({ color: { hex: OTHER_HEX } });
+    expect(handle.forceUpdate).toHaveBeenCalled();
+  });
+
+  it("highlight WINS over the category colour, and deselection restores the category, not the base", () => {
+    const { live, evaluator } = categorized();
+
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+    expect(evaluator.run(7, { use: "residential" })).toEqual({
+      color: { hex: GEO_HIGHLIGHT_COLOR_HEX },
+    });
+    expect(evaluator.run(8, { use: "residential" })).toEqual({
+      color: { hex: RESIDENTIAL_HEX },
+    });
+
+    syncGeoHighlight(null, live, makeColor);
+    expect(evaluator.run(7, { use: "residential" })).toEqual({
+      color: { hex: RESIDENTIAL_HEX },
+    });
+  });
+
+  it("re-applies the categories to a feature set the engine recreated", () => {
+    const { live, handle } = categorized();
+    syncGeoHighlight(null, live, makeColor);
+
+    // `Layer.update()` (what a style edit rides) mints a fresh feature set.
+    const rebuilt = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", rebuilt, 2n);
+
+    expect(rebuilt.evaluate).toHaveBeenCalledTimes(1);
+    expect(rebuilt.run(1, { use: "retail" })).toEqual({
+      color: { hex: RETAIL_HEX },
+    });
+    expect(handle.forceUpdate).toHaveBeenCalled();
+  });
+
+  it("a category swatch edit arrives through the re-describe + recreation path", () => {
+    const { view, live, layers, handle } = categorized();
+    syncGeoHighlight(null, live, makeColor);
+    handle.forceUpdate.mockClear();
+
+    // The UI writes the WHOLE style; the sync re-describes (never rebuilds).
+    const edited = geojson({
+      style: {
+        ...ZONED_STYLE,
+        colorByAttribute: {
+          attribute: "use",
+          categories: [
+            { value: "residential", color: "#123456" },
+            { value: "retail", color: "#4b8ef7" },
+            { value: null, color: "#8a93a0" },
+          ],
+        },
+      },
+    });
+    syncGeoLayers(view, [edited], live);
+    expect(layers[0]!.update).toHaveBeenCalledTimes(1);
+    expect(view.addLayer).toHaveBeenCalledTimes(1);
+
+    // ...which recreates the feature sets, and the fresh evaluator carries
+    // the edited category.
+    const rebuilt = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", rebuilt, 3n);
+    expect(rebuilt.run(1, { use: "residential" })).toEqual({
+      color: { hex: 0x123456 },
+    });
+    expect(rebuilt.run(2, { use: "retail" })).toEqual({
+      color: { hex: RETAIL_HEX },
+    });
+    expect(handle.forceUpdate).toHaveBeenCalled();
+  });
+
+  it("keeps the missing bucket distinct from the OTHER sentinel when both are null-valued", () => {
+    // `categoriesFor` emits this exact shape when the attribute has BOTH a
+    // missing value that made the first-eight cut AND a ninth distinct value:
+    // the missing bucket is `{ value: null, color: palette[0] }`, and the
+    // trailing OTHER sentinel is ALSO null-valued. The two must not collapse:
+    // a missing feature wears its palette slot, only an overflow value wears
+    // CATEGORY_OTHER_HEX.
+    const missingPlusOverflow: GeoLayer["style"] = {
+      ...DEFAULT_GEO_LAYER_STYLE,
+      colorByAttribute: {
+        attribute: "zone",
+        categories: [
+          { value: null, color: CATEGORY_PALETTE_HEX[0]! },
+          { value: "a", color: CATEGORY_PALETTE_HEX[1]! },
+          { value: "b", color: CATEGORY_PALETTE_HEX[2]! },
+          { value: "c", color: CATEGORY_PALETTE_HEX[3]! },
+          { value: "d", color: CATEGORY_PALETTE_HEX[4]! },
+          { value: "e", color: CATEGORY_PALETTE_HEX[5]! },
+          { value: "f", color: CATEGORY_PALETTE_HEX[6]! },
+          { value: "g", color: CATEGORY_PALETTE_HEX[7]! },
+          { value: null, color: CATEGORY_OTHER_HEX },
+        ],
+      },
+    };
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson({ style: missingPlusOverflow })], live);
+    const handle = layers[0]!;
+    const evaluator = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", evaluator, 1n);
+    // A highlight change paints (the first pass supplies the colour factory);
+    // the clear returns to the category path, which is what this test reads.
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+    syncGeoHighlight(null, live, makeColor);
+
+    const missingHex = hexColorToNumber(CATEGORY_PALETTE_HEX[0]!)!;
+    // Missing — explicit null or an absent properties bag — paints its own
+    // palette slot, not the grey the OTHER sentinel would overwrite it with.
+    expect(evaluator.run(1, { zone: null })).toEqual({
+      color: { hex: missingHex },
+    });
+    expect(evaluator.run(2)).toEqual({ color: { hex: missingHex } });
+    // An overflow value (the ninth distinct) still paints OTHER.
+    expect(evaluator.run(3, { zone: "overflow" })).toEqual({
+      color: { hex: hexColorToNumber(CATEGORY_OTHER_HEX) },
+    });
+  });
+
+  it("removing colorByAttribute leaves fresh feature sets un-overridden", () => {
+    const { view, live, layers, handle } = categorized();
+    syncGeoHighlight(null, live, makeColor);
+
+    // Back to `None`: the style edit re-describes, the recreated feature set
+    // must come up CLEAN — the layer's own base colour wins by omission.
+    syncGeoLayers(view, [geojson()], live);
+    expect(layers[0]!.update).toHaveBeenCalledTimes(1);
+    const rebuilt = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", rebuilt, 3n);
+
+    expect(rebuilt.evaluate).not.toHaveBeenCalled();
+    expect(live.get("g1")!.hadFeatureColors).toBe(false);
   });
 });
 

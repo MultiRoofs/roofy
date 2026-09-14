@@ -43,7 +43,7 @@ cd "${REPO_ROOT}"
 export CARGO_HOME="${CARGO_HOME:-/usr/local/cargo}"
 export PATH="${HOME}/.cargo/bin:${HOME}/.local/bin:${CARGO_HOME}/bin:${PATH}"
 
-log "Bootstrapping MultiRoof Viewer devcontainer..."
+log "Bootstrapping Roofy devcontainer..."
 
 if command -v apt-get >/dev/null 2>&1; then
   warn "Installing system packages for native Node and Rust tooling..."

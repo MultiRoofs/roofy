@@ -52,11 +52,17 @@ export function geoSourceDescription(
       // index for large files: on 0.0.5 a tiled geojson source renders NOTHING
       // (browser-verified against the Delft fixture; the engine's own examples
       // only ever use the bare form). Re-test before reintroducing it.
-      const { url, data } = layer.config;
-      if (url !== undefined && url !== "") {
+      const { preparedData, data, url, preparation } = layer.config;
+      if (preparedData !== undefined)
+        return { type: "geojson", data: preparedData };
+      // Hand-built configs in tests and third-party callers predate the
+      // preparation lifecycle. Store-created loading sources deliberately
+      // wait for their normalized clone instead of letting the engine remint
+      // an unstable URL source first.
+      if (preparation === undefined && url !== undefined && url !== "")
         return { type: "geojson", url };
-      }
-      if (data !== undefined) return { type: "geojson", data };
+      if (preparation === undefined && data !== undefined)
+        return { type: "geojson", data };
       return null;
     }
     case "raster-xyz": {

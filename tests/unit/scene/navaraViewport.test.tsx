@@ -14,7 +14,8 @@ const addPlugin = vi.fn();
 const init = vi.fn(async () => {});
 const dispose = vi.fn();
 const setCamera = vi.fn();
-const flyTo = vi.fn();
+// Returns the never-landing flight declared below (called only after module init).
+const flyTo = vi.fn((..._args: unknown[]): unknown => flightInProgress);
 /** `view.addSource` / `view.addLayer` — the whole of the Google tiles seam
  *  (Task C17, toggled since Task C21). `addSource` answers with a
  *  `Source`-shaped stub, which is what the layer must reference; both stubs
@@ -180,8 +181,8 @@ const photorealHandles = {
   stars: { visible: true },
   skyLightProbe: { visible: true },
   sun: { visible: true, update: vi.fn() },
-  // `update` too: the viewport switches this pass into `irradiance` mode right
-  // after `addDefaultPhotorealScene()`, which is what lights the whole scene.
+  // `update` too, so a regression that pushes the pass into `irradiance`
+  // mode (the deferred calibration that can show no cast shadow) is caught.
   aerialPerspective: { visible: true, update: vi.fn() },
   lensFlare: { visible: true },
   toneMapping: { visible: true },
@@ -318,8 +319,8 @@ vi.mock("@navaramap/three", () => ({
     return view;
   }),
   getPickRay,
-  // The engine reports geodetic angles in RADIANS; the readout wants degrees.
-  // Both are identity-ish here so a test can assert the exact numbers.
+  // The engine reports geodetic angles in DEGREES (since 0.1.0) and the
+  // readout wants degrees, so an identity mock lets a test assert exact numbers.
   vector3ToGeodetic: vi.fn((v: { x: number; y: number; z: number }) => ({
     lng: v.x,
     lat: v.y,
@@ -357,6 +358,17 @@ const flatPluginInstance = {
   dispose: vi.fn(),
   suppressSettleThenCommit: vi.fn(async (fn: () => unknown) => fn()),
 };
+/** A flight that never lands. `view.flyTo` returns it (Navara 0.1.x resolves
+ *  the promise at the END of the flight), and the assertion that matters is
+ *  that the very same object reaches `suppressSettleThenCommit` — the settle
+ *  gate holds for the whole animation only if the move RETURNS it. */
+const flightInProgress = new Promise<boolean>(() => {});
+/** What the last settle-suppressed move hands back when re-invoked. */
+function settleWrappedMove(): unknown {
+  const calls = flatPluginInstance.suppressSettleThenCommit.mock.calls;
+  const move = calls.at(-1)![0] as () => unknown;
+  return move();
+}
 vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
   FlatCityBufPlugin: vi.fn(function () {
     return flatPluginInstance;
@@ -364,6 +376,9 @@ vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
 }));
 
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
+const { shadowTuningFor } = await import("../../../src/scene/shadowQuality");
+/** What the viewport writes for the store's default shadow quality. */
+const SUN_SHADOW_TUNING = shadowTuningFor("medium");
 // The mocked engine export the elevation-heatmap source's marker resolves to.
 // DYNAMIC, like the component above: a static import would evaluate the
 // `@navaramap/three` mock factory before the stubs it closes over exist.
@@ -392,6 +407,8 @@ import type { CityModel } from "../../../src/domain/citymodel/types";
 // The licence text the attribution overlay must show whatever else is on
 // screen (Task C17 / Global Constraints -> Vertical datum).
 import { GEOID_ATTRIBUTION } from "@cityjson/navara-core";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import { normalizeColorBy } from "../../../src/features/rules/colorBy";
 
 /**
  * jsdom has no `ResizeObserver`, and the container-resize wiring is exactly
@@ -470,13 +487,21 @@ function makeModel(referenceSystem?: string): CityModel {
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
 function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
+  // Same derivation the store applies: rules read as "Color by rules", so
+  // every case written before the mode existed still means what it said.
+  const colorBy = normalizeColorBy({
+    colorBy: patch.colorBy,
+    singleColor: patch.singleColor,
+    unmatchedColor: patch.unmatchedColor,
+    rules: patch.rules,
+  });
   return {
+    ...colorBy,
     name: patch.id,
     model: makeModel(CRS_URI),
     modelRef: { type: "url", url: `https://example.test/${patch.id}` },
     visible: true,
     rules: [],
-    rulesEnabled: true,
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
@@ -491,10 +516,13 @@ function makeHandle(id: string, triangles = 10) {
     id,
     setVisible: vi.fn(),
     setLod: vi.fn(),
+    setVisibleObjectIds: vi.fn(),
     setStyle: vi.fn(),
     // The real `CityModelHandle` gained this with the scene themes; the
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn((pick: { properties?: { surfaceIndex?: number } }) => ({
       kind: "surface",
@@ -555,12 +583,18 @@ describe("NavaraViewport lifecycle", () => {
     cityPluginInstance.addCityModel.mockImplementation(
       (_model: unknown, opts: { id: string }) => makeHandle(opts.id),
     );
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    // The auto-fit is keyed on the whole workspace, so a geo layer left behind
+    // by another test would silently make a later one "not empty".
+    useGeoLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
     cleanup();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useGeoLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSelectionStore.setState({
       toolMode: "select",
       selections: [],
@@ -733,6 +767,7 @@ describe("NavaraViewport lifecycle", () => {
     });
 
     expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(settleWrappedMove()).toBe(flightInProgress);
     const target = flyTo.mock.calls[0]![0] as {
       lng: number;
       lat: number;
@@ -886,8 +921,18 @@ describe("NavaraViewport lifecycle", () => {
     );
     expect(cityPluginInstance.addCityModel.mock.calls.map((c) => c[1])).toEqual(
       [
-        { id: "a", crs: CRS_URI, lod: "1.2" },
-        { id: "b", crs: CRS_URI, lod: null },
+        {
+          id: "a",
+          crs: CRS_URI,
+          lod: "1.2",
+          textureBaseUrl: "https://example.test/a",
+        },
+        {
+          id: "b",
+          crs: CRS_URI,
+          lod: null,
+          textureBaseUrl: "https://example.test/b",
+        },
       ],
     );
     // 2 handles x 10 triangles.
@@ -936,12 +981,18 @@ describe("NavaraViewport lifecycle", () => {
     await waitFor(() => expect(onTriangleCount).toHaveBeenLastCalledWith(10));
   });
 
-  it("fits the camera when a layer is ADDED, and not when one is merely toggled", async () => {
+  // Task 6 (M12.1). The automatic fit is an ORIENTATION for a workspace that
+  // had nothing to look at, not a reaction to every add: once the user has
+  // framed a view, a second file must arrive without stealing the camera.
+  // "Empty" is the whole workspace — city layers (static AND streaming) plus
+  // the geo overlays — not the static handles alone.
+  it("fits when the first layer of an empty workspace lands, and not when one is merely toggled", async () => {
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
+    expect(flyTo).not.toHaveBeenCalled();
     // A camera derived from the handle's real bounds, not a NaN jump.
-    const camera = flyTo.mock.calls[0]![0] as Record<string, number>;
+    const camera = setCamera.mock.calls[0]![0] as Record<string, number>;
     expect(camera.lng).toBeCloseTo(4.355, 6);
     // South of the box centre (52.005) and above it, looking north — the
     // default framing, derived from the handle's own bounds.
@@ -958,13 +1009,82 @@ describe("NavaraViewport lifecycle", () => {
         cityPluginInstance.addCityModel.mock.results[0]!.value.setVisible,
       ).toHaveBeenCalledWith(false),
     );
-    expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(setCamera).toHaveBeenCalledTimes(1);
+  });
 
-    // A second layer IS a new fit.
+  it("does not fit when a SECOND static layer lands", async () => {
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
+
     useLayerStore.setState({
-      layers: [makeLayer({ id: "a", visible: false }), makeLayer({ id: "b" })],
+      layers: [makeLayer({ id: "a" }), makeLayer({ id: "b" })],
     });
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(2));
+
+    // The layer really was added — the camera simply stayed where the user
+    // left it, and "Zoom to layer" is how they go and look at it.
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(2),
+    );
+    expect(setCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fit when a static layer joins a workspace that already has a streaming layer", async () => {
+    // `syncLayers` skips streaming layers, so `liveRef` is still empty here —
+    // which is exactly why the old "no static handles yet" test was wrong: the
+    // workspace is NOT empty, and the .fcb the user is looking at must not be
+    // left behind when a CityJSON file lands beside it.
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "streamed", isStreaming: true })],
+    });
+    // `onTriangleCount` is the sync effect's own footprint — it is called at
+    // the end of every pass, and only past the `engineReady` gate. Waiting on
+    // `init` instead would race it: the effect is several microtasks behind
+    // that, and a layer set in between would look like the first of an empty
+    // workspace.
+    const onTriangleCount = vi.fn();
+    render(<NavaraViewport onTriangleCount={onTriangleCount} />);
+    await waitFor(() => expect(onTriangleCount).toHaveBeenCalled());
+    expect(cityPluginInstance.addCityModel).not.toHaveBeenCalled();
+
+    useLayerStore.setState({
+      layers: [
+        makeLayer({ id: "streamed", isStreaming: true }),
+        makeLayer({ id: "a" }),
+      ],
+    });
+
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    expect(flyTo).not.toHaveBeenCalled();
+  });
+
+  it("does not fit when a city layer joins a geo-only workspace", async () => {
+    // Geo layers never reach `liveRef` either (they are engine source+layer
+    // pairs, reconciled by `geoLayerSync`), and they are just as much a view
+    // the user has arranged.
+    act(() => {
+      useGeoLayerStore.getState().addGeoLayer({
+        name: "overlay",
+        kind: "raster-xyz",
+        config: { urlTemplate: "https://tile.example/{z}/{x}/{y}.png" },
+      });
+    });
+    // The sync effect's own footprint, not `init` — see the streaming case
+    // above.
+    const onTriangleCount = vi.fn();
+    render(<NavaraViewport onTriangleCount={onTriangleCount} />);
+    await waitFor(() => expect(onTriangleCount).toHaveBeenCalled());
+
+    act(() => {
+      useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    });
+
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    expect(flyTo).not.toHaveBeenCalled();
   });
 
   it("fits WITHIN the active view mode: a 2D fit stays a plan view", async () => {
@@ -974,8 +1094,8 @@ describe("NavaraViewport lifecycle", () => {
     useViewModeStore.setState({ mode: "2d" });
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(flyTo).toHaveBeenCalled());
-    const fit = flyTo.mock.calls.at(-1)![0] as Record<string, number>;
+    await waitFor(() => expect(setCamera).toHaveBeenCalled());
+    const fit = setCamera.mock.calls.at(-1)![0] as Record<string, number>;
     expect(fit.pitch).toBeCloseTo(-89.9, 6);
     expect(fit.heading).toBeCloseTo(0, 6);
     // Still framed on the layer's bounds — the mode changes the angle, not
@@ -1032,12 +1152,16 @@ describe("NavaraViewport lifecycle", () => {
 
     release();
 
-    // A layer added AFTER the restore is an ordinary user action and still
-    // earns its fit — the suppression is scoped, not a permanent opt-out.
-    useLayerStore.setState({
-      layers: [makeLayer({ id: "a" }), makeLayer({ id: "b" })],
-    });
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    // The suppression is scoped, not a permanent opt-out: once the user has
+    // cleared the workspace, the next layer they open is again the first layer
+    // of an empty workspace and still earns its fit. Two steps, because a
+    // workspace that never goes empty never fits again (Task 6).
+    const handle = cityPluginInstance.addCityModel.mock.results[0]!.value;
+    useLayerStore.setState({ layers: [] });
+    await waitFor(() => expect(handle.delete).toHaveBeenCalledTimes(1));
+
+    useLayerStore.setState({ layers: [makeLayer({ id: "b" })] });
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
   });
 
   it("deletes the handle of a layer that left the store", async () => {
@@ -1071,15 +1195,20 @@ describe("NavaraViewport lifecycle", () => {
     ref.current!.fitLayer("b");
     expect(handleA.getBoundsGeodetic).not.toHaveBeenCalled();
     expect(handleB.getBoundsGeodetic).toHaveBeenCalled();
+    // The fit's flight promise (Navara 0.1.x resolves it at the END of the
+    // flight) is what the streaming settle gate waits on — `void`ing it here
+    // would re-open the gate two seconds after take-off, mid-flight.
+    expect(settleWrappedMove()).toBe(flightInProgress);
 
     handleB.getBoundsGeodetic.mockClear();
     ref.current!.fitAll();
     expect(handleA.getBoundsGeodetic).toHaveBeenCalled();
     expect(handleB.getBoundsGeodetic).toHaveBeenCalled();
+    expect(settleWrappedMove()).toBe(flightInProgress);
 
     // alignView reads the same union, so it aligns against real bounds too.
     ref.current!.alignView("top");
-    expect(setCamera).toHaveBeenCalledTimes(1);
+    expect(setCamera).toHaveBeenCalledTimes(2); // initial framing + alignment
   });
 
   // -------------------------------------------------------------------------
@@ -1118,7 +1247,7 @@ describe("NavaraViewport lifecycle", () => {
 
     // Switching the layer's rules off clears the style.
     useLayerStore.setState({
-      layers: [makeLayer({ id: "a", rules, rulesEnabled: false })],
+      layers: [makeLayer({ id: "a", rules, colorBy: "surface" })],
     });
     await waitFor(() => expect(handle.setStyle).toHaveBeenCalledTimes(2));
     expect(handle.setStyle).toHaveBeenLastCalledWith(null);
@@ -1159,7 +1288,7 @@ describe("NavaraViewport lifecycle", () => {
       );
     }
     await waitFor(() =>
-      expect(on.mock.calls.some((c) => c[0] === "mousemove")).toBe(true),
+      expect(on.mock.calls.some((c) => c[0] === "pointermove")).toBe(true),
     );
     // The div the engine would append its canvas to — and the element the
     // viewport binds its own DOM listeners to.
@@ -1179,7 +1308,7 @@ describe("NavaraViewport lifecycle", () => {
     y: number,
     opts: { engineSees?: boolean } = {},
   ) {
-    const ev = new MouseEvent(type, { bubbles: true, clientX: x + 300 });
+    const ev = new PointerEvent(type, { bubbles: true, clientX: x + 300 });
     Object.defineProperty(ev, "offsetX", { value: x });
     Object.defineProperty(ev, "offsetY", { value: y });
     const relay = (e: Event) => fire(type, e);
@@ -1193,7 +1322,7 @@ describe("NavaraViewport lifecycle", () => {
 
   it("hovers the NEAREST layer under the cursor, not the first in the list", async () => {
     const { handles } = await mountTwoLayers({ a: 900, b: 12 });
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
 
     // Every visible layer is raycast — you cannot know which is nearest
     // without asking — but only the winner interprets its own indices.
@@ -1212,7 +1341,7 @@ describe("NavaraViewport lifecycle", () => {
     // The app renders the canvas beside a left sidebar; using clientX would
     // put every pick a sidebar's width to the right of the cursor.
     await mountTwoLayers({ a: null, b: null });
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
     const [windowLike, camera, point] = getPickRay.mock
       .calls[0]! as unknown as [
       { width: number; height: number; pixelRatio: number },
@@ -1227,11 +1356,11 @@ describe("NavaraViewport lifecycle", () => {
     );
   });
 
-  it("does not re-push an unchanged hover (a repaint per mousemove otherwise)", async () => {
+  it("does not re-push an unchanged hover (a repaint per pointermove otherwise)", async () => {
     const { handles } = await mountTwoLayers({ a: null, b: 12 });
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
     handles.b.setHighlight.mockClear();
-    act(() => fire("mousemove", mouse(11, 21)));
+    act(() => fire("pointermove", mouse(11, 21)));
     // Same surface: the resolved Selection is a fresh object each time, so
     // without a value comparison the store would churn and every layer would
     // repaint its vertex colors at pointer rate.
@@ -1241,7 +1370,7 @@ describe("NavaraViewport lifecycle", () => {
   it("selects on click and toggles on shift-click", async () => {
     await mountTwoLayers({ a: null, b: 12 });
     act(() => {
-      fire("mousedown", mouse(10, 20));
+      fire("pointerdown", mouse(10, 20));
       fire("click", mouse(10, 20));
     });
     expect(useSelectionStore.getState().selections).toEqual([
@@ -1249,7 +1378,7 @@ describe("NavaraViewport lifecycle", () => {
     ]);
 
     act(() => {
-      fire("mousedown", mouse(10, 20));
+      fire("pointerdown", mouse(10, 20));
       fire("click", mouse(10, 20, { shiftKey: true }));
     });
     expect(useSelectionStore.getState().selections).toEqual([]);
@@ -1261,19 +1390,19 @@ describe("NavaraViewport lifecycle", () => {
       selections: [{ kind: "object", layerId: "b", objectId: "b-obj" }],
     });
     act(() => {
-      fire("mousedown", mouse(10, 20));
+      fire("pointerdown", mouse(10, 20));
       fire("click", mouse(10, 20));
     });
     expect(useSelectionStore.getState().selections).toEqual([]);
   });
 
   it("ignores the click that ends a camera DRAG", async () => {
-    // The engine's `click` is the raw DOM click and fires after an orbit too;
-    // without the gate every camera gesture would clear the selection.
+    // Since Navara 0.1.1 the engine never emits `click` after a drag itself;
+    // the gate is defence in depth, and a drag it saw must not commit.
     await mountTwoLayers({ a: null, b: 12 });
     act(() => {
-      fire("mousedown", mouse(100, 100));
-      fire("mousemove", mouse(160, 100));
+      fire("pointerdown", mouse(100, 100));
+      fire("pointermove", mouse(160, 100));
       fire("click", mouse(160, 100));
     });
     expect(useSelectionStore.getState().selections).toEqual([]);
@@ -1283,8 +1412,8 @@ describe("NavaraViewport lifecycle", () => {
     await mountTwoLayers({ a: null, b: 12 });
     useSelectionStore.setState({ toolMode: "measure" });
     act(() => {
-      fire("mousemove", mouse(10, 20));
-      fire("mousedown", mouse(10, 20));
+      fire("pointermove", mouse(10, 20));
+      fire("pointerdown", mouse(10, 20));
       fire("click", mouse(10, 20));
     });
     expect(useSelectionStore.getState().hovered).toBeNull();
@@ -1293,17 +1422,17 @@ describe("NavaraViewport lifecycle", () => {
     // box-select still hovers (the old app did) but leaves the commit to its
     // drag overlay.
     useSelectionStore.setState({ toolMode: "box-select" });
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
     expect(useSelectionStore.getState().hovered).not.toBeNull();
     act(() => {
-      fire("mousedown", mouse(10, 20));
+      fire("pointerdown", mouse(10, 20));
       fire("click", mouse(10, 20));
     });
     expect(useSelectionStore.getState().selections).toEqual([]);
   });
 
   it("clears the hover and the readout when the pointer leaves the canvas", async () => {
-    // A DOM listener, not the engine's `mouseleave`: the engine skips the emit
+    // A DOM listener, not the engine's `pointerleave`: the engine skips the emit
     // whenever the screen ray misses the ellipsoid, so leaving the canvas
     // across a sky pixel would never be reported.
     const onCursorPosition = vi.fn();
@@ -1311,17 +1440,17 @@ describe("NavaraViewport lifecycle", () => {
       { a: null, b: 12 },
       { onCursorPosition },
     );
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
     expect(useSelectionStore.getState().hovered).not.toBeNull();
 
     onCursorPosition.mockClear();
-    domMouse(host, "mouseleave", 0, 0);
+    domMouse(host, "pointerleave", 0, 0);
     expect(useSelectionStore.getState().hovered).toBeNull();
     expect(onCursorPosition).toHaveBeenCalledWith(null);
   });
 
   it("clears hover and readout on a move the engine never reported (SKY)", async () => {
-    // The engine emits nothing at all — not even mouseleave — when the screen
+    // The engine emits nothing at all — not even pointerleave — when the screen
     // ray misses the ellipsoid, so without this the highlight and the status
     // bar freeze at their last on-globe values.
     const onCursorPosition = vi.fn();
@@ -1329,11 +1458,11 @@ describe("NavaraViewport lifecycle", () => {
       { a: null, b: 12 },
       { onCursorPosition },
     );
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
     expect(useSelectionStore.getState().hovered).not.toBeNull();
 
     onCursorPosition.mockClear();
-    domMouse(host, "mousemove", 400, 400); // engine stayed silent => sky
+    domMouse(host, "pointermove", 400, 400); // engine stayed silent => sky
     expect(useSelectionStore.getState().hovered).toBeNull();
     expect(onCursorPosition).toHaveBeenCalledWith(null);
   });
@@ -1344,29 +1473,26 @@ describe("NavaraViewport lifecycle", () => {
       { a: null, b: 12 },
       { onCursorPosition },
     );
-    pickDepthPosition.mockReturnValue({
-      x: (4.348 * Math.PI) / 180,
-      y: (52.006 * Math.PI) / 180,
-      z: 14,
-    });
+    // Degrees, like every geodetic value the 0.1.x engine hands back.
+    pickDepthPosition.mockReturnValue({ x: 4.348, y: 52.006, z: 14 });
     onCursorPosition.mockClear();
-    domMouse(host, "mousemove", 10, 20, { engineSees: true });
+    domMouse(host, "pointermove", 10, 20, { engineSees: true });
     // Same event object reached both listeners: the cursor is on the globe.
     expect(useSelectionStore.getState().hovered).not.toBeNull();
     expect(onCursorPosition.mock.calls.at(-1)![0]).not.toBeNull();
   });
 
   it("arms the drag gate from the DOM too, so a gesture over sky still blocks", async () => {
-    // A mousedown over the sky is invisible to the engine; a gate armed only by
+    // A pointerdown over the sky is invisible to the engine; a gate armed only by
     // engine events would still be holding the previous gesture's state.
     const { host } = await mountTwoLayers({ a: null, b: 12 });
-    domMouse(host, "mousedown", 100, 100);
-    domMouse(host, "mousemove", 160, 100);
+    domMouse(host, "pointerdown", 100, 100);
+    domMouse(host, "pointermove", 160, 100);
     act(() => fire("click", mouse(160, 100)));
     expect(useSelectionStore.getState().selections).toEqual([]);
   });
 
-  it("reports the cursor in the layer's source CRS at ORTHOMETRIC height", async () => {
+  it("reports the cursor in WGS84 at ellipsoidal height", async () => {
     const onCursorPosition = vi.fn();
     const { handles } = await mountTwoLayers(
       { a: null, b: 12 },
@@ -1375,32 +1501,33 @@ describe("NavaraViewport lifecycle", () => {
     // The layer is placed 43.2 m up by the geoid sample, so the ellipsoidal
     // height under the cursor is 43.2 m above the file's own z.
     handles.b.heightOffset.mockReturnValue(43.2);
-    const rad = (deg: number) => (deg * Math.PI) / 180;
+    // Degrees straight from the engine, no conversion in between (0.0.5
+    // returned radians here and the viewport converted).
     pickDepthPosition.mockReturnValue({
-      x: rad(4.348),
-      y: rad(52.006),
+      x: 4.348,
+      y: 52.006,
       z: 14 + 43.2,
     });
 
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
     expect(pickDepthPosition).toHaveBeenCalledWith(10, 20);
     const out = onCursorPosition.mock.calls.at(-1)![0] as [
       number,
       number,
       number,
     ];
-    // RD New metres for Delft (PROJ ground truth), and the file's own z back —
-    // NOT 57.2.
-    expect(out[0]).toBeCloseTo(83647.09, 1);
-    expect(out[1]).toBeCloseTo(446913.56, 1);
-    expect(out[2]).toBeCloseTo(14, 6);
+    // WGS84 directly from the depth hit; the status readout does not adopt a
+    // layer CRS or subtract its geoid offset.
+    expect(out[0]).toBeCloseTo(4.348, 6);
+    expect(out[1]).toBeCloseTo(52.006, 6);
+    expect(out[2]).toBeCloseTo(57.2, 6);
   });
 
   it("reports no position when the cursor is on the sky", async () => {
     const onCursorPosition = vi.fn();
     await mountTwoLayers({ a: null, b: null }, { onCursorPosition });
     pickDepthPosition.mockReturnValue(null);
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
     expect(onCursorPosition).toHaveBeenLastCalledWith(null);
   });
 
@@ -1487,8 +1614,8 @@ describe("NavaraViewport lifecycle", () => {
     // layer changes nothing about a city gesture.
     await mountTwoLayers({ a: null, b: 12 });
     act(() => {
-      fire("mousedown", mouse(10, 20));
-      fire("pick", { batchId: 4, properties: {}, layerId: "layer-1" });
+      fire("pointerdown", mouse(10, 20));
+      fire("featureClick", { batchId: 4, properties: {}, layerId: "layer-1" });
       fire("click", mouse(10, 20));
     });
     expect(useSelectionStore.getState().selections).toEqual([
@@ -1499,22 +1626,22 @@ describe("NavaraViewport lifecycle", () => {
 
   it("unsubscribes every pointer listener on unmount", async () => {
     const { unmount, host } = await mountTwoLayers({ a: null, b: 12 });
-    act(() => fire("mousemove", mouse(10, 20)));
+    act(() => fire("pointermove", mouse(10, 20)));
     const hovered = useSelectionStore.getState().hovered;
     expect(hovered).not.toBeNull();
     unmount();
 
     // The DOM listeners went with it: a stray move must not clear a hover the
     // component no longer owns.
-    domMouse(host, "mousemove", 400, 400);
-    domMouse(host, "mouseleave", 0, 0);
+    domMouse(host, "pointermove", 400, 400);
+    domMouse(host, "pointerleave", 0, 0);
     expect(useSelectionStore.getState().hovered).toBe(hovered);
 
     const removed = off.mock.calls.map((c) => c[0]);
-    for (const name of ["mousedown", "mousemove", "click"]) {
+    for (const name of ["pointerdown", "pointermove", "click"]) {
       expect(removed).toContain(name);
     }
-    expect(listeners.get("mousemove")?.size ?? 0).toBe(0);
+    expect(listeners.get("pointermove")?.size ?? 0).toBe(0);
   });
 
   it("forgets its handles when the engine is disposed, so a remount re-adds", async () => {
@@ -1562,7 +1689,8 @@ describe("NavaraViewport Google tiles", () => {
     defaultPluginThrows = null;
     cityPluginInstance.getHandle.mockReset();
     cityPluginInstance.addCityModel.mockReset();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -1763,7 +1891,8 @@ describe("NavaraViewport basemap", () => {
     // The basemap suite owns `addSource`/`addLayer`, so the Google tiles stay
     // out of the way (no key configured is the same as the toggle being off).
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -1986,7 +2115,8 @@ describe("NavaraViewport wheel", () => {
     viewInstances.length = 0;
     defaultPluginThrows = null;
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2031,7 +2161,8 @@ describe("NavaraViewport clouds", () => {
     viewInstances.length = 0;
     defaultPluginThrows = null;
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2052,6 +2183,24 @@ describe("NavaraViewport clouds", () => {
     expect(addEffect.mock.invocationCallOrder[0]!).toBeGreaterThan(
       init.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("applies the shadow switch to cloud shadows without rebuilding clouds", async () => {
+    useRenderDebugStore.setState({
+      cloudsEnabled: true,
+      sunShadowsEnabled: true,
+    });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addEffect).toHaveBeenCalledTimes(1));
+    act(() => useRenderDebugStore.getState().setSunShadowsEnabled(false));
+    await waitFor(() =>
+      expect(updateEffect).toHaveBeenCalledWith({ clouds: { shadows: false } }),
+    );
+    act(() => useRenderDebugStore.getState().setSunShadowsEnabled(true));
+    await waitFor(() =>
+      expect(updateEffect).toHaveBeenCalledWith({ clouds: { shadows: true } }),
+    );
+    expect(addEffect).toHaveBeenCalledTimes(1);
   });
 
   it("pushes coverage to the live pass instead of rebuilding it", async () => {
@@ -2165,7 +2314,8 @@ describe("NavaraViewport render settings", () => {
     viewInstances.length = 0;
     defaultPluginThrows = null;
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2238,48 +2388,74 @@ describe("NavaraViewport render settings", () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() =>
       expect(photorealHandles.sun.update).toHaveBeenCalledWith({
-        sun: { castShadow: true },
+        sun: { castShadow: true, ...SUN_SHADOW_TUNING },
       }),
     );
 
     act(() => useRenderDebugStore.getState().setSunShadowsEnabled(false));
     await waitFor(() =>
       expect(photorealHandles.sun.update).toHaveBeenCalledWith({
-        sun: { castShadow: false },
+        sun: { castShadow: false, ...SUN_SHADOW_TUNING },
       }),
     );
     // Never `visible`: the sun is the scene's only key light.
     expect(photorealHandles.sun.visible).toBe(true);
   });
 
-  // THE lighting model. The aerial-perspective pass defaults to
-  // `irradiance: false` — it only hazes whatever the scene lights produced.
-  // Turning it on sets `sunLight = skyLight = true` on the pass, so the physical
-  // atmosphere lights the g-buffer albedo directly. That is the calibration
-  // `DEFAULT_EXPOSURE = 10` belongs to, and the reason the city meshes are unlit
-  // (`MeshBasicMaterial`, @cityjson/navara-cityjson). Without this push the
-  // whole scene is lit twice and clips to white.
-  it("switches the aerial-perspective pass into irradiance mode at startup", async () => {
+  // Shadow acne is the shadow map's texel showing through a grazing sun, so
+  // the cure is a finer map and a bias sized to its texel — both live in the
+  // same `sun` block as the switch, and a quality change re-writes the block
+  // whole so the two can never drift apart.
+  it("re-tunes the cascades when the shadow quality changes", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() =>
-      expect(photorealHandles.aerialPerspective.update).toHaveBeenCalledWith({
-        // `useNormalBuffer: true` is only safe because the TERRAIN layer feeds
-        // the MRT normal attachment (`requestVertexNormals`). Without terrain
-        // the globe writes no normals, a raster basemap turns the attachment
-        // to half-float NaN, and the frame renders black — which is why this
-        // pair is asserted together. See `enableAtmosphericLighting`.
-        aerialPerspective: { irradiance: true, useNormalBuffer: true },
+      expect(photorealHandles.sun.update).toHaveBeenCalledWith({
+        sun: { castShadow: true, ...shadowTuningFor("medium") },
       }),
     );
+
+    act(() => useRenderDebugStore.getState().setShadowQuality("high"));
+    await waitFor(() =>
+      expect(photorealHandles.sun.update).toHaveBeenLastCalledWith({
+        sun: { castShadow: true, ...shadowTuningFor("high") },
+      }),
+    );
+    expect(shadowTuningFor("high").shadowMapSize).toBeGreaterThan(
+      shadowTuningFor("medium").shadowMapSize,
+    );
+  });
+
+  // THE lighting model: the engine's own FORWARD-LIT default. `SunLightDesc`
+  // (direction and colour from the atmosphere, cascaded shadow maps) and the
+  // sky light probe shade every lit material — the city meshes are lit Lambert
+  // materials registered for shadows (`@cityjson/navara-cityjson`), and so
+  // are the terrain and the basemap — and the aerial-perspective pass only
+  // hazes what they produced. The deferred alternative (`view.lit = false` +
+  // `irradiance: true`) re-lights the G-buffer albedo from the atmosphere and
+  // CANNOT show a cast shadow: the engine's irradiance term reads no shadow
+  // buffer (issue #13). Mixing the two is what once clipped the frame white.
+  it("keeps the engine forward-lit at startup and never switches the aerial perspective into irradiance", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(photorealHandles.sun.update).toHaveBeenCalledWith({
+        sun: { castShadow: true, ...SUN_SHADOW_TUNING },
+      }),
+    );
+    // Stated, not inherited: the engine defaults to `true`, and a future
+    // default flip must not silently take the shadows with it.
+    expect((viewInstances[0] as { lit?: boolean }).lit).toBe(true);
+    for (const call of photorealHandles.aerialPerspective.update.mock.calls) {
+      const ap = (call[0] as { aerialPerspective?: { irradiance?: boolean } })
+        .aerialPerspective;
+      expect(ap?.irradiance).not.toBe(true);
+    }
   });
 
   // The scene-lights calibration is GONE, ambient fill and all. A regression
   // that adds one back is a double-exposed frame, not a brighter one.
   it("adds no scene lights of its own", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() =>
-      expect(photorealHandles.aerialPerspective.update).toHaveBeenCalled(),
-    );
+    await waitFor(() => expect(photorealHandles.sun.update).toHaveBeenCalled());
     expect(addLight).not.toHaveBeenCalled();
   });
 
@@ -2292,7 +2468,7 @@ describe("NavaraViewport render settings", () => {
     const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() =>
       expect(photorealHandles.sun.update).toHaveBeenCalledWith({
-        sun: { castShadow: true },
+        sun: { castShadow: true, ...SUN_SHADOW_TUNING },
       }),
     );
     const view = currentView();
@@ -2318,8 +2494,8 @@ describe("NavaraViewport render settings", () => {
   });
 
   it("keeps the viewer alive when the engine refuses a settings push", async () => {
-    photorealHandles.aerialPerspective.update.mockImplementationOnce(() => {
-      throw new Error("this build has no irradiance mode");
+    photorealHandles.sun.update.mockImplementationOnce(() => {
+      throw new Error("this build has no cascaded shadow maps");
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const ref = createRef<CitySceneHandle>();
@@ -2346,7 +2522,8 @@ describe("NavaraViewport container resize", () => {
     viewInstances.length = 0;
     defaultPluginThrows = null;
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2419,7 +2596,8 @@ describe("NavaraViewport geospatial layers", () => {
     );
     // This suite owns `addSource`/`addLayer`: no backdrop of its own.
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useGeoLayerStore.setState({ layers: [] });
     useSelectionStore.setState({
       selections: [],
@@ -2433,7 +2611,8 @@ describe("NavaraViewport geospatial layers", () => {
   afterEach(() => {
     cleanup();
     useGeoLayerStore.setState({ layers: [] });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSelectionStore.setState({
       selections: [],
       hovered: null,
@@ -2541,26 +2720,26 @@ describe("NavaraViewport geospatial layers", () => {
     return { geoLayerId, handle: lastHandleOfType("vector")!, unmount };
   }
 
-  /** The gesture as the engine really delivers it: mousedown, then the pick
+  /** The gesture as the engine really delivers it: pointerdown, then the pick
    *  (emitted on a clean mouseup), then the DOM click. */
   function pickThenClick(info: unknown, patch: Record<string, unknown> = {}) {
     act(() => {
-      fire("mousedown", mouse(10, 20));
-      fire("pick", info);
+      fire("pointerdown", mouse(10, 20));
+      fire("featureClick", info);
       fire("click", mouse(10, 20, patch));
     });
   }
 
   it("subscribes the engine's pick event and unsubscribes it on teardown", async () => {
     const { unmount } = await mountGeoJson();
-    const subscribed = on.mock.calls.filter((c) => c[0] === "pick");
+    const subscribed = on.mock.calls.filter((c) => c[0] === "featureClick");
     // ONE handler, not one per layer edit: the hosting effect re-runs on every
     // city-layer change, so a missing `off` would accumulate them.
     expect(subscribed).toHaveLength(1);
 
     unmount();
 
-    expect(off.mock.calls).toContainEqual(["pick", subscribed[0]![1]]);
+    expect(off.mock.calls).toContainEqual(["featureClick", subscribed[0]![1]]);
   });
 
   it("selects the picked geo feature when the own-raycast misses", async () => {
@@ -2626,7 +2805,7 @@ describe("NavaraViewport geospatial layers", () => {
     expect(useSelectionStore.getState().geoSelection).not.toBeNull();
 
     act(() => {
-      fire("mousedown", mouse(10, 20));
+      fire("pointerdown", mouse(10, 20));
       fire("click", mouse(10, 20));
     });
 

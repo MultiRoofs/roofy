@@ -213,6 +213,7 @@ function geoJsonLayer(config: { data?: unknown; url?: string }): GeoLayer {
     visible: true,
     opacity: 1,
     style: DEFAULT_GEO_LAYER_STYLE,
+    derivedFrom: null,
     config,
   };
 }
@@ -265,6 +266,7 @@ describe("resolveGeoLayerBounds", () => {
       visible: true,
       opacity: 1,
       style: DEFAULT_GEO_LAYER_STYLE,
+      derivedFrom: null,
       config: { url: "https://x/tileset.json" },
     };
     const bounds = await resolveGeoLayerBounds(
@@ -284,6 +286,7 @@ describe("resolveGeoLayerBounds", () => {
       visible: true,
       opacity: 1,
       style: DEFAULT_GEO_LAYER_STYLE,
+      derivedFrom: null,
       config: { urlTemplate: "https://tile/{z}/{x}/{y}.png" },
     };
     expect(
@@ -332,6 +335,7 @@ describe("resolveGeoLayerBounds", () => {
       visible: true,
       opacity: 1,
       style: DEFAULT_GEO_LAYER_STYLE,
+      derivedFrom: null,
       config: { url: "" },
     };
     expect(
@@ -344,5 +348,32 @@ describe("resolveGeoLayerBounds", () => {
     expect(
       await resolveGeoLayerBounds(geoJsonLayer({}), vi.fn() as never),
     ).toBeNull();
+  });
+});
+
+describe("selectedGeoJsonBounds", () => {
+  it("uses only selected prepared feature coordinates", async () => {
+    const { selectedGeoJsonBounds } =
+      await import("../../../../src/features/geoLayers/geoLayerBounds");
+    expect(
+      selectedGeoJsonBounds(
+        {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              properties: { __roofy_stable_feature_id: { stableId: "a" } },
+              geometry: { type: "Point", coordinates: [4, 52] },
+            },
+            {
+              type: "Feature",
+              properties: { __roofy_stable_feature_id: { stableId: "b" } },
+              geometry: { type: "Point", coordinates: [8, 55] },
+            },
+          ],
+        },
+        new Set(["b"]),
+      ),
+    ).toMatchObject({ west: 8, east: 8, south: 55, north: 55 });
   });
 });

@@ -1,0 +1,3503 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440" />
+    <title>Roofy — Processing toolbox wireframe</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* =====================================================================
+   Roofy — processing toolbox mockup (docs/superpowers/specs/
+   2026-09-10-processing-toolbox-design.md §11).
+
+   Two fidelities, on purpose:
+   · The EXISTING app shell is a GREYBOX (class .gb): flat greys, hairlines,
+     schematic map, placeholder text. Traced from 1440x900 screenshots of the
+     dev server with the Delft fixture loaded.
+   · The NEW toolbox surfaces (right-panel Tools tab, tool forms, run states,
+     log, recent runs, map-header Tools button, computed-column badges) are drawn
+     with the app's real Soft Utility tokens, copied from src/app/brand.css
+     (light theme) and src/app/flatControls.css.
+   Static: no engine, no data, no build step.
+   ===================================================================== */
+
+      /* ---- tokens: brand.css [data-theme="light"] ------------------------- */
+      :root {
+        --brand-primary: #7cb518;
+        --brand-secondary: #f0a800;
+        --brand-tertiary: #1e5fd8;
+        --brand-accent: #d9481c;
+
+        --lime-100: #edfbc8;
+        --lime-300: #cdf176;
+        --lime-500: #a7e32b;
+        --lime-700: #7cb518;
+        --lime-900: #4a7a0f;
+
+        --bg-root: #f6f7f2;
+        --bg-panel: #ffffff;
+        --bg-raised: #edefe7;
+        --fg: #14181e;
+        --fg-muted: #5c636e;
+        --fg-dim: #8b93a3;
+        --border: rgba(20, 24, 30, 0.1);
+        --border-strong: rgba(20, 24, 30, 0.18);
+
+        --font-ui:
+          "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+        --font-display: var(--font-ui);
+        /* brand.css sets --font-mono: var(--font-ui) on purpose ("one family").
+     The mock keeps section labels in that family with the tracked-uppercase
+     treatment (--font-label) and uses a true monospace only for content that
+     is code: the resolved column list (§6 "in mono") and the log's SQL. */
+        --font-label: var(--font-ui);
+        --font-code:
+          ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        --tracking-label: 0.16em;
+
+        /* flatControls.css, light */
+        --control-radius: 8px;
+        --control-height: 38px;
+        --control-height-compact: 30px;
+        --control-rest: #f2f4ee;
+        --control-hover: #e1e6da;
+        --control-selected: #eaf2df;
+        --control-selected-fg: #304d1d;
+        --layer-selected: #e8ece3;
+
+        /* derived, as app.css derives them */
+        --accent: var(--brand-primary);
+        --accent-fill: var(--lime-500);
+        --accent-fill-ink: #1d2a0b;
+        --danger: var(--brand-accent);
+        --warn: var(--brand-secondary);
+
+        /* greybox palette — deliberately hue-free so the new surfaces read as new */
+        --gb-panel: #fbfbf9;
+        --gb-fill: #ecece8;
+        --gb-fill-2: #f2f2ee;
+        --gb-line: #dcdcd7;
+        --gb-fg: #666961;
+        --gb-fg-strong: #5c5f57;
+        --gb-map: #e9e9e5;
+
+        /* shell geometry, measured from the 1440x900 screenshots */
+        --h-header: 44px;
+        --h-status: 28px;
+        --h-maphdr: 48px;
+        --h-drawer: 274px;
+        --w-left: 270px;
+        --w-right: 318px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #e2e3dd;
+        color: var(--fg);
+        font: 13px/1.45 var(--font-ui);
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        min-width: 1440px;
+        padding-bottom: 92px;
+      }
+
+      .page {
+        width: 1440px;
+        margin: 0 auto;
+        padding: 24px 0 20px;
+      }
+
+      .page-head {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin: 0 0 14px;
+        color: #4d5147;
+      }
+      .page-head h1 {
+        margin: 0;
+        font:
+          600 17px/1.2 "Outfit",
+          var(--font-display);
+        letter-spacing: -0.02em;
+        color: #2c2f29;
+      }
+      .page-head span {
+        font-size: 12px;
+        color: #6f7369;
+      }
+
+      /* the frame is exactly 1440x900 including its edge */
+      .frame {
+        position: relative;
+        width: 1440px;
+        height: 900px;
+        overflow: hidden;
+        background: var(--bg-root);
+        box-shadow:
+          0 0 0 1px #cfd0ca,
+          0 10px 30px rgba(20, 24, 30, 0.12);
+      }
+
+      /* ---- app shell ------------------------------------------------------ */
+      .app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .shell {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+
+      /* greybox primitives */
+      .gb {
+        color: var(--gb-fg);
+      }
+      .gbox {
+        background: var(--gb-fill);
+        border-radius: var(--control-radius);
+      }
+      .gbar {
+        background: var(--gb-fill);
+        border-radius: 3px;
+        display: inline-block;
+      }
+      .gb-panel {
+        background: var(--gb-panel);
+      }
+      .gb-strong {
+        color: var(--gb-fg-strong);
+      }
+
+      /* header ------------------------------------------------------------- */
+      .hdr {
+        flex: 0 0 var(--h-header);
+        height: var(--h-header);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        background: var(--gb-panel);
+        border-bottom: 1px solid var(--gb-line);
+      }
+      .hdr-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .hdr-mark {
+        width: 22px;
+        height: 16px;
+        border-radius: 3px;
+        background: var(--gb-fill);
+      }
+      .hdr-word {
+        width: 44px;
+        height: 10px;
+      }
+      .hdr-ws {
+        font-size: 12px;
+        color: var(--gb-fg-strong);
+      }
+      .hdr-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .gb-hbtn {
+        height: 30px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        border-radius: var(--control-radius);
+        background: var(--gb-fill);
+        color: var(--gb-fg-strong);
+        font-size: 12px;
+      }
+      .gb-hbtn i {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        background: #d5d5d0;
+        display: block;
+      }
+      .gb-sq {
+        width: 30px;
+        height: 30px;
+        border-radius: var(--control-radius);
+        background: var(--gb-fill);
+      }
+
+      /* NEW: map-header Tools button (production fidelity, §4.1) */
+      .tools-btn {
+        position: relative;
+        height: 30px;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 11px;
+        border: 0;
+        border-radius: var(--control-radius);
+        background: var(--control-rest);
+        color: var(--fg);
+        font: 500 12px/1 var(--font-ui);
+        cursor: default;
+      }
+      .tools-btn svg {
+        width: 15px;
+        height: 15px;
+      }
+      .tools-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--lime-500);
+        box-shadow: 0 0 0 2px var(--bg-panel);
+        display: none;
+      }
+      .frame[data-dot="lime"] .tools-dot {
+        display: block;
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      .frame[data-dot="amber"] .tools-dot {
+        display: block;
+        background: var(--warn);
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.35;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .frame[data-dot="lime"] .tools-dot {
+          animation: none;
+        }
+      }
+
+      /* left panel --------------------------------------------------------- */
+      .left {
+        flex: 0 0 var(--w-left);
+        width: var(--w-left);
+        background: var(--gb-panel);
+        border-right: 1px solid var(--gb-line);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .left-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 12px 12px;
+      }
+      .left-label {
+        font: 11px/1 var(--font-label);
+        letter-spacing: var(--tracking-label);
+        text-transform: uppercase;
+        color: var(--gb-fg);
+      }
+      .layer-list {
+        padding: 0 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .layer-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: var(--control-radius);
+        background: transparent;
+      }
+      .layer-row-active {
+        background: var(--gb-fill-2);
+      }
+      /* NEW: a derived layer (destination New layer) is inserted directly under
+         its target, active, in the app's own selected-row wash (§6.2) */
+      .layer-row-derived {
+        background: var(--control-selected);
+      }
+      .layer-row-derived .layer-row-name {
+        color: var(--fg);
+      }
+      .layer-row-derived .layer-row-sub {
+        color: var(--fg-muted);
+      }
+      .layer-row-derived .eye,
+      .layer-row-derived .kind {
+        background: #c2d4a8;
+      }
+      .layer-row-derived .dots {
+        color: var(--fg-dim);
+      }
+      /* with the derived layer active, the target row loses its wash */
+      .frame[data-state="10"] .layer-row-target {
+        background: transparent;
+      }
+      .layer-row .eye,
+      .layer-row .kind {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        background: #d8d8d3;
+        flex: 0 0 14px;
+      }
+      .layer-row-txt {
+        min-width: 0;
+      }
+      .layer-row-name {
+        font-size: 12px;
+        color: var(--gb-fg-strong);
+      }
+      .layer-row-sub {
+        font-size: 11px;
+        color: var(--gb-fg);
+      }
+      .layer-row .dots {
+        margin-left: auto;
+        color: var(--gb-fg);
+        font-size: 13px;
+      }
+      .left-sep {
+        height: 1px;
+        background: var(--gb-line);
+        margin: 12px 0 0;
+      }
+      .active-layer {
+        padding: 14px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .al-title {
+        font-size: 13px;
+        color: var(--gb-fg-strong);
+      }
+      .al-sub {
+        font-size: 11px;
+      }
+      /* NEW: the derived layer's own heading (§6.2, §8) */
+      .al-title-derived {
+        font-size: 13px;
+        color: var(--fg);
+      }
+      .al-sub-derived {
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+      .al-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .gb-btn {
+        height: 30px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        border-radius: var(--control-radius);
+        background: var(--gb-fill);
+        color: var(--gb-fg-strong);
+        font-size: 12px;
+      }
+      .gb-field {
+        height: 30px;
+        border-radius: var(--control-radius);
+        background: var(--gb-fill);
+        display: flex;
+        align-items: center;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      .disclose {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 0;
+        border-top: 1px solid var(--gb-line);
+        font-size: 12px;
+        color: var(--gb-fg-strong);
+      }
+      .legend-rows {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 11px;
+      }
+      .legend-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .legend-row .sw {
+        width: 12px;
+        height: 12px;
+        border-radius: 2px;
+        background: #d5d5d0;
+      }
+      .legend-row .hex {
+        margin-left: auto;
+      }
+
+      /* map column --------------------------------------------------------- */
+      .mapcol {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+      }
+      .maphdr {
+        flex: 0 0 var(--h-maphdr);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 12px;
+        background: var(--gb-panel);
+        border-bottom: 1px solid var(--gb-line);
+      }
+      .maphdr-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .map {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        background: var(--gb-map);
+        overflow: hidden;
+      }
+      .map > svg.map-bg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .map-legend {
+        position: absolute;
+        left: 14px;
+        bottom: 46px;
+        width: 176px;
+        background: var(--gb-panel);
+        border-radius: var(--control-radius);
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .map-legend .hd {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+        color: var(--gb-fg-strong);
+      }
+      .map-legend .lr {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+      }
+      .map-legend .lr .sw {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        background: #d5d5d0;
+      }
+      .map-legend .lr .n {
+        margin-left: auto;
+      }
+      .camera {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-40%);
+        background: var(--gb-panel);
+        border-radius: var(--control-radius);
+        padding: 5px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .camera i {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        background: var(--gb-fill);
+        display: block;
+      }
+      .scalebar {
+        position: absolute;
+        right: 12px;
+        bottom: 46px;
+        width: 116px;
+        height: 20px;
+        border-radius: 4px;
+        background: var(--gb-panel);
+        font-size: 10px;
+        color: var(--gb-fg);
+        display: flex;
+        align-items: center;
+        padding: 0 6px;
+      }
+      .attrib {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 14px;
+        background: rgba(251, 251, 249, 0.86);
+        font-size: 10px;
+        color: var(--gb-fg);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      /* collapsed right-panel pills (NEW surface) */
+      .collapsed-pills {
+        position: absolute;
+        right: 12px;
+        top: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-end;
+      }
+      .glass-pill {
+        height: var(--control-height-compact);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: var(--control-radius);
+        background: var(--bg-panel);
+        color: var(--fg);
+        font: 500 12px/1 var(--font-ui);
+        box-shadow: 0 5px 18px rgb(18 30 16 / 16%);
+        cursor: default;
+      }
+      .glass-pill .rdot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--lime-500);
+      }
+      .glass-pill .chev {
+        width: 16px;
+        height: 16px;
+        flex: 0 0 16px;
+        color: var(--fg-dim);
+        display: block;
+      }
+
+      /* toast (NEW surface) */
+      .toast {
+        position: absolute;
+        left: 50%;
+        bottom: 44px;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        max-width: 560px;
+        padding: 10px 14px;
+        border-radius: var(--control-radius);
+        background: var(--bg-panel);
+        box-shadow: 0 8px 24px rgb(18 30 16 / 20%);
+        font-size: 12.5px;
+        color: var(--fg);
+        z-index: 5;
+      }
+      .toast .ok {
+        color: var(--lime-700);
+        display: flex;
+        flex: 0 0 16px;
+      }
+      .toast .ok svg {
+        width: 16px;
+        height: 16px;
+        display: block;
+      }
+
+      /* collapsed drawer handle + drawer ------------------------------------ */
+      .handle {
+        flex: 0 0 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        background: var(--gb-panel);
+        border-top: 1px solid var(--gb-line);
+        font-size: 11px;
+        color: var(--gb-fg);
+      }
+      .drawer {
+        flex: 0 0 var(--h-drawer);
+        display: flex;
+        flex-direction: column;
+        background: var(--gb-panel);
+        border-top: 1px solid var(--gb-line);
+        min-height: 0;
+      }
+      .drawer-head {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 10px 12px;
+        font-size: 12px;
+      }
+      .drawer-head .nm {
+        color: var(--gb-fg-strong);
+      }
+      .drawer-head .rt {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .drawer-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-top: 1px solid var(--gb-line);
+        font-size: 12px;
+      }
+      .gb-tab {
+        height: 26px;
+        padding: 0 10px;
+        border-radius: var(--control-radius);
+        background: var(--gb-fill);
+        display: inline-flex;
+        align-items: center;
+        font-size: 12px;
+        color: var(--gb-fg-strong);
+      }
+      .gb-tab-on {
+        background: var(--gb-fill);
+        box-shadow: inset 0 0 0 1px #d2d2cc;
+      }
+      .gb-chip {
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: var(--gb-fill);
+        display: inline-flex;
+        align-items: center;
+        font-size: 11px;
+        color: var(--gb-fg-strong);
+      }
+
+      .table-wrap {
+        flex: 1;
+        min-height: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+      }
+      .table-wrap::-webkit-scrollbar {
+        display: none;
+      }
+      .tbl {
+        border-collapse: collapse;
+        table-layout: fixed;
+        width: 1132px;
+      }
+      .tbl th,
+      .tbl td {
+        text-align: left;
+        padding: 8px 10px;
+        font-size: 11px;
+        border-bottom: 1px solid var(--gb-line);
+      }
+      .tbl thead th {
+        color: var(--gb-fg);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-weight: 400;
+        background: var(--gb-panel);
+        white-space: nowrap;
+      }
+      .tbl td {
+        color: var(--gb-fg-strong);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tbl .sticky {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: var(--gb-panel);
+        box-shadow: 1px 0 0 var(--gb-line);
+      }
+      .tbl .th-tools {
+        display: inline-flex;
+        gap: 6px;
+        margin-left: 8px;
+        opacity: 0.6;
+      }
+      .tbl .th-tools i {
+        width: 11px;
+        height: 11px;
+        border-radius: 2px;
+        background: #d8d8d3;
+        display: block;
+      }
+      /* NEW: computed column headers keep app colours and carry the badge */
+      .tbl th.computed {
+        color: var(--fg-muted);
+        font-family: var(--font-code);
+        text-transform: none;
+        letter-spacing: 0;
+        font-size: 10.5px;
+        box-shadow: inset 0 -2px 0 var(--lime-300);
+      }
+      .tbl td.computed {
+        color: var(--fg);
+      }
+      .drawer-foot {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border-top: 1px solid var(--gb-line);
+        font-size: 11px;
+      }
+      .drawer-foot .rt {
+        margin-left: auto;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      /* status bar --------------------------------------------------------- */
+      .status {
+        flex: 0 0 var(--h-status);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 12px;
+        background: var(--gb-panel);
+        border-top: 1px solid var(--gb-line);
+        font-size: 11px;
+      }
+      .status .mid {
+        margin: 0 auto;
+      }
+
+      /* =====================================================================
+   RIGHT PANEL — every surface below is production-intent
+   ===================================================================== */
+      .right {
+        flex: 0 0 var(--w-right);
+        width: var(--w-right);
+        background: var(--bg-panel);
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .rp-tabs {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 8px 0;
+      }
+      .tab {
+        height: var(--control-height-compact);
+        max-width: 172px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--control-radius);
+        background: transparent;
+        color: var(--fg-muted);
+        font: 500 12px/1 var(--font-ui);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        cursor: default;
+      }
+      .tab-on {
+        background: var(--control-selected);
+        color: var(--control-selected-fg);
+      }
+      .tab-emph {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .tab-emph::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--lime-500);
+        flex: 0 0 6px;
+      }
+      .rp-collapse {
+        margin-left: auto;
+        width: 26px;
+        height: 26px;
+        border: 0;
+        background: transparent;
+        color: var(--fg-dim);
+        cursor: default;
+      }
+      .rp-tabline {
+        height: 1px;
+        background: var(--border);
+        margin: 8px 0 0;
+      }
+      .rp-body {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .tab-body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .body-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 12px 8px;
+      }
+      .body-head h2 {
+        margin: 0;
+        font: 600 14px/1.2 var(--font-ui);
+        letter-spacing: -0.01em;
+      }
+      .body-head .sp {
+        margin-left: auto;
+      }
+      .icon-btn {
+        width: 26px;
+        height: 26px;
+        border: 0;
+        background: transparent;
+        color: var(--fg-dim);
+        border-radius: 6px;
+        cursor: default;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .scroller {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0 12px 14px;
+      }
+      .scroller::-webkit-scrollbar {
+        width: 8px;
+      }
+      .scroller::-webkit-scrollbar-thumb {
+        background: #dfe2d9;
+        border-radius: 4px;
+      }
+
+      /* section labels — the app's tracked-uppercase "mono label" */
+      .sec {
+        margin: 16px 0 8px;
+        font: 11px/1 var(--font-label);
+        letter-spacing: var(--tracking-label);
+        text-transform: uppercase;
+        color: var(--fg-muted);
+      }
+      .sec:first-child {
+        margin-top: 6px;
+      }
+
+      /* controls */
+      .field {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .field > label {
+        flex: 0 0 54px;
+        font-size: 12px;
+        color: var(--fg-muted);
+        white-space: nowrap;
+      }
+      .inp,
+      .sel {
+        width: 100%;
+        min-height: var(--control-height-compact);
+        height: var(--control-height-compact);
+        border: 1px solid var(--border);
+        border-radius: var(--control-radius);
+        background: var(--control-rest);
+        color: var(--fg);
+        font: 12px/1 var(--font-ui);
+        padding: 0 10px;
+      }
+      .sel {
+        appearance: none;
+        background-image:
+          linear-gradient(45deg, transparent 50%, var(--fg-dim) 50%),
+          linear-gradient(135deg, var(--fg-dim) 50%, transparent 50%);
+        background-position:
+          right 11px center,
+          right 6px center;
+        background-size:
+          5px 5px,
+          5px 5px;
+        background-repeat: no-repeat;
+        padding-right: 22px;
+      }
+      .inp:disabled,
+      .sel:disabled,
+      .btn:disabled {
+        opacity: 0.45;
+      }
+      .is-focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .search-wrap {
+        position: relative;
+        margin: 2px 0 4px;
+      }
+      .search-wrap svg {
+        position: absolute;
+        left: 10px;
+        top: 8px;
+        width: 14px;
+        height: 14px;
+        color: var(--fg-dim);
+      }
+      .search-wrap .inp {
+        padding-left: 30px;
+      }
+
+      .btn {
+        height: var(--control-height-compact);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: var(--control-radius);
+        background: var(--control-rest);
+        color: var(--fg);
+        font: 500 12px/1 var(--font-ui);
+        cursor: default;
+      }
+      .btn-ghost {
+        background: transparent;
+      }
+      .btn-primary {
+        height: var(--control-height);
+        padding: 0 20px;
+        background: var(--accent-fill);
+        color: var(--accent-fill-ink);
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .btn-lg {
+        height: var(--control-height);
+        font-size: 13px;
+      }
+
+      .checks {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 10px;
+      }
+      .chk,
+      .rad {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--fg);
+        line-height: 1.3;
+      }
+      .chk input,
+      .rad input {
+        margin: 1px 0 0;
+        accent-color: var(--accent);
+        width: 14px;
+        height: 14px;
+        flex: 0 0 14px;
+      }
+      .chk.dis,
+      .rad.dis {
+        color: var(--fg-dim);
+      }
+      .radios {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .rad .why {
+        display: block;
+        font-size: 11px;
+        color: var(--fg-dim);
+      }
+      /* the Name field that appears under the "New layer" radio (§6): it sits
+         in the radio column, indented past the radio itself, not as a
+         label-plus-control .field row */
+      .dest-name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 22px;
+      }
+      .dest-name > label {
+        flex: 0 0 auto;
+        font-size: 12px;
+        color: var(--fg-muted);
+      }
+      .dest-name > .inp {
+        flex: 1;
+        min-width: 0;
+      }
+      .muted {
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+      .dim {
+        color: var(--fg-dim);
+        font-size: 11px;
+        line-height: 1.45;
+      }
+      .note {
+        margin: 12px 0 0;
+        font-size: 11.5px;
+        color: var(--fg-muted);
+        line-height: 1.45;
+      }
+      .warnline {
+        display: flex;
+        gap: 7px;
+        margin-top: 8px;
+        font-size: 11.5px;
+        color: #8a5a08;
+        line-height: 1.4;
+      }
+      .warnline svg {
+        flex: 0 0 14px;
+        width: 14px;
+        height: 14px;
+        color: var(--warn);
+        margin-top: 1px;
+      }
+      .errline {
+        color: var(--danger);
+      }
+      .cols {
+        font-family: var(--font-code);
+        font-size: 11px;
+        color: var(--fg);
+        line-height: 1.6;
+        word-break: break-word;
+        margin-top: 8px;
+      }
+
+      /* catalogue */
+      .tool-row {
+        display: block;
+        width: 100%;
+        text-align: left;
+        border: 0;
+        background: transparent;
+        padding: 8px 8px 9px;
+        margin: 0 -8px;
+        border-radius: var(--control-radius);
+        cursor: default;
+        color: inherit;
+        font: inherit;
+      }
+      .tool-row + .tool-row {
+        margin-top: 2px;
+      }
+      .tool-row-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .tool-name {
+        font-size: 13px;
+        color: var(--fg);
+      }
+      .tool-desc {
+        font-size: 11.5px;
+        color: var(--fg-muted);
+        margin-top: 2px;
+      }
+      .tool-reason {
+        font-size: 11.5px;
+        color: var(--fg-dim);
+        margin-top: 3px;
+      }
+      .tool-row:disabled .tool-name,
+      .tool-row:disabled .tool-desc {
+        opacity: 0.45;
+      }
+      .tool-row .caret {
+        color: var(--fg-dim);
+        font-size: 11px;
+      }
+      .chip {
+        margin-left: auto;
+        height: 19px;
+        padding: 0 7px;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        background: var(--lime-100);
+        color: var(--lime-900);
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .chip-muted {
+        background: var(--bg-raised);
+        color: var(--fg-dim);
+      }
+      .chip-lg {
+        height: 20px;
+        font-size: 11px;
+      }
+      .empty {
+        font-size: 11.5px;
+        color: var(--fg-dim);
+        padding: 2px 0 6px;
+      }
+
+      /* run rows in recent runs */
+      .run-row {
+        padding: 8px 0;
+        border-top: 1px solid var(--border);
+      }
+      .run-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+      }
+      .rdot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: 0 0 8px;
+      }
+      .rdot-done {
+        background: var(--lime-500);
+      }
+      .rdot-failed {
+        background: var(--warn);
+      }
+      .run-sub {
+        font-size: 11.5px;
+        color: var(--fg-muted);
+        margin: 3px 0 5px;
+      }
+      .run-actions {
+        display: flex;
+        gap: 6px;
+      }
+      .link-btn {
+        border: 0;
+        background: transparent;
+        padding: 0 2px;
+        color: var(--accent);
+        font: 500 11.5px/1 var(--font-ui);
+        cursor: default;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
+      /* tool view header */
+      .tool-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 10px 12px 0;
+      }
+      .back {
+        width: 26px;
+        height: 26px;
+        border: 0;
+        background: transparent;
+        color: var(--fg-muted);
+        border-radius: 6px;
+        cursor: default;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .tool-title {
+        margin: 0;
+        font: 600 14px/1.3 var(--font-ui);
+        letter-spacing: -0.01em;
+        flex: 1;
+      }
+      .tool-lede {
+        padding: 4px 12px 0;
+        font-size: 11.5px;
+        color: var(--fg-muted);
+        line-height: 1.45;
+      }
+
+      /* footer / run states */
+      .foot {
+        flex: 0 0 auto;
+        border-top: 1px solid var(--border);
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--bg-panel);
+      }
+      .foot .sp {
+        margin-left: auto;
+      }
+
+      .progress {
+        flex: 0 0 auto;
+        border-top: 1px solid var(--border);
+        padding: 12px;
+        background: var(--bg-panel);
+      }
+      .pbar-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .pbar {
+        flex: 1;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--bg-raised);
+        overflow: hidden;
+      }
+      .pbar-fill {
+        width: 46%;
+        height: 100%;
+        border-radius: 999px;
+        background: var(--lime-500);
+        animation: slide 1.5s ease-in-out infinite alternate;
+      }
+      @keyframes slide {
+        from {
+          transform: translateX(-16%);
+        }
+        to {
+          transform: translateX(120%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pbar-fill {
+          animation: none;
+        }
+      }
+      .pbar-label {
+        font-size: 12px;
+        color: var(--fg);
+      }
+      .phases {
+        margin-top: 8px;
+        font-size: 11.5px;
+        color: var(--fg-dim);
+        line-height: 1.5;
+      }
+      .phases .ph-done {
+        color: var(--fg-muted);
+      }
+      .phases .ph-done b {
+        color: var(--lime-700);
+        font-weight: 600;
+      }
+      .phases .ph-now {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .prow {
+        display: flex;
+        align-items: center;
+        margin-top: 10px;
+      }
+      .prow .el {
+        font-size: 12px;
+        color: var(--fg-muted);
+      }
+      .prow .sp {
+        margin-left: auto;
+      }
+
+      .card {
+        flex: 0 0 auto;
+        border-top: 1px solid var(--border);
+        padding: 12px;
+        background: var(--bg-panel);
+      }
+      .card-1 {
+        display: flex;
+        gap: 8px;
+        font-size: 12.5px;
+        line-height: 1.4;
+        color: var(--fg);
+      }
+      .card-1 svg {
+        flex: 0 0 15px;
+        width: 15px;
+        height: 15px;
+        margin-top: 1px;
+      }
+      .card-done .card-1 svg {
+        color: var(--lime-700);
+      }
+      .card-failed .card-1 svg {
+        color: var(--danger);
+      }
+      .card-2 {
+        margin: 4px 0 0 23px;
+        font-size: 11.5px;
+        color: var(--fg-muted);
+      }
+      .card-3 {
+        margin: 6px 0 0 23px;
+        font-size: 12px;
+        color: var(--fg);
+      }
+      .card-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .card-actions .sp {
+        margin-left: auto;
+      }
+
+      /* annotation (mock-only marginalia) */
+      .annot {
+        margin: 8px 12px 0;
+        padding: 6px 8px;
+        border-left: 2px solid var(--lime-500);
+        background: #f7fce9;
+        font-size: 10.5px;
+        line-height: 1.45;
+        color: #4f5a3c;
+      }
+
+      /* computed badge (flatControls .computed-attribute-badge) */
+      .badge {
+        width: 14px;
+        height: 14px;
+        color: var(--fg-muted);
+        flex: 0 0 14px;
+        vertical-align: -2px;
+      }
+      .badge-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
+      .tip {
+        position: absolute;
+        top: 100%;
+        left: -6px;
+        z-index: 20;
+        margin-top: 4px;
+        padding: 6px 8px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        color: var(--fg);
+        white-space: nowrap;
+        font: 12px/1.4 var(--font-ui);
+        box-shadow: 0 5px 18px rgb(18 30 16 / 16%);
+      }
+
+      /* details tab body (greybox shell + production computed block) */
+      .det-head {
+        padding: 12px 12px 0;
+      }
+      .det-crumb {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--gb-fg-strong);
+      }
+      .det-crumb .sp {
+        margin-left: auto;
+      }
+      .det-id {
+        font-size: 11px;
+        color: var(--gb-fg);
+        margin-top: 3px;
+      }
+      .det-sec {
+        margin: 16px 0 8px;
+        font: 11px/1 var(--font-label);
+        letter-spacing: var(--tracking-label);
+        text-transform: uppercase;
+        color: var(--gb-fg);
+      }
+      .det-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--gb-line);
+        font-size: 12px;
+        color: var(--gb-fg-strong);
+      }
+      .det-line .v {
+        margin-left: auto;
+        color: var(--gb-fg);
+      }
+      .det-sec-computed {
+        margin: 18px 0 6px;
+        font: 11px/1 var(--font-label);
+        letter-spacing: var(--tracking-label);
+        text-transform: uppercase;
+        color: var(--fg-muted);
+      }
+      .cmp-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--fg);
+      }
+      .cmp-line .nm {
+        font-family: var(--font-code);
+        font-size: 11px;
+      }
+      .cmp-line .v {
+        margin-left: auto;
+        color: var(--fg);
+      }
+
+      /* log view */
+      .log-dl {
+        margin: 0;
+        font-size: 11.5px;
+      }
+      .log-dl div {
+        display: flex;
+        gap: 10px;
+        padding: 3px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .log-dl dt {
+        flex: 0 0 96px;
+        color: var(--fg-muted);
+      }
+      .log-dl dd {
+        margin: 0;
+        color: var(--fg);
+        flex: 1;
+        word-break: break-word;
+      }
+      .sql {
+        margin: 8px 0 0;
+        padding: 8px 9px;
+        border-radius: 6px;
+        background: var(--bg-raised);
+        font: 10.5px/1.45 var(--font-code);
+        color: var(--fg);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .sql-meta {
+        display: flex;
+        gap: 10px;
+        margin-top: 4px;
+        font-size: 10.5px;
+        color: var(--fg-dim);
+      }
+      .sql-n {
+        font-size: 11px;
+        color: var(--fg-muted);
+        margin-top: 12px;
+      }
+      .warn-item {
+        display: flex;
+        gap: 7px;
+        font-size: 11.5px;
+        color: var(--fg-muted);
+        margin-top: 6px;
+      }
+      .warn-item svg {
+        flex: 0 0 13px;
+        width: 13px;
+        height: 13px;
+        color: var(--warn);
+        margin-top: 1px;
+      }
+
+      /* ---- caption + state strip ------------------------------------------ */
+      .caption {
+        width: 1440px;
+        margin: 14px auto 0;
+        padding: 12px 14px;
+        background: #f4f4f0;
+        border-radius: 10px;
+        border: 1px solid #d9dad4;
+        color: #4a4e46;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .caption b {
+        color: #2c2f29;
+      }
+      .caption p {
+        margin: 0;
+      }
+      .caption p + p {
+        margin-top: 3px;
+      }
+
+      .strip {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 16px;
+        background: #22251f;
+        overflow-x: auto;
+      }
+      .strip .lbl {
+        color: #b9bdb2;
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-right: 6px;
+        white-space: nowrap;
+      }
+      .strip button {
+        border: 0;
+        border-radius: 6px;
+        background: #34382f;
+        color: #dfe3d8;
+        font: 11.5px/1 var(--font-ui);
+        padding: 7px 10px;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .strip button:hover {
+        background: #414639;
+      }
+      .strip button[aria-pressed="true"] {
+        background: var(--lime-500);
+        color: #1d2a0b;
+        font-weight: 600;
+      }
+      .strip .hint {
+        margin-left: auto;
+        color: #878c7f;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <symbol
+          id="i-wrench"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M14.7 6.3a4 4 0 0 0 5 5l-8 8a2.8 2.8 0 0 1-4-4l8-8Z" />
+          <path d="M14.7 6.3 17 4a4 4 0 0 1 3 3l-2.3 2.3" />
+        </symbol>
+        <symbol
+          id="i-search"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+        >
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="m16 16 4.5 4.5" />
+        </symbol>
+        <symbol
+          id="i-chev-left"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="m14.5 5-7 7 7 7" />
+        </symbol>
+        <symbol
+          id="i-chev-right"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="m9.5 5 7 7-7 7" />
+        </symbol>
+        <symbol
+          id="i-x"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+        >
+          <path d="M6 6l12 12M18 6 6 18" />
+        </symbol>
+        <symbol
+          id="i-check"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="m4 12.5 5.2 5.2L20 6.8" />
+        </symbol>
+        <symbol
+          id="i-cross"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+        >
+          <path d="M6 6l12 12M18 6 6 18" />
+        </symbol>
+        <symbol
+          id="i-warn"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M12 4 2.8 20h18.4L12 4Z" />
+          <path d="M12 10v4.5" />
+          <path d="M12 17.4h.01" />
+        </symbol>
+        <!-- computed-column badge -->
+        <symbol
+          id="i-computed"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.7"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path
+            d="M11 3.5 12.7 8l4.5 1.7-4.5 1.7L11 15.9 9.3 11.4 4.8 9.7 9.3 8 11 3.5Z"
+          />
+          <path
+            d="M18 15.2l.8 2.1 2.1.8-2.1.8-.8 2.1-.8-2.1-2.1-.8 2.1-.8.8-2.1Z"
+          />
+        </symbol>
+        <symbol
+          id="i-copy"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <main class="page">
+      <div class="page-head">
+        <h1>Roofy — processing toolbox</h1>
+        <span
+          >Feature spec mockup ·
+          docs/superpowers/specs/2026-09-10-processing-toolbox-design.md ·
+          greybox shell + Soft Utility toolbox surfaces · 1440 × 900</span
+        >
+      </div>
+
+      <div class="frame" id="frame" data-state="1" data-dot="">
+        <div class="app">
+          <!-- ============ HEADER (greybox: Export, Save, Share,
+               Preferences and the collapse chevrons — §4.1 leaves it
+               unchanged) ==================================================== -->
+          <header class="hdr gb">
+            <div class="hdr-left">
+              <span class="hdr-mark"></span>
+              <span class="gbar hdr-word"></span>
+              <span class="hdr-ws">Untitled workspace</span>
+              <span class="gb-sq" style="width: 26px; height: 26px"></span>
+            </div>
+            <div class="hdr-right">
+              <span class="gb-hbtn"><i></i>Export</span>
+              <span class="gb-hbtn"><i></i>Save</span>
+              <span class="gb-hbtn"><i></i>Share</span>
+              <span class="gb-hbtn"><i></i>Preferences</span>
+              <span class="gb-sq"></span>
+            </div>
+          </header>
+
+          <div class="shell">
+            <!-- ============ LEFT PANEL (greybox) ========================== -->
+            <aside class="left gb">
+              <div class="left-head">
+                <span class="left-label">Layers</span>
+                <span class="gb-btn">Add layer</span>
+              </div>
+
+              <div class="layer-list">
+                <div class="layer-row layer-row-target layer-row-active">
+                  <span class="eye"></span><span class="kind"></span>
+                  <span class="layer-row-txt">
+                    <span class="layer-row-name">delft.city.jsonl</span><br />
+                    <span class="layer-row-sub">1,115 buildings · LoD 2.2</span>
+                  </span>
+                  <span class="dots">···</span>
+                </div>
+                <!-- NEW: the derived layer of state 10 -->
+                <div class="layer-row layer-row-derived" data-when="10">
+                  <span class="eye"></span><span class="kind"></span>
+                  <span class="layer-row-txt">
+                    <span class="layer-row-name">Delft · solids</span><br />
+                    <span class="layer-row-sub"
+                      >312 buildings · LoD 2.2 · Derived from Delft</span
+                    >
+                  </span>
+                  <span class="dots">···</span>
+                </div>
+                <div class="layer-row" data-when="6 7">
+                  <span class="eye"></span><span class="kind"></span>
+                  <span class="layer-row-txt">
+                    <span class="layer-row-name">zones.geojson</span><br />
+                    <span class="layer-row-sub">Vector · 6 areas</span>
+                  </span>
+                  <span class="dots">···</span>
+                </div>
+              </div>
+
+              <div class="left-sep"></div>
+
+              <div class="active-layer">
+                <div class="al-title" data-when="1 2 3 4 5 6 7 8 9">
+                  delft.city.jsonl
+                </div>
+                <div class="al-sub" data-when="1 2 3 4 5 6 7 8 9">
+                  City model · CityJSONSeq
+                </div>
+                <div class="al-title-derived" data-when="10">
+                  Delft · solids
+                </div>
+                <div class="al-sub-derived" data-when="10">
+                  Derived · not saved in workspaces
+                </div>
+                <div class="al-actions">
+                  <span class="gb-btn">Zoom to layer</span>
+                  <span class="gb-btn" data-when="1 2 3 6 7 8 9 10"
+                    >Open table</span
+                  >
+                  <span class="gb-btn" data-when="4 5">Close table</span>
+                  <span class="gb-btn">Export</span>
+                </div>
+
+                <div
+                  style="
+                    height: 1px;
+                    background: var(--gb-line);
+                    margin: 2px 0 0;
+                  "
+                ></div>
+                <div
+                  style="
+                    font-size: 12px;
+                    color: var(--gb-fg-strong);
+                    margin-top: 8px;
+                  "
+                >
+                  Style
+                </div>
+                <div class="gb-field" style="justify-content: center">
+                  Copy from…
+                </div>
+                <div class="al-sub" style="margin-top: 2px">Color by</div>
+                <div class="gb-field">Surface type</div>
+                <div class="al-sub">
+                  delft.city.jsonl · Color roof surfaces by surface type
+                </div>
+                <div class="legend-rows">
+                  <span class="legend-row"
+                    ><span class="sw"></span>Roof<span class="hex"
+                      >#D9481C</span
+                    ></span
+                  >
+                  <span class="legend-row"
+                    ><span class="sw"></span>Wall<span class="hex"
+                      >#D9DCD4</span
+                    ></span
+                  >
+                  <span class="legend-row"
+                    ><span class="sw"></span>Ground<span class="hex"
+                      >#6F7566</span
+                    ></span
+                  >
+                </div>
+                <div class="al-sub">Palette is read-only.</div>
+                <div class="disclose">› Filter</div>
+                <div class="disclose">› Details</div>
+              </div>
+            </aside>
+
+            <!-- ============ MAP COLUMN (greybox, except the Tools button) = -->
+            <section class="mapcol">
+              <div class="maphdr gb">
+                <span style="font-size: 12px">Mode</span>
+                <span class="gb-sq" style="width: 22px; height: 22px"></span>
+                <span class="gb-field" style="width: 148px">Pick feature</span>
+
+                <!-- NEW: the toolbox entry point lives in the scene's own
+                     toolbar, directly after the Mode select and before the
+                     address search (§4.1) -->
+                <button class="tools-btn" type="button">
+                  <svg><use href="#i-wrench" /></svg>Tools<span
+                    class="tools-dot"
+                  ></span>
+                </button>
+
+                <span class="gb-sq" style="width: 30px; height: 30px"></span>
+                <span class="maphdr-right">
+                  <span class="gb-hbtn"><i></i>Sun &amp; shade</span>
+                  <span class="gb-hbtn"><i></i>Scene settings</span>
+                </span>
+              </div>
+
+              <div class="map">
+                <svg
+                  class="map-bg"
+                  viewBox="0 0 1170 620"
+                  preserveAspectRatio="xMidYMid slice"
+                  aria-hidden="true"
+                >
+                  <rect width="1170" height="620" fill="#e9e9e5" />
+                  <g fill="#e2e2dd" stroke="#d3d3cd" stroke-width="1.5">
+                    <path d="M0 246 1170 176 1170 214 0 292Z" />
+                    <path d="M402 0 470 620 512 620 452 0Z" />
+                  </g>
+                  <g fill="#efefeb" stroke="#d0d0c9" stroke-width="1.5">
+                    <path d="M60 78h190v104H60z" />
+                    <path d="M60 330h150v92H60z" />
+                    <path d="M232 330h120v140H232z" />
+                    <path d="M60 470h150v96H60z" />
+                    <path d="M540 60h214v122H540z" />
+                    <path d="M790 60h150v78H790z" />
+                    <path d="M980 60h150v160H980z" />
+                    <path d="M545 320h230v100H545z" />
+                    <path d="M545 448h130v128H545z" />
+                    <path d="M706 448h240v76H706z" />
+                    <path d="M812 300h134v104H812z" />
+                    <path d="M980 300h150v112H980z" />
+                    <path d="M980 448h150v128H980z" />
+                    <path d="M270 60h96v122h-96z" />
+                  </g>
+                  <g fill="none" stroke="#dcdcd6" stroke-width="1.2">
+                    <path
+                      d="M60 78h190v104H60zM540 60h214v122H540zM545 320h230v100H545zM980 300h150v112H980z"
+                    />
+                    <path
+                      d="M105 78v104M155 78v104M205 78v104M596 60v122M652 60v122M708 60v122"
+                    />
+                  </g>
+                </svg>
+
+                <!-- collapsed right-panel pills (state 9) -->
+                <div class="collapsed-pills" data-when="9">
+                  <button class="glass-pill" type="button">
+                    <span class="rdot"></span>Tools · running<svg
+                      class="chev"
+                      width="16"
+                      height="16"
+                    >
+                      <use href="#i-chev-left" />
+                    </svg>
+                  </button>
+                  <button class="glass-pill" type="button">
+                    Details · Building …12869<svg
+                      class="chev"
+                      width="16"
+                      height="16"
+                    >
+                      <use href="#i-chev-left" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div class="map-legend gb">
+                  <span class="hd">Legend <span>⌄</span></span>
+                  <span class="lr" style="color: var(--gb-fg-strong)"
+                    >delft.city.jsonl<span class="n">›</span></span
+                  >
+                  <span class="lr"
+                    ><span class="sw"></span>Roof<span class="n"
+                      >8325</span
+                    ></span
+                  >
+                  <span class="lr"
+                    ><span class="sw"></span>Wall<span class="n"
+                      >55949</span
+                    ></span
+                  >
+                  <span class="lr"
+                    ><span class="sw"></span>Ground<span class="n"
+                      >3348</span
+                    ></span
+                  >
+                  <span class="lr"
+                    ><span class="sw"></span>Other<span class="n"
+                      >1115</span
+                    ></span
+                  >
+                </div>
+
+                <div class="camera gb"><i></i><i></i><i></i><i></i><i></i></div>
+                <div class="scalebar gb">20 m</div>
+
+                <!-- toast (state 10) -->
+                <div class="toast" data-when="10">
+                  <span class="ok"
+                    ><svg width="16" height="16"><use href="#i-check" /></svg
+                  ></span>
+                  Created Delft · solids · 312 buildings · 37 invalid solids (no
+                  volume) · 2.4 s
+                </div>
+
+                <!-- toast (state 4) -->
+                <div class="toast" data-when="4">
+                  <span class="ok"
+                    ><svg width="16" height="16"><use href="#i-check" /></svg
+                  ></span>
+                  1,115 buildings measured · 37 invalid solids (no volume) · 12
+                  skipped · 2.4 s
+                </div>
+
+                <!-- licence obligation: attribution renders unconditionally -->
+                <div class="attrib">
+                  <span>Imagery © Google</span>
+                  <span
+                    >Source: Esri, Vantor, Earthstar Geographics, and the GIS
+                    User Community</span
+                  >
+                  <span>Terrain: © Re:Earth Terrain</span>
+                  <span>Geoid (EGM2008): © Mapterhorn, CC BY 4.0</span>
+                  <span>© OpenStreetMap contributors, ODbL</span>
+                  <span>Re:Earth Terrain, EGM2008 (NGA)</span>
+                </div>
+              </div>
+
+              <!-- collapsed drawer handle -->
+              <div class="handle gb" data-when="1 2 3 6 7 8 9 10">
+                <span class="gb-btn" style="height: 24px">Open table</span>
+                <span>Drag up to expand</span>
+              </div>
+
+              <!-- ============ DATA DRAWER (greybox + new computed headers) -->
+              <div class="drawer gb" data-when="4 5">
+                <div class="drawer-head">
+                  <span class="nm">delft.city.jsonl</span>
+                  <span>All 1,115 · Matching 312 · Selected 2 buildings</span>
+                  <span class="rt">
+                    <span>Map + table</span>
+                    <span class="gb-btn" style="height: 26px">Expand</span>
+                    <span
+                      class="gb-sq"
+                      style="width: 26px; height: 26px"
+                    ></span>
+                  </span>
+                </div>
+                <div class="drawer-row">
+                  <span class="gb-btn" style="height: 26px">Columns</span>
+                </div>
+                <div class="drawer-row">
+                  <span class="gb-tab gb-tab-on">Records</span>
+                  <span class="gb-tab">Summary</span>
+                  <span
+                    class="rt"
+                    style="
+                      margin-left: auto;
+                      display: flex;
+                      gap: 8px;
+                      align-items: center;
+                    "
+                  >
+                    <span class="gb-btn" style="height: 26px">Raw objects</span>
+                    <span>Show selected records</span>
+                    <span class="gb-btn" style="height: 26px"
+                      >Clear selection</span
+                    >
+                  </span>
+                </div>
+                <div class="drawer-row">
+                  <span class="gb-btn" style="height: 26px">Add condition</span>
+                  <span class="gb-chip">status = Pand in gebruik</span>
+                  <span class="gb-btn" style="height: 26px">Apply</span>
+                  <span class="gb-btn" style="height: 26px">Clear</span>
+                </div>
+
+                <div class="table-wrap" id="tableWrap">
+                  <table class="tbl">
+                    <colgroup>
+                      <col style="width: 128px" />
+                      <col style="width: 96px" />
+                      <col style="width: 76px" />
+                      <col style="width: 80px" />
+                      <col style="width: 50px" />
+                      <col style="width: 140px" />
+                      <col style="width: 150px" />
+                      <col style="width: 158px" />
+                      <col style="width: 132px" />
+                      <col style="width: 122px" />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th class="sticky">ID</th>
+                        <th>Status</th>
+                        <th>
+                          Roof area <span class="th-tools"><i></i></span>
+                        </th>
+                        <th>
+                          Mean slope <span class="th-tools"><i></i></span>
+                        </th>
+                        <th>
+                          Parts <span class="th-tools"><i></i></span>
+                        </th>
+                        <th class="computed">
+                          solid_volume_m3
+                          <svg class="badge"><use href="#i-computed" /></svg>
+                        </th>
+                        <th class="computed">
+                          solid_envelope_m2
+                          <svg class="badge"><use href="#i-computed" /></svg>
+                        </th>
+                        <th class="computed">
+                          solid_footprint_m2
+                          <svg class="badge"><use href="#i-computed" /></svg>
+                        </th>
+                        <th class="computed">
+                          solid_height_m
+                          <svg class="badge"><use href="#i-computed" /></svg>
+                        </th>
+                        <th class="computed">
+                          solid_valid
+                          <svg class="badge"><use href="#i-computed" /></svg>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="sticky">NL.IMBAG.Pand.0503100000012869</td>
+                        <td>Pand in gebruik</td>
+                        <td>21.65</td>
+                        <td>0.77</td>
+                        <td>1</td>
+                        <td class="computed">1043.82</td>
+                        <td class="computed">742.19</td>
+                        <td class="computed">21.65</td>
+                        <td class="computed">6.42</td>
+                        <td class="computed">true</td>
+                      </tr>
+                      <tr>
+                        <td class="sticky">NL.IMBAG.Pand.0503100000018224</td>
+                        <td>Pand in gebruik</td>
+                        <td>184.02</td>
+                        <td>34.10</td>
+                        <td>3</td>
+                        <td class="computed">2417.06</td>
+                        <td class="computed">1508.44</td>
+                        <td class="computed">184.02</td>
+                        <td class="computed">11.08</td>
+                        <td class="computed">true</td>
+                      </tr>
+                      <tr>
+                        <td class="sticky">NL.IMBAG.Pand.0503100000021775</td>
+                        <td>Pand in gebruik</td>
+                        <td>96.31</td>
+                        <td>28.44</td>
+                        <td>1</td>
+                        <td class="computed">—</td>
+                        <td class="computed">611.70</td>
+                        <td class="computed">96.31</td>
+                        <td class="computed">8.14</td>
+                        <td class="computed">false</td>
+                      </tr>
+                      <tr>
+                        <td class="sticky">NL.IMBAG.Pand.0503100000025028</td>
+                        <td>Pand in gebruik</td>
+                        <td>52.88</td>
+                        <td>0.41</td>
+                        <td>1</td>
+                        <td class="computed">318.44</td>
+                        <td class="computed">274.03</td>
+                        <td class="computed">52.88</td>
+                        <td class="computed">5.97</td>
+                        <td class="computed">true</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="drawer-foot">
+                  <span>1–20 of 312</span>
+                  <span class="rt">
+                    <span>Rows per page</span
+                    ><span class="gb-btn" style="height: 24px">20</span>
+                    <span class="gb-sq" style="width: 24px; height: 24px"></span
+                    ><span
+                      class="gb-sq"
+                      style="width: 24px; height: 24px"
+                    ></span>
+                    <span class="gb-sq" style="width: 24px; height: 24px"></span
+                    ><span
+                      class="gb-sq"
+                      style="width: 24px; height: 24px"
+                    ></span>
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            <!-- ============ RIGHT PANEL (new surfaces) ==================== -->
+            <aside class="right" data-when="1 2 3 4 5 6 7 8 10">
+              <div class="rp-tabs">
+                <button class="tab" id="tabTools" type="button">Tools</button>
+                <button
+                  class="tab"
+                  id="tabDetails"
+                  type="button"
+                  data-when="4 5"
+                >
+                  Details · Building …12869
+                </button>
+                <button
+                  class="rp-collapse"
+                  type="button"
+                  title="Collapse panel"
+                >
+                  <svg width="14" height="14"><use href="#i-chev-right" /></svg>
+                </button>
+              </div>
+              <div class="rp-tabline"></div>
+
+              <div class="annot" data-when="4">
+                Mock note: picking a feature while Tools is showing does not
+                switch the tab — the
+                <b>Details</b> tab title updates and takes the emphasis dot
+                (§4.2).
+              </div>
+
+              <div class="rp-body">
+                <!-- ---------- TOOLS TAB BODY ---------- -->
+                <div class="tab-body" data-when="1 2 3 4 6 7 8 10">
+                  <!-- ===== catalogue (state 1) ===== -->
+                  <div class="tab-body" data-when="1">
+                    <div class="body-head">
+                      <h2>Tools</h2>
+                      <span class="sp"></span>
+                      <button
+                        class="icon-btn"
+                        type="button"
+                        title="Close tools"
+                      >
+                        <svg width="15" height="15"><use href="#i-x" /></svg>
+                      </button>
+                    </div>
+                    <div class="scroller">
+                      <div class="search-wrap">
+                        <svg><use href="#i-search" /></svg>
+                        <input
+                          class="inp is-focus"
+                          type="search"
+                          placeholder="Search tools…"
+                        />
+                      </div>
+
+                      <div class="sec">Roof</div>
+                      <button class="tool-row" type="button">
+                        <span class="tool-row-top"
+                          ><span class="caret">▸</span
+                          ><span class="tool-name"
+                            >Roof metrics to attributes</span
+                          ></span
+                        >
+                        <span class="tool-desc"
+                          >Roof area, slope, azimuth per building</span
+                        >
+                      </button>
+
+                      <div class="sec">3D measurements</div>
+                      <button class="tool-row" type="button">
+                        <span class="tool-row-top"
+                          ><span class="caret">▸</span
+                          ><span class="tool-name">Measure solids</span
+                          ><span class="chip">3D</span></span
+                        >
+                        <span class="tool-desc"
+                          >Volume, envelope, footprint, height</span
+                        >
+                      </button>
+                      <button class="tool-row" type="button">
+                        <span class="tool-row-top"
+                          ><span class="caret">▸</span
+                          ><span class="tool-name">Validate solids</span
+                          ><span class="chip">3D</span></span
+                        >
+                        <span class="tool-desc"
+                          >Closed, manifold, oriented, report</span
+                        >
+                      </button>
+                      <button class="tool-row" type="button">
+                        <span class="tool-row-top"
+                          ><span class="caret">▸</span
+                          ><span class="tool-name"
+                            >Height from extent</span
+                          ></span
+                        >
+                        <span class="tool-desc"
+                          >Vertical extent from the bounding box</span
+                        >
+                      </button>
+
+                      <div class="sec">Cross-layer</div>
+                      <button
+                        class="tool-row"
+                        type="button"
+                        disabled
+                        title="Add a vector layer to join with"
+                      >
+                        <span class="tool-row-top"
+                          ><span class="caret">▸</span
+                          ><span class="tool-name"
+                            >Join attributes by location</span
+                          ><span class="chip">Spatial</span></span
+                        >
+                        <span class="tool-reason"
+                          >Add a vector layer to join with</span
+                        >
+                      </button>
+                      <button
+                        class="tool-row"
+                        type="button"
+                        disabled
+                        title="Add a vector layer to join with"
+                      >
+                        <span class="tool-row-top"
+                          ><span class="caret">▸</span
+                          ><span class="tool-name"
+                            >Aggregate buildings per area</span
+                          ><span class="chip">Spatial</span></span
+                        >
+                        <span class="tool-reason"
+                          >Add a vector layer to join with</span
+                        >
+                      </button>
+                      <button
+                        class="tool-row"
+                        type="button"
+                        disabled
+                        title="Add a vector layer to join with"
+                      >
+                        <span class="tool-row-top"
+                          ><span class="caret">▸</span
+                          ><span class="tool-name">Distance to nearest</span
+                          ><span class="chip">Spatial</span></span
+                        >
+                        <span class="tool-reason"
+                          >Add a vector layer to join with</span
+                        >
+                      </button>
+
+                      <div class="sec">Recent runs</div>
+                      <div class="empty">Runs you start appear here</div>
+                    </div>
+                  </div>
+
+                  <!-- ===== Measure solids form (states 2, 3, 4) ===== -->
+                  <div class="tab-body" data-when="2 3 4 10">
+                    <div class="tool-head">
+                      <button
+                        class="back"
+                        type="button"
+                        title="Back to the catalogue"
+                      >
+                        <svg width="15" height="15">
+                          <use href="#i-chev-left" />
+                        </svg>
+                      </button>
+                      <h2 class="tool-title">Measure solids</h2>
+                      <span class="chip chip-lg" style="margin-left: 0"
+                        >3D</span
+                      >
+                      <button
+                        class="icon-btn"
+                        type="button"
+                        title="Close tools"
+                      >
+                        <svg width="15" height="15"><use href="#i-x" /></svg>
+                      </button>
+                    </div>
+                    <div class="tool-lede">
+                      Volume, envelope area, footprint area and height of each
+                      building's solid.
+                    </div>
+
+                    <div class="scroller">
+                      <div class="sec">Target</div>
+                      <div class="field">
+                        <label for="ms-layer">Layer</label>
+                        <select class="sel lockable" id="ms-layer">
+                          <option>Delft</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label for="ms-lod">LoD</label>
+                        <select class="sel lockable" id="ms-lod">
+                          <option>2.2 (1,115 buildings with a solid)</option>
+                        </select>
+                      </div>
+                      <div class="field" style="align-items: flex-start">
+                        <label style="padding-top: 2px">Scope</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-scope"
+                              checked
+                            />All 1,115 buildings</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-scope"
+                            />Matching 312</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-scope"
+                            />Selected 2</label
+                          >
+                        </span>
+                      </div>
+
+                      <div class="sec">Parameters</div>
+                      <div class="checks">
+                        <label class="chk"
+                          ><input
+                            class="lockable"
+                            type="checkbox"
+                            checked
+                          />Volume (m³)</label
+                        >
+                        <label class="chk"
+                          ><input
+                            class="lockable"
+                            type="checkbox"
+                            checked
+                          />Envelope area</label
+                        >
+                        <label class="chk"
+                          ><input
+                            class="lockable"
+                            type="checkbox"
+                            checked
+                          />Footprint area (m²)</label
+                        >
+                        <label class="chk"
+                          ><input
+                            class="lockable"
+                            type="checkbox"
+                            checked
+                          />Height (m)</label
+                        >
+                        <label class="chk"
+                          ><input class="lockable" type="checkbox" />Ground
+                          elevation</label
+                        >
+                        <label class="chk"
+                          ><input class="lockable" type="checkbox" />Ridge
+                          elevation</label
+                        >
+                      </div>
+
+                      <div class="sec">Output</div>
+
+                      <!-- destination, This layer (states 2, 3, 4) -->
+                      <div
+                        class="field"
+                        style="align-items: flex-start"
+                        data-when="2 3 4"
+                      >
+                        <label style="padding-top: 2px">Write to</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-dest-a"
+                              checked
+                            />This layer (Delft)</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-dest-a"
+                            />New layer</label
+                          >
+                        </span>
+                      </div>
+
+                      <!-- destination, New layer (state 10) -->
+                      <div
+                        class="field"
+                        style="align-items: flex-start"
+                        data-when="10"
+                      >
+                        <label style="padding-top: 2px">Write to</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-dest-b"
+                            />This layer (Delft)</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-dest-b"
+                              checked
+                            />New layer</label
+                          >
+                          <span class="dest-name">
+                            <label for="ms-newname">Name</label>
+                            <input
+                              class="inp lockable"
+                              id="ms-newname"
+                              value="Delft · solids"
+                            />
+                          </span>
+                        </span>
+                      </div>
+
+                      <div class="field">
+                        <label for="ms-prefix">Prefix</label>
+                        <input
+                          class="inp lockable"
+                          id="ms-prefix"
+                          value="solid_"
+                          data-focus-in="2"
+                        />
+                      </div>
+                      <div class="muted">Columns:</div>
+                      <div class="cols">
+                        solid_volume_m3, solid_envelope_m2, solid_footprint_m2,
+                        solid_height_m, solid_valid
+                      </div>
+                      <div class="warnline" data-when="2 3 4">
+                        <svg><use href="#i-warn" /></svg>
+                        <span
+                          >3 of these columns exist; they will be
+                          replaced.</span
+                        >
+                      </div>
+
+                      <p class="note">
+                        Loads the three_d extension on first run (about 1 MB,
+                        once per session).
+                      </p>
+                    </div>
+
+                    <!-- footer: form (state 2) -->
+                    <div class="foot" data-when="2">
+                      <span class="sp"></span>
+                      <button class="btn btn-ghost btn-lg" type="button">
+                        Cancel
+                      </button>
+                      <button class="btn btn-primary" type="button">Run</button>
+                    </div>
+
+                    <!-- footer: running (state 3) -->
+                    <div class="progress" data-when="3">
+                      <div class="pbar-row">
+                        <span class="pbar"
+                          ><span class="pbar-fill"></span
+                        ></span>
+                        <span class="pbar-label">Computing…</span>
+                      </div>
+                      <div class="phases">
+                        <span class="ph-done">Loading extension <b>✓</b></span>
+                        · <span class="ph-done">Reading source <b>✓</b></span> ·
+                        <span class="ph-now">Computing …</span> ·
+                        <span>Writing results</span>
+                      </div>
+                      <div class="prow">
+                        <span class="el">1.7 s</span>
+                        <span class="sp"></span>
+                        <button class="btn" type="button">Cancel</button>
+                      </div>
+                    </div>
+
+                    <!-- footer: done (state 4) -->
+                    <div class="card card-done" data-when="4">
+                      <div class="card-1">
+                        <svg><use href="#i-check" /></svg>
+                        <span
+                          >1,115 buildings measured · 37 invalid solids (no
+                          volume) · 12 skipped · 2.4 s</span
+                        >
+                      </div>
+                      <div class="card-2">
+                        12 skipped: 9 no geometry at LoD 2.2 · 3 not a solid
+                      </div>
+                      <div class="card-3">Wrote 5 columns to Delft.</div>
+                      <div class="card-actions">
+                        <button class="btn" type="button">Open table</button>
+                        <button class="btn" type="button">
+                          Style by result
+                        </button>
+                        <button class="btn" type="button">Undo</button>
+                        <button class="btn" type="button">Log</button>
+                      </div>
+                      <div class="card-actions">
+                        <span class="sp"></span>
+                        <button class="btn btn-primary" type="button">
+                          Run again
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- footer: done, destination New layer (state 10) -->
+                    <div class="card card-done" data-when="10">
+                      <div class="card-1">
+                        <svg><use href="#i-check" /></svg>
+                        <span
+                          >Created Delft · solids · 312 buildings · 37 invalid
+                          solids (no volume) · 2.4 s</span
+                        >
+                      </div>
+                      <div class="card-actions">
+                        <button class="btn" type="button">Zoom to layer</button>
+                        <button class="btn" type="button">Open table</button>
+                        <button class="btn" type="button">
+                          Style by result
+                        </button>
+                        <button class="btn" type="button">Undo</button>
+                        <button class="btn" type="button">Log</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ===== Join attributes by location (states 6, 7) ===== -->
+                  <div class="tab-body" data-when="6 7">
+                    <div class="tool-head">
+                      <button
+                        class="back"
+                        type="button"
+                        title="Back to the catalogue"
+                      >
+                        <svg width="15" height="15">
+                          <use href="#i-chev-left" />
+                        </svg>
+                      </button>
+                      <h2 class="tool-title">Join attributes by location</h2>
+                      <span class="chip chip-lg" style="margin-left: 0"
+                        >Spatial</span
+                      >
+                      <button
+                        class="icon-btn"
+                        type="button"
+                        title="Close tools"
+                      >
+                        <svg width="15" height="15"><use href="#i-x" /></svg>
+                      </button>
+                    </div>
+                    <div class="tool-lede">
+                      Copies attributes of the vector feature each building
+                      falls in (zoning, district, noise band, flood zone) onto
+                      the building.
+                    </div>
+
+                    <div class="scroller">
+                      <div class="sec">Target</div>
+                      <div class="field">
+                        <label for="jn-layer">Layer</label>
+                        <select class="sel lockable-j" id="jn-layer">
+                          <option>Delft</option>
+                        </select>
+                      </div>
+                      <div class="field" style="align-items: flex-start">
+                        <label style="padding-top: 2px">Scope</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-scope"
+                              checked
+                            />All 1,115 buildings</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-scope"
+                            />Matching 312</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-scope"
+                            />Selected 2</label
+                          >
+                        </span>
+                      </div>
+
+                      <div class="sec">Source</div>
+                      <div class="field">
+                        <label for="jn-src">Layer</label>
+                        <select class="sel lockable-j" id="jn-src">
+                          <option>Zones</option>
+                        </select>
+                      </div>
+
+                      <div class="sec">Parameters</div>
+                      <div class="muted" style="margin-bottom: 6px">
+                        Building geometry
+                      </div>
+                      <div class="radios">
+                        <label class="rad dis"
+                          ><input
+                            type="radio"
+                            name="jn-proxy"
+                            disabled
+                          />Footprint (LoD 0)</label
+                        >
+                        <label class="rad"
+                          ><input
+                            class="lockable-j"
+                            type="radio"
+                            name="jn-proxy"
+                          />Extent rectangle</label
+                        >
+                        <label class="rad"
+                          ><input
+                            class="lockable-j"
+                            type="radio"
+                            name="jn-proxy"
+                            checked
+                          />Extent centre</label
+                        >
+                      </div>
+                      <div class="dim" style="margin-top: 6px">
+                        LoD 0 footprints are not in this layer; the bounding-box
+                        centre is used.
+                      </div>
+
+                      <div class="field" style="margin-top: 12px">
+                        <label for="jn-pred">Predicate</label>
+                        <select class="sel lockable-j" id="jn-pred">
+                          <option>Intersects</option>
+                          <option>Within</option>
+                          <option>Centre within</option>
+                        </select>
+                      </div>
+
+                      <div class="muted" style="margin: 12px 0 6px">
+                        Fields to copy
+                      </div>
+                      <div class="radios">
+                        <label class="chk"
+                          ><input
+                            class="lockable-j"
+                            type="checkbox"
+                            checked
+                            data-focus-in="6"
+                          />zone_name <span class="dim">text</span></label
+                        >
+                        <label class="chk"
+                          ><input
+                            class="lockable-j"
+                            type="checkbox"
+                            checked
+                          />zone_code <span class="dim">text</span></label
+                        >
+                        <label class="chk"
+                          ><input
+                            class="lockable-j"
+                            type="checkbox"
+                            checked
+                          />district <span class="dim">text</span></label
+                        >
+                        <label class="chk"
+                          ><input
+                            class="lockable-j"
+                            type="checkbox"
+                            checked
+                          />noise_band <span class="dim">number</span></label
+                        >
+                        <label class="chk"
+                          ><input
+                            class="lockable-j"
+                            type="checkbox"
+                            checked
+                          />max_height_m <span class="dim">number</span></label
+                        >
+                        <label class="chk"
+                          ><input
+                            class="lockable-j"
+                            type="checkbox"
+                            checked
+                          />protected <span class="dim">boolean</span></label
+                        >
+                      </div>
+
+                      <div class="muted" style="margin: 14px 0 6px">
+                        When several areas match
+                      </div>
+                      <div class="radios">
+                        <label class="rad"
+                          ><input
+                            class="lockable-j"
+                            type="radio"
+                            name="jn-tie"
+                            checked
+                          />First (by source order)</label
+                        >
+                        <label class="rad dis">
+                          <input type="radio" name="jn-tie" disabled />
+                          <span
+                            >Largest overlap<span class="why"
+                              >Largest overlap needs a footprint or
+                              rectangle</span
+                            ></span
+                          >
+                        </label>
+                        <label class="rad"
+                          ><input
+                            class="lockable-j"
+                            type="radio"
+                            name="jn-tie"
+                          />Count only</label
+                        >
+                      </div>
+
+                      <label class="chk" style="margin-top: 12px"
+                        ><input
+                          class="lockable-j"
+                          type="checkbox"
+                          checked
+                        />Also write the match count
+                        <span class="dim">zones_matches_n</span></label
+                      >
+
+                      <div class="sec">Output</div>
+
+                      <!-- destination, New layer (state 6): a derived layer has
+                           no earlier columns, so no replace warning applies -->
+                      <div
+                        class="field"
+                        style="align-items: flex-start"
+                        data-when="6"
+                      >
+                        <label style="padding-top: 2px">Write to</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-dest-a"
+                            />This layer (Delft)</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-dest-a"
+                              checked
+                            />New layer</label
+                          >
+                          <span class="dest-name">
+                            <label for="jn-newname">Name</label>
+                            <input
+                              class="inp lockable-j"
+                              id="jn-newname"
+                              value="Delft + Zones"
+                            />
+                          </span>
+                        </span>
+                      </div>
+
+                      <!-- destination, This layer (state 7) -->
+                      <div
+                        class="field"
+                        style="align-items: flex-start"
+                        data-when="7"
+                      >
+                        <label style="padding-top: 2px">Write to</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-dest-b"
+                              checked
+                            />This layer (Delft)</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-dest-b"
+                            />New layer</label
+                          >
+                        </span>
+                      </div>
+
+                      <div class="field">
+                        <label for="jn-prefix">Prefix</label>
+                        <input
+                          class="inp lockable-j"
+                          id="jn-prefix"
+                          value="zones_"
+                        />
+                      </div>
+                      <div class="muted">Columns:</div>
+                      <div class="cols">
+                        zones_zone_name, zones_zone_code, zones_district,
+                        zones_noise_band, zones_max_height_m, zones_protected,
+                        zones_matches_n
+                      </div>
+
+                      <p class="note">
+                        Loads the spatial extension on first run (about 24 MB,
+                        once per session).
+                      </p>
+                    </div>
+
+                    <!-- footer: form (state 6) -->
+                    <div class="foot" data-when="6">
+                      <span class="sp"></span>
+                      <button class="btn btn-ghost btn-lg" type="button">
+                        Cancel
+                      </button>
+                      <button class="btn btn-primary" type="button">Run</button>
+                    </div>
+
+                    <!-- footer: failed (state 7) -->
+                    <div class="card card-failed" data-when="7">
+                      <div class="card-1">
+                        <svg><use href="#i-cross" /></svg>
+                        <span>Failed after 1.2 s</span>
+                      </div>
+                      <div class="card-2 errline">
+                        Binder Error: Referenced column "zone_id" not found in
+                        FROM clause
+                      </div>
+                      <div class="card-actions">
+                        <button class="btn" type="button">Retry</button>
+                        <button class="btn" type="button">Log</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ===== Log view (state 8) ===== -->
+                  <div class="tab-body" data-when="8">
+                    <div class="tool-head">
+                      <button class="back" type="button" title="Back">
+                        <svg width="15" height="15">
+                          <use href="#i-chev-left" />
+                        </svg>
+                      </button>
+                      <h2 class="tool-title">Log · Measure solids</h2>
+                      <button class="btn" type="button">
+                        <svg width="13" height="13"><use href="#i-copy" /></svg
+                        >Copy
+                      </button>
+                    </div>
+
+                    <div class="scroller" style="padding-top: 10px">
+                      <dl class="log-dl">
+                        <div>
+                          <dt>Tool</dt>
+                          <dd>Measure solids</dd>
+                        </div>
+                        <div>
+                          <dt>Target layer</dt>
+                          <dd>Delft (delft.city.jsonl · CityJSONSeq)</dd>
+                        </div>
+                        <div>
+                          <dt>Source layer</dt>
+                          <dd>—</dd>
+                        </div>
+                        <div>
+                          <dt>Scope</dt>
+                          <dd>All · 1,115 buildings (frozen at 14:02:11)</dd>
+                        </div>
+                        <div>
+                          <dt>LoD</dt>
+                          <dd>2.2 (1,115 buildings with a solid)</dd>
+                        </div>
+                        <div>
+                          <dt>Building geometry</dt>
+                          <dd>Solid at LoD 2.2 (no 2D proxy used)</dd>
+                        </div>
+                        <div>
+                          <dt>Parameters</dt>
+                          <dd>
+                            Volume ✓ · Envelope area ✓ · Footprint area ✓ ·
+                            Height ✓ · Ground elevation ✗ · Ridge elevation ✗
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Output</dt>
+                          <dd>
+                            solid_volume_m3 (m³), solid_envelope_m2 (m²),
+                            solid_footprint_m2 (m²), solid_height_m (m),
+                            solid_valid (boolean)
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Started</dt>
+                          <dd>2026-09-10 14:02:11</dd>
+                        </div>
+                        <div>
+                          <dt>Elapsed</dt>
+                          <dd>2.4 s</dd>
+                        </div>
+                        <div>
+                          <dt>Status</dt>
+                          <dd>done</dd>
+                        </div>
+                      </dl>
+
+                      <div class="sec">SQL</div>
+
+                      <div class="sql-n">1 · Loading extension</div>
+                      <pre class="sql">
+INSTALL three_d FROM community;
+LOAD three_d;</pre
+                      >
+                      <div class="sql-meta">
+                        <span>0.412 s</span><span>—</span>
+                      </div>
+
+                      <div class="sql-n">2 · Reading source</div>
+                      <pre class="sql">
+CREATE OR REPLACE TEMP TABLE solid_src AS
+SELECT id, feature_id, geometry AS wkb
+FROM read_cityjsonseq('layer_1_source.city.jsonl', lod =&gt; '2.2');</pre
+                      >
+                      <div class="sql-meta">
+                        <span>0.884 s</span><span>1,116 rows</span>
+                      </div>
+
+                      <div class="sql-n">3 · Computing · per contributor</div>
+                      <pre class="sql">
+CREATE OR REPLACE TEMP TABLE solid_scratch AS
+WITH parsed AS (
+  SELECT id, feature_id, ST_3DTryFromWKB(wkb) AS g FROM solid_src
+)
+SELECT id, feature_id,
+       ST_3DValidationReport(g).is_valid       AS solid_valid,
+       CASE WHEN ST_3DValidationReport(g).is_valid
+            THEN ST_3DVolume(g) END            AS solid_volume_m3,
+       ST_3DArea(g)                            AS solid_envelope_m2,
+       ST_3DFootprintArea(g)                   AS solid_footprint_m2,
+       ST_3DZMin(g)                            AS zmin_m,
+       ST_3DZMax(g)                            AS zmax_m
+FROM parsed
+WHERE g IS NOT NULL;</pre
+                      >
+                      <div class="sql-meta">
+                        <span>0.771 s</span><span>1,116 rows · 37 invalid</span>
+                      </div>
+
+                      <div class="sql-n">
+                        4 · Computing · roll-up to features
+                      </div>
+                      <pre class="sql">
+CREATE OR REPLACE TEMP TABLE solid_rollup AS
+SELECT feature_id,
+       CASE WHEN bool_and(solid_volume_m3 IS NOT NULL)
+            THEN sum(solid_volume_m3) END      AS solid_volume_m3,
+       sum(solid_envelope_m2)                  AS solid_envelope_m2,
+       sum(solid_footprint_m2)                 AS solid_footprint_m2,
+       max(zmax_m) - min(zmin_m)               AS solid_height_m,
+       bool_and(solid_valid)                   AS solid_valid
+FROM solid_scratch
+GROUP BY feature_id;</pre
+                      >
+                      <div class="sql-meta">
+                        <span>0.184 s</span><span>1,115 rows</span>
+                      </div>
+
+                      <div class="sql-n">5 · Writing results</div>
+                      <pre class="sql">
+UPDATE layer_1 AS t
+   SET solid_volume_m3    = s.solid_volume_m3,
+       solid_envelope_m2  = s.solid_envelope_m2,
+       solid_footprint_m2 = s.solid_footprint_m2,
+       solid_height_m     = s.solid_height_m,
+       solid_valid        = s.solid_valid
+  FROM solid_rollup AS s
+ WHERE t.feature_id = s.feature_id;</pre
+                      >
+                      <div class="sql-meta">
+                        <span>0.146 s</span
+                        ><span
+                          >2,231 rows updated (1,115 roots · 1,116 parts)</span
+                        >
+                      </div>
+
+                      <div class="sec">Warnings</div>
+                      <div class="warn-item">
+                        <svg><use href="#i-warn" /></svg
+                        ><span>ST_3DVolume skipped 37 invalid solids</span>
+                      </div>
+                      <div class="warn-item">
+                        <svg><use href="#i-warn" /></svg
+                        ><span
+                          >Envelope, footprint and height were still computed
+                          for the 37 invalid solids (§7.2)</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ---------- DETAILS TAB BODY (state 5) ---------- -->
+                <div class="tab-body" data-when="5">
+                  <div class="det-head gb">
+                    <div class="det-crumb">
+                      <span>delft.city.jsonl › Building …12869</span>
+                      <span class="sp"></span>
+                      <span class="gb-btn" style="height: 24px">Copy</span>
+                      <span
+                        class="gb-sq"
+                        style="width: 24px; height: 24px"
+                      ></span>
+                    </div>
+                    <div class="det-id">NL.IMBAG.Pand.0503100000012869</div>
+                  </div>
+
+                  <div class="scroller">
+                    <div class="det-sec gb">Summary</div>
+                    <div class="det-line gb">
+                      Roof area <span class="v">21.6 m²</span>
+                    </div>
+                    <div class="det-line gb">
+                      Mean roof slope <span class="v">0.8°</span>
+                    </div>
+                    <div class="det-line gb">
+                      Main orientation <span class="v">NW (334°)</span>
+                    </div>
+                    <div class="det-line gb">
+                      Parts <span class="v">1</span>
+                    </div>
+
+                    <div class="det-sec gb" style="margin-top: 18px">
+                      Attributes
+                    </div>
+                    <div class="det-line gb">
+                      <span
+                        class="gbar"
+                        style="width: 112px; height: 8px"
+                      ></span
+                      ><span class="v"
+                        ><span
+                          class="gbar"
+                          style="width: 26px; height: 8px"
+                        ></span
+                      ></span>
+                    </div>
+                    <div class="det-line gb">
+                      <span class="gbar" style="width: 88px; height: 8px"></span
+                      ><span class="v"
+                        ><span
+                          class="gbar"
+                          style="width: 18px; height: 8px"
+                        ></span
+                      ></span>
+                    </div>
+                    <div class="det-line gb">
+                      <span
+                        class="gbar"
+                        style="width: 126px; height: 8px"
+                      ></span
+                      ><span class="v"
+                        ><span
+                          class="gbar"
+                          style="width: 40px; height: 8px"
+                        ></span
+                      ></span>
+                    </div>
+                    <div class="det-line gb">
+                      <span class="gbar" style="width: 96px; height: 8px"></span
+                      ><span class="v"
+                        ><span
+                          class="gbar"
+                          style="width: 52px; height: 8px"
+                        ></span
+                      ></span>
+                    </div>
+                    <div class="det-line gb">
+                      <span
+                        class="gbar"
+                        style="width: 118px; height: 8px"
+                      ></span
+                      ><span class="v"
+                        ><span
+                          class="gbar"
+                          style="width: 34px; height: 8px"
+                        ></span
+                      ></span>
+                    </div>
+
+                    <div class="det-sec-computed">Computed</div>
+                    <div class="cmp-line">
+                      <span class="badge-wrap">
+                        <svg class="badge"><use href="#i-computed" /></svg>
+                        <span class="tip"
+                          >Measure solids · LoD 2.2 · 2026-09-10 14:02</span
+                        >
+                      </span>
+                      <span class="nm">solid_volume_m3</span
+                      ><span class="v">1043.82</span>
+                    </div>
+                    <div class="cmp-line" style="margin-top: 22px">
+                      <span class="badge-wrap"
+                        ><svg class="badge"><use href="#i-computed" /></svg
+                      ></span>
+                      <span class="nm">solid_envelope_m2</span
+                      ><span class="v">742.19</span>
+                    </div>
+                    <div class="cmp-line">
+                      <span class="badge-wrap"
+                        ><svg class="badge"><use href="#i-computed" /></svg
+                      ></span>
+                      <span class="nm">solid_footprint_m2</span
+                      ><span class="v">21.65</span>
+                    </div>
+                    <div class="cmp-line">
+                      <span class="badge-wrap"
+                        ><svg class="badge"><use href="#i-computed" /></svg
+                      ></span>
+                      <span class="nm">solid_height_m</span
+                      ><span class="v">6.42</span>
+                    </div>
+                    <div class="cmp-line">
+                      <span class="badge-wrap"
+                        ><svg class="badge"><use href="#i-computed" /></svg
+                      ></span>
+                      <span class="nm">solid_valid</span
+                      ><span class="v">true</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+
+          <!-- ============ STATUS BAR (greybox) =========================== -->
+          <div class="status gb">
+            <span>Navara · 60 FPS · 2.2K loaded objects</span>
+            <span class="mid">52.0016° N, 4.3687° E · 43 m</span>
+            <span
+              class="gb-sq"
+              style="width: 16px; height: 16px; border-radius: 50%"
+            ></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="caption" id="caption"></div>
+    </main>
+
+    <nav class="strip" id="strip" aria-label="Mockup states">
+      <span class="lbl">State</span>
+      <span class="hint">1–9, 0 or ← → to switch</span>
+    </nav>
+
+    <script>
+      (function () {
+        var STATES = [
+          {
+            n: 1,
+            label: "1 · Catalogue",
+            dot: "",
+            lines: [
+              "<b>Catalogue (§5).</b> Tools tab open with no selection, so no Details tab and no activity dot on the map header's Tools button. Search, three groups, capability chips on the rows that need them, the three cross-layer tools disabled with their reason, and Recent runs in its empty state.",
+              "Simulated: the search field carries a drawn focus ring (a static page has no :focus-visible); the workspace holds only the Delft city layer, which is what disables the cross-layer rows.",
+            ],
+          },
+          {
+            n: 2,
+            label: "2 · Measure solids",
+            dot: "",
+            lines: [
+              "<b>Tool view (§6, §7.2).</b> Back chevron to the catalogue, description, TARGET (layer, LoD with its qualifying count, scope radios with live counts), PARAMETERS, then OUTPUT: the <b>Write to</b> destination pair (This layer, the default, with New layer collapsed below it), the prefix, the resolved column list in mono and the replace warning — which belongs to This layer only. Then the extension note and the Cancel / Run footer.",
+              "Simulated: the focus ring sits on the column-prefix input. Scope counts (312 matching, 2 selected) match the drawer header in states 4–5.",
+            ],
+          },
+          {
+            n: 3,
+            label: "3 · Running",
+            dot: "lime",
+            lines: [
+              "<b>Running (§6.1).</b> The footer is replaced by the progress block and every form field is really disabled — values stay readable. The bar is indeterminate within a phase; phases are discrete and ticked as they pass; elapsed time ticks; Cancel is best-effort.",
+              'Simulated: the map header\'s Tools button carries the lime activity dot. Queueing ("Queued behind Measure solids") is not drawn — one run only.',
+            ],
+          },
+          {
+            n: 4,
+            label: "4 · Done",
+            dot: "",
+            lines: [
+              "<b>Done (§6.2).</b> The result card with Open table / Style by result / Undo / Log / Run again, a toast repeating its first line, and the drawer open on the target: the five new columns are appended after the file's columns, each with the computed badge in its header.",
+              'Simulated: the ID column is pinned and the table is pre-scrolled so the appended columns are in view (§6.2 "scrolled into view"); the drawer\'s own scrollbar is hidden. The Details tab is present with the emphasis dot, as the mock note beside the tab strip explains.',
+            ],
+          },
+          {
+            n: 5,
+            label: "5 · Details",
+            dot: "",
+            lines: [
+              "<b>Details with computed columns (§8).</b> Same workspace as state 4 with the Details tab active. The existing Details structure is greyboxed; the COMPUTED sub-heading, the five badged rows and one open provenance tooltip are drawn in the app's tokens.",
+              "Simulated: the tooltip is pinned open (it is hover/focus-only in the app); the file attributes are placeholder bars, not real b3_… values.",
+            ],
+          },
+          {
+            n: 6,
+            label: "6 · Join form",
+            dot: "",
+            lines: [
+              "<b>Join attributes by location (§7.5).</b> A second layer, zones.geojson, is in the left panel. TARGET Delft, SOURCE Zones, the building-geometry radios with the explanatory muted line, predicate, the six fields to copy with their types, the tie rule, the match-count checkbox, and OUTPUT with destination <b>New layer</b> chosen: the Name field is prefilled “Delft + Zones”, and no replace warning is shown because a new layer has no earlier columns. Then prefix zones_ and the 24 MB spatial note.",
+              "Simulated: this layer has no LoD 0, so Footprint (LoD 0) is disabled and the centre proxy is the default — which in turn disables Largest overlap with its own reason. The focus ring sits on the first Fields-to-copy checkbox.",
+            ],
+          },
+          {
+            n: 7,
+            label: "7 · Failed",
+            dot: "amber",
+            lines: [
+              "<b>Failed (§6.3).</b> The same join form with the failure block: elapsed time, the first DuckDB error line as the export dialog shows it, Retry and Log. Nothing was written.",
+              "Simulated: the map header's dot is amber, as the brief asks. §4.1 says the amber dot clears once the Tools tab is opened, and here it is open — see the report. Destination is back on This layer, so the state-6 Name field is gone.",
+            ],
+          },
+          {
+            n: 8,
+            label: "8 · Log",
+            dot: "",
+            lines: [
+              "<b>Log (§6.4).</b> The done Measure solids run: the reproducible run header, then every statement in order with its timing and row count, then the warnings, with Copy and a back chevron.",
+              "Simulated: plausible DuckDB SQL, not captured output — ST_3DTryFromWKB (never ST_3DFromWKB), ST_3DVolume guarded by ST_3DValidationReport, and a final UPDATE … FROM that writes root and part rows.",
+            ],
+          },
+          {
+            n: 9,
+            label: "9 · Collapsed panel",
+            dot: "lime",
+            lines: [
+              "<b>Collapsed right panel (§4.2).</b> The panel is collapsed to nothing and its two pills sit on the map's right edge: \"Tools · running\" with the running dot, beside the existing Details pill. The map header's Tools button keeps the lime activity dot.",
+              "Simulated: a run is in flight while the panel is collapsed; the camera cluster keeps its place lower on the same edge.",
+            ],
+          },
+          {
+            n: 10,
+            label: "10 · Derived layer",
+            dot: "",
+            lines: [
+              '<b>Done · new layer (§6.2, §8).</b> Measure solids finished with destination <b>New layer</b> on scope Matching 312. "Delft · solids" is inserted directly under its target, active, reading "312 buildings · LoD 2.2 · Derived from Delft", and the config block below the list is titled after it with the muted "Derived · not saved in workspaces". The result card reads "Created …" with Zoom to layer / Open table / Style by result / Undo / Log, the toast repeats its first line, the drawer is closed and the Tools button carries no dot (the run is over).',
+              "Simulated: the card carries the five actions §6.2 lists for a New-layer run and no Run again. Delft’s own table is untouched, so the drawer stays closed rather than showing columns that do not exist there. The greybox Style block below is not re-labelled for the derived layer — it is existing-shell filler.",
+            ],
+          },
+        ];
+
+        var frame = document.getElementById("frame");
+        var caption = document.getElementById("caption");
+        var strip = document.getElementById("strip");
+        var hint = strip.querySelector(".hint");
+        var tableWrap = document.getElementById("tableWrap");
+        var tabTools = document.getElementById("tabTools");
+        var tabDetails = document.getElementById("tabDetails");
+        var whenEls = Array.prototype.slice.call(
+          document.querySelectorAll("[data-when]"),
+        );
+        var current = 1;
+
+        STATES.forEach(function (s) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.textContent = s.label;
+          b.setAttribute("aria-pressed", "false");
+          b.addEventListener("click", function () {
+            show(s.n);
+          });
+          strip.insertBefore(b, hint);
+          s.btn = b;
+        });
+
+        function show(n) {
+          current = n;
+          var s = STATES[n - 1];
+          frame.dataset.state = String(n);
+          frame.dataset.dot = s.dot;
+
+          whenEls.forEach(function (el) {
+            el.hidden = el.dataset.when.split(" ").indexOf(String(n)) === -1;
+          });
+
+          // tab selection
+          var detailsActive = n === 5;
+          tabTools.className = "tab" + (detailsActive ? "" : " tab-on");
+          tabDetails.className =
+            "tab" + (detailsActive ? " tab-on" : n === 4 ? " tab-emph" : "");
+
+          // the form locks while a run is executing and stays locked on the card
+          document.querySelectorAll(".lockable").forEach(function (f) {
+            f.disabled = n === 3 || n === 4 || n === 10;
+          });
+          // state 10 ran on scope Matching 312; every other state on All
+          var msScope = document.querySelectorAll('input[name="ms-scope"]');
+          if (msScope.length) msScope[n === 10 ? 1 : 0].checked = true;
+          document.querySelectorAll(".lockable-j").forEach(function (f) {
+            f.disabled = false;
+          });
+
+          // drawn focus rings (a static page has no :focus-visible)
+          document.querySelectorAll(".is-focus").forEach(function (el) {
+            el.classList.remove("is-focus");
+          });
+          var focusTarget = document.querySelector(
+            '[data-focus-in~="' + n + '"]',
+          );
+          if (n === 1)
+            focusTarget = document.querySelector(".search-wrap .inp");
+          if (focusTarget) focusTarget.classList.add("is-focus");
+
+          // §6.2: the new columns are scrolled into view
+          if (tableWrap) tableWrap.scrollLeft = n === 4 || n === 5 ? 9999 : 0;
+
+          caption.innerHTML = s.lines
+            .map(function (l) {
+              return "<p>" + l + "</p>";
+            })
+            .join("");
+          STATES.forEach(function (o) {
+            o.btn.setAttribute("aria-pressed", o.n === n ? "true" : "false");
+          });
+        }
+
+        document.addEventListener("keydown", function (e) {
+          var t = e.target;
+          if (
+            t &&
+            (t.tagName === "INPUT" ||
+              t.tagName === "SELECT" ||
+              t.tagName === "TEXTAREA")
+          )
+            return;
+          if (e.key >= "1" && e.key <= "9") {
+            show(Number(e.key));
+            return;
+          }
+          if (e.key === "0") {
+            show(10);
+            return;
+          }
+          if (e.key === "ArrowRight") {
+            show(current === 10 ? 1 : current + 1);
+            e.preventDefault();
+          }
+          if (e.key === "ArrowLeft") {
+            show(current === 1 ? 10 : current - 1);
+            e.preventDefault();
+          }
+        });
+
+        show(1);
+      })();
+    </script>
+  </body>
+</html>

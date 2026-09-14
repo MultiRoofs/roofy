@@ -13,32 +13,58 @@
  * materials to serve a debug toggle is worse than not having the toggle.
  *
  * `ambientIntensity` is gone for a different reason: it had a live counterpart
- * (`view.addLight({ ambient })`), but it belonged to the SCENE-LIGHTS
- * calibration this scene no longer uses. The aerial-perspective pass lights the
- * whole frame from the physical atmosphere now, so an ambient fill is pure
- * additional energy on an already exposure-10 image. See {@link DEFAULT_EXPOSURE}.
+ * (`view.addLight({ ambient })`), but the sky light probe the default
+ * photoreal scene adds IS the ambient term, sampled from the atmosphere, so a
+ * flat fill on top of it is pure additional energy on an already exposure-10
+ * image. See {@link DEFAULT_EXPOSURE}.
  */
 
 import { create } from "zustand";
+import {
+  DEFAULT_SHADOW_QUALITY,
+  type ShadowQuality,
+} from "../../scene/shadowQuality";
 
 /**
  * The exposure Navara's own getting-started sets (`view.toneMappingExposure =
  * 10`).
  *
- * This is the PHYSICAL-ATMOSPHERE calibration, and it is the whole scene's
- * calibration: the atmosphere feeds the tone mapper radiance-scale values, and
- * the aerial-perspective pass runs in `irradiance` mode so it — not
- * `SunLightDesc` + `skyLightProbe` — is what lights the city meshes, the globe
- * and the tiles. Every surface in the scene is therefore unlit albedo in the
- * g-buffer; nothing may add scene-light energy on top, or it clips to white at
- * this exposure. The 2026-08-04 overbright-scene diagnosis supersedes the
- * earlier "the scene is far darker" note: exposure 10 was right, the lighting
- * model underneath it was wrong.
+ * This is the engine's FORWARD-LIT calibration, and it is the whole scene's
+ * calibration: the atmosphere feeds `SunLightDesc` and the sky light probe
+ * radiance-scale values, those two light every lit material — the city
+ * meshes, the globe, the tiles — and the aerial-perspective pass only hazes
+ * the result (`NavaraViewport`'s `applyForwardLighting`). Nothing may add
+ * scene-light energy on top, or it clips to white at this exposure; the
+ * 2026-08-04 overbright-scene diagnosis found exactly that (a second lighting
+ * pass over lit materials), and issue #13 moved the scene back to ONE forward
+ * pass so the sun's cascaded shadow maps reach the frame.
  */
 export const DEFAULT_EXPOSURE = 10;
 
 /** Slider bounds. 0.5 is "nearly black", 30 is "blown out" — both useful when
  *  diagnosing a scene, neither a sensible resting place. */
+export const SHADOW_QUALITY_PREFERENCE_KEY = "roofy.shadowQuality";
+function storedShadowQuality(): ShadowQuality {
+  try {
+    const value =
+      typeof localStorage === "undefined"
+        ? null
+        : localStorage.getItem(SHADOW_QUALITY_PREFERENCE_KEY);
+    return value === "low" || value === "medium" || value === "high"
+      ? value
+      : DEFAULT_SHADOW_QUALITY;
+  } catch {
+    return DEFAULT_SHADOW_QUALITY;
+  }
+}
+function persistShadowQuality(value: ShadowQuality): void {
+  try {
+    localStorage.setItem(SHADOW_QUALITY_PREFERENCE_KEY, value);
+  } catch {
+    /* preference storage is optional */
+  }
+}
+
 export const EXPOSURE_RANGE = { min: 0.5, max: 30, step: 0.5 } as const;
 
 export interface RenderDebugState {
@@ -50,6 +76,14 @@ export interface RenderDebugState {
   readonly cloudsEnabled: boolean;
   readonly aerialPerspectiveEnabled: boolean;
   readonly sunShadowsEnabled: boolean;
+  /** Which row of `src/scene/shadowQuality.ts` the sun's cascaded shadow
+   *  maps run at: a level, not a map size, so the table stays the one place
+   *  that knows what a level costs (GPU memory, fill) and buys (shadows that
+   *  attach closer to their casters). Its engine counterpart is the
+   *  `shadowMapSize` / `shadowBias` pair `NavaraViewport` writes with every
+   *  `castShadow` write. The panel control for it is pending (see
+   *  docs/roadmap.md); until then the dev-console handle is the way in. */
+  readonly shadowQuality: ShadowQuality;
   /** `view.toneMappingExposure`. */
   readonly exposure: number;
   /**
@@ -71,6 +105,7 @@ export interface RenderDebugActions {
   setCloudsEnabled: (value: boolean) => void;
   setAerialPerspectiveEnabled: (value: boolean) => void;
   setSunShadowsEnabled: (value: boolean) => void;
+  setShadowQuality: (value: ShadowQuality) => void;
   setExposure: (value: number) => void;
   setStreamQueryBoxEnabled: (value: boolean) => void;
   reset: () => void;
@@ -87,6 +122,7 @@ export const DEFAULT_RENDER_DEBUG_STATE: RenderDebugState = {
   cloudsEnabled: false,
   aerialPerspectiveEnabled: true,
   sunShadowsEnabled: true,
+  shadowQuality: DEFAULT_SHADOW_QUALITY,
   exposure: DEFAULT_EXPOSURE,
   streamQueryBoxEnabled: false,
 };
@@ -98,6 +134,7 @@ function clamp(value: number, min: number, max: number): number {
 
 export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
   ...DEFAULT_RENDER_DEBUG_STATE,
+  shadowQuality: storedShadowQuality(),
 
   setPostProcessingEnabled: (postProcessingEnabled) =>
     set({ postProcessingEnabled }),
@@ -105,22 +142,29 @@ export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
   setAerialPerspectiveEnabled: (aerialPerspectiveEnabled) =>
     set({ aerialPerspectiveEnabled }),
   setSunShadowsEnabled: (sunShadowsEnabled) => set({ sunShadowsEnabled }),
+  setShadowQuality: (shadowQuality) => {
+    persistShadowQuality(shadowQuality);
+    set({ shadowQuality });
+  },
   // Clamped in the STORE, not at the slider: the dev-console handle
-  // (`window.__urbisRenderDebug`) writes here too, and an exposure of NaN
+  // (`window.__roofyRenderDebug`) writes here too, and an exposure of NaN
   // makes the engine render a black frame with no error anywhere.
   setExposure: (exposure) =>
     set({ exposure: clamp(exposure, EXPOSURE_RANGE.min, EXPOSURE_RANGE.max) }),
   setStreamQueryBoxEnabled: (streamQueryBoxEnabled) =>
     set({ streamQueryBoxEnabled }),
-  reset: () => set(DEFAULT_RENDER_DEBUG_STATE),
+  reset: () => {
+    persistShadowQuality(DEFAULT_SHADOW_QUALITY);
+    set(DEFAULT_RENDER_DEBUG_STATE);
+  },
 }));
 
 declare global {
   interface Window {
-    __urbisRenderDebug?: typeof useRenderDebugStore;
+    __roofyRenderDebug?: typeof useRenderDebugStore;
   }
 }
 
 if (import.meta.env.DEV && typeof window !== "undefined") {
-  window.__urbisRenderDebug = useRenderDebugStore;
+  window.__roofyRenderDebug = useRenderDebugStore;
 }

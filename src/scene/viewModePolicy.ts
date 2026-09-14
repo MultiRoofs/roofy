@@ -85,7 +85,7 @@ const POLICIES: Record<ViewMode, ViewModePolicy> = {
     tiltButtons: true,
   },
   "2d": {
-    enableSpin: false,
+    enableSpin: true,
     enableTilt: false,
     minPitchDeg: PLAN_PITCH_DEG,
     maxPitchDeg: PLAN_PITCH_DEG,

@@ -1,194 +1,74 @@
-/**
- * Bottom status bar showing model statistics, FPS, cursor position, CRS and
- * selection state — the facts row, in the GIS convention the toolbar shed its
- * information pills for.
- */
-
-import type { DuckDBStatus } from "../analytics/duckdb";
 import type { StreamStatus } from "../features/streaming/streamStore";
-import { useLayerStore } from "../features/layers/layerStore";
-import { extractCrsCode } from "./toolbar/crsCode";
 
 interface StatusBarProps {
   readonly objectCount: number;
-  readonly triangleCount: number;
-  readonly selectedCount: number;
-  readonly duckdbStatus?: DuckDBStatus;
   readonly fps?: number;
   readonly cursorPosition?: readonly [number, number, number] | null;
-  readonly tableOpen?: boolean;
-  readonly onToggleTable?: () => void;
-  /** The active layer's viewport-streaming status, or `null`/`undefined`
-   *  when the active layer isn't streaming. `"idle"` (nothing pending) is
-   *  deliberately not surfaced — there's nothing notable to tell the user
-   *  about that state, unlike probing/fetching/too-far/error. */
   readonly streamStatus?: StreamStatus | null;
-  /** The worker/driver's own message for the current `streamStatus` (e.g.
-   *  an error's detail text). Ignored for `"too-far"`, which always shows
-   *  the fixed, user-facing "Zoom in to load features" instead of the
-   *  internal reason-coded message (`"Zoom in (feature-budget)"` etc.). */
   readonly streamMessage?: string | null;
+  readonly residentCellCount?: number;
 }
-
 export function StatusBar({
   objectCount,
-  triangleCount,
-  selectedCount,
-  duckdbStatus,
   fps,
   cursorPosition,
-  tableOpen,
-  onToggleTable,
   streamStatus,
   streamMessage,
+  residentCellCount,
 }: StatusBarProps) {
-  // Read straight from the store rather than through a prop: the CRS is a
-  // property of the active layer, not of anything `App` already computes, and
-  // threading it would put a fact nobody else needs through the shell.
-  const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
-  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
-  const crs = activeLayer
-    ? extractCrsCode(activeLayer.model.metadata.referenceSystem)
-    : null;
-
   return (
-    <footer className="statusbar">
-      <div className="status-item">
-        <span className="status-dot" />
-        <span className="status-label">Ready</span>
+    <footer className="statusbar statusbar--map">
+      <div className="statusbar__left">
+        <span>Navara</span>
+        {fps !== undefined && <span>· {fps} FPS</span>}
+        <span>· {formatCount(objectCount)} loaded objects</span>
       </div>
-
-      {onToggleTable && (
-        <button
-          className={`tb-btn table-toggle-btn ${tableOpen ? "active" : ""}`}
-          title={tableOpen ? "Hide table" : "Show table"}
-          onClick={onToggleTable}
-        >
-          <svg viewBox="0 0 24 24" width="14" height="14">
-            <rect x="3" y="3" width="18" height="18" rx="2" fill="none" />
-            <path d="M3 9h18M3 15h18M9 3v18" />
-          </svg>
-          <span>Table</span>
-        </button>
-      )}
-
-      {fps !== undefined && (
-        <div className="status-item">
-          <span className="status-label">FPS</span>
-          <span className={`status-value ${fps < 30 ? "warn" : ""}`}>
-            {fps}
-          </span>
-        </div>
-      )}
-
-      {cursorPosition && (
-        <div className="status-item status-item-cursor">
-          <span className="status-label">XYZ</span>
-          <span className="status-value status-value-mono">
-            {cursorPosition[0].toFixed(1)}, {cursorPosition[1].toFixed(1)},{" "}
-            {cursorPosition[2].toFixed(1)}
-          </span>
-        </div>
-      )}
-
-      <div className="toolbar-spacer" />
-
-      {streamStatus && streamStatus !== "idle" && (
-        <div className="status-item">
-          <span className={`status-dot ${streamDotClass(streamStatus)}`} />
-          <span className="status-label">Stream</span>
-          <span className="status-value">
-            {streamStatusLabel(streamStatus, streamMessage ?? null)}
-          </span>
-        </div>
-      )}
-
-      {duckdbStatus && duckdbStatus.state !== "uninitialized" && (
-        <div className="status-item">
-          <span className={`status-dot ${duckdbDotClass(duckdbStatus)}`} />
-          <span className="status-label">DuckDB</span>
-          <span className="status-value">{duckdbLabel(duckdbStatus)}</span>
-        </div>
-      )}
-      <div className="status-item">
-        <span className="status-label">Objects</span>
-        <span className="status-value">{objectCount}</span>
+      <div className="statusbar__centre" title="WGS84 ellipsoidal height">
+        {cursorPosition && formatCoordinate(cursorPosition)}
       </div>
-      <div className="status-item">
-        <span className="status-label">Selected</span>
-        <span className={`status-value ${selectedCount > 0 ? "accent" : ""}`}>
-          {selectedCount}
-        </span>
+      <div className="statusbar__right">
+        {streamStatus && (
+          <>
+            <span className={`status-dot ${streamDotClass(streamStatus)}`} />
+            <span>
+              {residentCellCount ?? 0} resident cells ·{" "}
+              {streamLabel(streamStatus, streamMessage ?? null)}
+            </span>
+          </>
+        )}
       </div>
-      <div className="status-item">
-        <span className="status-label">Triangles</span>
-        <span className="status-value">{formatCount(triangleCount)}</span>
-      </div>
-      {/* Last, i.e. bottom-right: where QGIS puts the EPSG code. */}
-      {crs && (
-        <div className="status-item">
-          <span className="status-label">CRS</span>
-          <span className="status-value status-value-mono">EPSG:{crs}</span>
-        </div>
-      )}
     </footer>
   );
 }
-
-/** `status` is already checked `!== "idle"` at the call site — the `"idle"`
- *  branch here only exists so the function type-checks against the full
- *  `StreamStatus` union without an unsafe cast. */
-function streamDotClass(status: StreamStatus): string {
-  switch (status) {
-    case "probing":
-    case "fetching":
-      return "dot-loading";
-    case "too-far":
-      return "dot-partial";
-    case "error":
-      return "dot-error";
-    case "idle":
-      return "dot-ready";
-  }
+export function formatCoordinate([lng, lat, height]: readonly [
+  number,
+  number,
+  number,
+]): string {
+  const ns = lat >= 0 ? "N" : "S";
+  const ew = lng >= 0 ? "E" : "W";
+  return `${Math.abs(lat).toFixed(4)}° ${ns}, ${Math.abs(lng).toFixed(4)}° ${ew} · ${Math.round(height)} m`;
 }
-
-function streamStatusLabel(
-  status: StreamStatus,
-  message: string | null,
-): string {
-  switch (status) {
-    case "probing":
-      return "Probing…";
-    case "fetching":
-      return "Loading features…";
-    case "too-far":
-      // Fixed, user-facing text — NOT the driver's internal reason-coded
-      // message (e.g. "Zoom in (feature-budget)"), which is debug detail.
-      return "Zoom in to load features";
-    case "error":
-      return message ?? "Streaming error";
-    case "idle":
-      return "Streaming";
-  }
+function streamLabel(status: StreamStatus, message: string | null) {
+  return status === "idle"
+    ? "Settled"
+    : status === "probing"
+      ? "Probing…"
+      : status === "fetching"
+        ? "Loading…"
+        : status === "too-far"
+          ? "Zoom in to load"
+          : (message ?? "Streaming error");
 }
-
-function duckdbDotClass(status: DuckDBStatus): string {
-  if (status.state === "ready")
-    return status.extensionLoaded ? "dot-ready" : "dot-partial";
-  if (status.state === "initializing") return "dot-loading";
-  return "dot-failed";
+function streamDotClass(status: StreamStatus) {
+  return status === "error"
+    ? "dot-error"
+    : status === "too-far"
+      ? "dot-partial"
+      : status === "probing" || status === "fetching"
+        ? "dot-loading"
+        : "dot-ready";
 }
-
-function duckdbLabel(status: DuckDBStatus): string {
-  if (status.state === "ready")
-    return status.extensionLoaded ? "Ready" : "No ext";
-  if (status.state === "initializing") return "Loading";
-  return "N/A";
-}
-
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+function formatCount(n: number) {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 }

@@ -28,6 +28,20 @@ const CUSTOM_STYLE: GeoLayerStyle = {
   fillOpacity: 0.35,
 };
 
+/** A layer the user recoloured per attribute: the categories are as much a
+ *  user choice as the base colour, so they ride the same snapshot field. */
+const CATEGORIZED_STYLE: GeoLayerStyle = {
+  ...DEFAULT_GEO_LAYER_STYLE,
+  colorByAttribute: {
+    attribute: "zone",
+    categories: [
+      { value: "residential", color: "#8fd020" },
+      { value: "retail", color: "#4b8ef7" },
+      { value: null, color: "#8a93a0" },
+    ],
+  },
+};
+
 const CAMERA = {
   lng: 4.35,
   lat: 52.01,
@@ -51,6 +65,7 @@ function capture(geoLayers?: ReadonlyArray<GeoLayerSnapshot>) {
 describe("geoLayerSnapshot", () => {
   it("drops the inline GeoJSON document but keeps every choice around it", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "parcels",
       kind: "geojson",
@@ -70,8 +85,31 @@ describe("geoLayerSnapshot", () => {
     });
   });
 
+  it("does not choke on a DERIVED layer, and writes nothing about it", () => {
+    // §8: a derived layer is not saved at all, and Task 24 is what drops it
+    // from the snapshot. Until then the only promise this door has to keep is
+    // that the new field does not reach the document — a `derivedFrom` in a
+    // saved workspace would be a dangling reference to a layer that no longer
+    // exists on restore.
+    const layer: GeoLayer = {
+      id: "g2",
+      name: "Zones · buildings",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
+      derivedFrom: { layerId: "g1", layerName: "Zones", runId: "run_9" },
+      config: { data: { type: "FeatureCollection", features: [] } },
+    };
+
+    const snapshot = geoLayerSnapshot(layer);
+    expect(snapshot).not.toHaveProperty("derivedFrom");
+    expect(JSON.stringify(capture([snapshot]))).not.toContain("derivedFrom");
+  });
+
   it("writes the layer's own style, which is a user choice like any other", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "parcels",
       kind: "geojson",
@@ -86,6 +124,7 @@ describe("geoLayerSnapshot", () => {
 
   it("keeps a GeoJSON URL, which costs nothing and restores completely", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "roads",
       kind: "geojson",
@@ -102,6 +141,7 @@ describe("geoLayerSnapshot", () => {
 
   it("keeps a raster template with its tile bounds", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "r1",
       name: "osm",
       kind: "raster-xyz",
@@ -123,6 +163,7 @@ describe("geoLayerSnapshot", () => {
 describe("normalizeGeoLayers", () => {
   it("round-trips a URL-backed layer into an addGeoLayer input", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "r1",
       name: "osm",
       kind: "raster-xyz",
@@ -146,6 +187,7 @@ describe("normalizeGeoLayers", () => {
 
   it("carries a custom style all the way back out of the round trip", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "roads",
       kind: "geojson",
@@ -161,6 +203,52 @@ describe("normalizeGeoLayers", () => {
     ) as unknown;
 
     expect(normalizeGeoLayers([saved])[0]?.style).toEqual(CUSTOM_STYLE);
+  });
+
+  it("round-trips a colorByAttribute without a schema bump", () => {
+    const layer: GeoLayer = {
+      derivedFrom: null,
+      id: "g1",
+      name: "parcels",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: CATEGORIZED_STYLE,
+      config: { url: "https://x/parcels.geojson" },
+    };
+
+    // The FULL path a workspace save takes: capture -> JSON -> restore.
+    const snapshot = capture([geoLayerSnapshot(layer)]);
+    const reread = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+
+    expect(normalizeGeoLayers(reread.geoLayers)[0]?.style).toEqual(
+      CATEGORIZED_STYLE,
+    );
+  });
+
+  it("drops a hand-edited colorByAttribute rather than a whole layer", () => {
+    const [restored] = normalizeGeoLayers([
+      {
+        name: "parcels",
+        kind: "geojson",
+        visible: true,
+        opacity: 1,
+        style: {
+          color: "#00c2ff",
+          colorByAttribute: { attribute: 5, categories: "junk" },
+        },
+        config: { url: "https://x/parcels.geojson" },
+      },
+    ]);
+
+    expect(restored).toEqual({
+      name: "parcels",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: { ...DEFAULT_GEO_LAYER_STYLE, color: "#00c2ff" },
+      config: { url: "https://x/parcels.geojson" },
+    });
   });
 
   it("defaults the style of a snapshot saved before styles existed", () => {
@@ -201,6 +289,7 @@ describe("normalizeGeoLayers", () => {
 
   it("restores a file-loaded GeoJSON layer as an empty, re-linkable record", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "parcels",
       kind: "geojson",

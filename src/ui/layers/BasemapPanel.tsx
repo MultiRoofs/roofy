@@ -1,3 +1,4 @@
+import { customBasemapOption } from "../../features/basemap/customBasemap";
 /**
  * Basemap picker.
  *
@@ -42,6 +43,22 @@ export function BasemapPanel() {
   const basemapId = useBasemapStore((s) => s.basemapId);
   const setBasemapId = useBasemapStore((s) => s.setBasemapId);
   const overridden = useSceneThemeStore((s) => isBasemapOverridden(s.theme));
+  const custom = useBasemapStore((s) => s.custom);
+  const setCustom = useBasemapStore((s) => s.setCustom);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [title, setTitle] = useState(custom?.title ?? "");
+  const [url, setUrl] = useState(custom?.url ?? "");
+  const [credit, setCredit] = useState(custom?.attribution ?? "");
+  const [customError, setCustomError] = useState("");
+  useEffect(() => {
+    setTitle(custom?.title ?? "");
+    setUrl(custom?.url ?? "");
+    setCredit(custom?.attribution ?? "");
+    setCustomError("");
+  }, [custom]);
+  useEffect(() => {
+    setCustomOpen(false);
+  }, [basemapId, custom]);
   const [rampOpen, setRampOpen] = useState(false);
 
   // The ramp settings only mean anything to an option with a heatmap layer
@@ -68,15 +85,58 @@ export function BasemapPanel() {
         id="basemap-select"
         className="basemap-select"
         aria-label="Basemap"
-        value={basemapId}
-        onChange={(e) => setBasemapId(e.target.value as BasemapId)}
+        value={customOpen ? "custom" : basemapId}
+        onChange={(e) => {
+          setCustomOpen(e.target.value === "custom");
+          if (e.target.value !== "custom")
+            setBasemapId(e.target.value as BasemapId);
+        }}
       >
         {BASEMAPS.filter((b) => !b.hidden).map((b) => (
           <option key={b.id} value={b.id}>
             {b.label}
           </option>
         ))}
+        <option value="custom">
+          {custom?.title ? `Custom · ${custom.title}` : "Custom…"}
+        </option>
       </select>
+      {(customOpen || basemapId === "custom") && (
+        <form
+          className="custom-basemap-fields"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const value = { title, url, attribution: credit };
+            if (!customBasemapOption(value)) {
+              setCustomError(
+                "Enter a title and an HTTP(S) tile URL containing {z}, {x} and {y}.",
+              );
+              return;
+            }
+            setCustom(value);
+            setCustomError("");
+          }}
+        >
+          <label>
+            Map title
+            <input value={title} onChange={(e) => setTitle(e.target.value)} />
+          </label>
+          <label>
+            XYZ tile URL
+            <input
+              value={url}
+              placeholder="https://tiles.example/{z}/{x}/{y}.png"
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          </label>
+          <label>
+            Attribution (optional)
+            <input value={credit} onChange={(e) => setCredit(e.target.value)} />
+          </label>
+          {customError && <p role="alert">{customError}</p>}
+          <button type="submit">Apply basemap</button>
+        </form>
+      )}
       {isHeatmap && rampOpen && <HeatmapRampFields />}
       {overridden && (
         <div className="theme-override-hint">{THEME_OVERRIDE_HINT}</div>

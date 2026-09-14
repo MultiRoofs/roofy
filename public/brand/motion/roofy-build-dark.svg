@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -4 64 64" width="192" height="192" role="img" aria-labelledby="title desc">
+<title id="title">Roofy — Build, roof by roof</title><desc id="desc">The foundation arrives first, then each roof plane settles into place. Plays once and holds the original logo.</desc>
+<style>g,path,rect{animation-timing-function:cubic-bezier(.16,1,.3,1)!important} .water{animation:base 1.8s both}.nature{animation:left 1.8s both}.social{animation:right 1.8s both}.energy{animation:cap 1.8s both}
+@keyframes base{0%{transform:translateY(6px);opacity:0}20%,100%{transform:none;opacity:1}}
+@keyframes left{0%,12%{transform:translate(-7px,4px);opacity:0}52%,100%{transform:none;opacity:1}}
+@keyframes right{0%,26%{transform:translate(7px,4px);opacity:0}66%,100%{transform:none;opacity:1}}
+@keyframes cap{0%,40%{transform:translateY(-6px);opacity:0}85%,100%{transform:none;opacity:1}}
+@media(prefers-reduced-motion:reduce){.mark,.water,.nature,.social,.energy{animation:none!important}}</style>
+<g class="mark"><path class="nature" d="M24 8 L24 29 L3 29 Z" fill="#A7E32B"/>
+<path class="energy" d="M24 8 L36 20 L24 20 Z" fill="#FFC530"/>
+<path class="social" d="M24 20 L36 20 L45 29 L24 29 Z" fill="#F2683C"/>
+<rect class="water" x="3" y="34" width="42" height="10" rx="2.5" fill="#3B82F6"/></g></svg>

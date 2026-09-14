@@ -30,7 +30,7 @@ import {
   getDuckDBStatus,
   initDuckDB,
   queryParquetBuffer,
-} from "../../analytics/duckdb";
+} from "../../insights/duckdb";
 import { validBbox2d } from "./stacNormalize";
 import type { StacCollectionCard, StacItemRecord } from "./stacTypes";
 

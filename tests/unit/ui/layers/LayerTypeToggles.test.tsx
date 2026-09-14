@@ -15,10 +15,16 @@ import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamState } from "../../../../src/features/streaming/streamStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../../src/scene/cityColors";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
 });
 
@@ -40,13 +46,21 @@ function makeLayer(overrides: Partial<Layer> = {}): Layer {
     modelRef: { type: "url", url: "https://x/a.city.json" },
     visible: true,
     rules: [],
-    rulesEnabled: true,
+    // Defaults, like every other field of this fixture: a layer with no
+    // rules colours by surface type. A case that needs a mode sets one.
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: null,
     availableLods: [],
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: ["Building", "Road"],
+    appearanceThemes: [],
+    selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
     ...overrides,
   };
@@ -55,7 +69,8 @@ function makeLayer(overrides: Partial<Layer> = {}): Layer {
 /** Registers `layer` in the store so the component's `setHiddenTypes` writes
  *  land somewhere observable, and returns it for rendering. */
 function seed(layer: Layer): Layer {
-  useLayerStore.setState({ layers: [layer], activeLayerId: layer.id });
+  useLayerStore.setState({ layers: [layer] });
+  useWorkspaceStore.setState({ activeLayerId: layer.id });
   return layer;
 }
 
@@ -70,6 +85,7 @@ function streamState(types: ReadonlyArray<string>): StreamState {
     ladderVersion: 0,
     types,
     typesVersion: types.length === 0 ? 0 : 1,
+    appearanceThemes: [],
     status: "idle",
     message: null,
     version: 0,
@@ -156,4 +172,21 @@ describe("LayerTypeToggles — streaming layer", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
+});
+
+it("shows a single type directly in the details panel", () => {
+  const layer = seed(makeLayer({ availableObjectTypes: ["Building"] }));
+  render(<LayerTypeToggles layer={layer} expanded />);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Building" }));
+  expect(hiddenTypesOf("L")).toEqual(["Building"]);
+});
+
+it("describes an empty static layer without promising streaming", () => {
+  render(
+    <LayerTypeToggles
+      layer={makeLayer({ availableObjectTypes: [] })}
+      expanded
+    />,
+  );
+  expect(screen.getByText("No object types in this layer")).toBeTruthy();
 });

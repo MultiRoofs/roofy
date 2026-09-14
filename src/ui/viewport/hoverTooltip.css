@@ -1,0 +1,28 @@
+.city-hover-tooltip {
+  position: absolute;
+  z-index: 3;
+  bottom: 0.8rem;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  max-width: min(22rem, calc(100% - 2rem));
+  padding: 0.35rem 0.55rem;
+  color: var(--fg);
+  font-size: 0.7rem;
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 24%);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.city-hover-tooltip strong {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+.city-hover-tooltip span {
+  color: var(--fg-muted);
+}

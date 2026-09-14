@@ -20,7 +20,7 @@ describe("TERRAIN", () => {
 
   it("requests vertex normals, which the globe has none of without them", () => {
     // Load-bearing twice over: terrain shading, and the normals the
-    // aerial-perspective pass reads in irradiance mode (CLAUDE.md issue (e)).
+    // aerial-perspective pass reads in irradiance mode (docs/architecture-notes.md issue (e)).
     expect(TERRAIN.source.requestVertexNormals).toBe(true);
   });
 

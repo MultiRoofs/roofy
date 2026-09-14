@@ -16,6 +16,11 @@ import {
   type LiveLayer,
   type StreamSyncMemo,
 } from "../../../src/scene/handleSync";
+import {
+  effectiveRules,
+  isSyntheticRule,
+  normalizeColorBy,
+} from "../../../src/features/rules/colorBy";
 
 function fakeHandle(id: string, triangles = 100) {
   return {
@@ -30,11 +35,23 @@ function fakeHandle(id: string, triangles = 100) {
     triangleCount: () => triangles,
     heightOffset: vi.fn(() => 0),
     setHiddenTypes: vi.fn(),
+    setVisibleObjectIds: vi.fn(),
+    setAppearance: vi.fn(),
+    setModel: vi.fn(),
     delete: vi.fn(),
   };
 }
 
 function layer(patch: Partial<Layer> & { id: string }): Layer {
+  // `colorBy` is DERIVED from the rules unless the case states a mode, so
+  // every test written before "Color by" existed still means what it said:
+  // rules read as "Color by rules".
+  const colorBy = normalizeColorBy({
+    colorBy: patch.colorBy,
+    singleColor: patch.singleColor,
+    unmatchedColor: patch.unmatchedColor,
+    rules: patch.rules,
+  });
   return {
     name: patch.id,
     model: {
@@ -47,7 +64,6 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     modelRef: { kind: "url", url: "x" },
     visible: true,
     rules: [],
-    rulesEnabled: false,
     selectedLod: "2",
     availableLods: ["2", "1"],
     lodMode: "manual",
@@ -56,8 +72,11 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
     ...patch,
+    ...colorBy,
   } as Layer;
 }
 
@@ -263,6 +282,35 @@ describe("syncLayers", () => {
     expect(handle.delete).toHaveBeenCalledTimes(1);
     expect(live.size).toBe(0);
   });
+
+  // The model write-back seam: a processing tool's computed attributes reach
+  // the mesh as a NEW model (`layerStore.mergeAttributes`), and `setModel` is
+  // a full repaint of the layer — so it is pushed on model IDENTITY and on
+  // nothing else.
+  it("pushes a new model identity to setModel, and pushes it once", () => {
+    const handle = fakeHandle("L1");
+    const registry = { get: () => handle, add: vi.fn(() => handle) };
+    const live = new Map<string, LiveLayer>();
+    const before = layer({ id: "L1" });
+    syncLayers(registry as never, [before], live, () => {});
+    // Seeded by the add, not pushed: `registry.add` builds the mesh from
+    // exactly this model.
+    expect(handle.setModel).not.toHaveBeenCalled();
+
+    const merged = {
+      ...before.model,
+      objects: { ...before.model.objects },
+    };
+    const after = layer({ id: "L1", model: merged });
+    syncLayers(registry as never, [after], live, () => {});
+    expect(handle.setModel).toHaveBeenCalledTimes(1);
+    expect(handle.setModel).toHaveBeenCalledWith(merged);
+    expect(live.get("L1")!.model).toBe(merged);
+
+    // An unrelated store change must not repaint the layer again.
+    syncLayers(registry as never, [after], live, () => {});
+    expect(handle.setModel).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("totalTriangles", () => {
@@ -386,10 +434,7 @@ describe("syncStyles", () => {
   it("compiles the layer's rules and pushes them to the handle", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
-    syncStyles(
-      [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
-      entries,
-    );
+    syncStyles([layer({ id: "L1", rules: [roofRule] })], entries);
 
     expect(handle.setStyle).toHaveBeenCalledTimes(1);
     // What was pushed is a working evaluator, not just "some function":
@@ -424,7 +469,7 @@ describe("syncStyles", () => {
   it("never styles a layer whose rules are switched off", () => {
     const handle = fakeHandle("L1");
     syncStyles(
-      [layer({ id: "L1", rules: [roofRule], rulesEnabled: false })],
+      [layer({ id: "L1", rules: [roofRule], colorBy: "surface" })],
       live(handle),
     );
     expect(handle.setStyle).not.toHaveBeenCalled();
@@ -434,11 +479,11 @@ describe("syncStyles", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
     const rules = [roofRule];
-    const l = layer({ id: "L1", rules, rulesEnabled: true });
+    const l = layer({ id: "L1", rules });
     syncStyles([l], entries);
     // A re-render with the same rules array (any unrelated store change) must
     // not recompile or repaint.
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    syncStyles([layer({ id: "L1", rules })], entries);
     syncStyles([l], entries);
     expect(handle.setStyle).toHaveBeenCalledTimes(1);
   });
@@ -446,16 +491,12 @@ describe("syncStyles", () => {
   it("re-pushes when the rules array changes", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
-    syncStyles(
-      [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
-      entries,
-    );
+    syncStyles([layer({ id: "L1", rules: [roofRule] })], entries);
     syncStyles(
       [
         layer({
           id: "L1",
           rules: [{ ...roofRule, color: "#ff0000" }],
-          rulesEnabled: true,
         }),
       ],
       entries,
@@ -470,17 +511,17 @@ describe("syncStyles", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
     const rules = [roofRule];
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: false })], entries);
+    syncStyles([layer({ id: "L1", rules })], entries);
+    syncStyles([layer({ id: "L1", rules, colorBy: "surface" })], entries);
     expect(handle.setStyle).toHaveBeenCalledTimes(2);
     expect(handle.setStyle).toHaveBeenLastCalledWith(null);
   });
 
-  it("clears the style when the last enabled rule is disabled", () => {
+  it("keeps painting when the last enabled rule is disabled — everything is now UNMATCHED", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
     syncStyles(
-      [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
+      [layer({ id: "L1", rules: [roofRule], colorBy: "rules" })],
       entries,
     );
     syncStyles(
@@ -488,19 +529,25 @@ describe("syncStyles", () => {
         layer({
           id: "L1",
           rules: [{ ...roofRule, enabled: false }],
-          rulesEnabled: true,
+          colorBy: "rules",
         }),
       ],
       entries,
     );
-    expect(handle.setStyle).toHaveBeenLastCalledWith(null);
+    // Not `setStyle(null)`, which is what this used to assert: a layer that is
+    // colouring BY RULES and matches none of them is not a layer colouring by
+    // surface type — every roof wears the unmatched colour, which is a fact the
+    // user can see and act on. Going back to the semantic palette is a MODE
+    // change now, and the round-trip test below covers it.
+    expect(handle.setStyle).toHaveBeenCalledTimes(2);
+    expect(handle.setStyle.mock.calls[1]![0]).not.toBeNull();
   });
 
   it("styles a layer again after it was re-added (a fresh handle is unstyled)", () => {
     const first = fakeHandle("L1");
     const entries = live(first);
     const rules = [roofRule];
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    syncStyles([layer({ id: "L1", rules })], entries);
 
     const second = fakeHandle("L1");
     entries.set("L1", {
@@ -509,7 +556,7 @@ describe("syncStyles", () => {
       visible: true,
       hiddenTypes: [],
     });
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    syncStyles([layer({ id: "L1", rules })], entries);
     expect(second.setStyle).toHaveBeenCalledTimes(1);
   });
 
@@ -527,7 +574,6 @@ describe("syncStyles", () => {
           id: "S1",
           isStreaming: true,
           rules: [roofRule],
-          rulesEnabled: true,
         }),
       ],
       entries,
@@ -537,10 +583,7 @@ describe("syncStyles", () => {
 
   it("skips a layer that has no live handle (its add was refused)", () => {
     expect(() =>
-      syncStyles(
-        [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
-        new Map(),
-      ),
+      syncStyles([layer({ id: "L1", rules: [roofRule] })], new Map()),
     ).not.toThrow();
   });
 
@@ -552,7 +595,6 @@ describe("syncStyles", () => {
           id: "L1",
           visible: false,
           rules: [roofRule],
-          rulesEnabled: true,
         }),
       ],
       live(handle),
@@ -835,6 +877,7 @@ describe("syncStreamState", () => {
       setVisible: vi.fn(),
       setCameraSync: vi.fn(),
       setHiddenTypes: vi.fn(),
+      setAppearance: vi.fn(),
     };
   }
 
@@ -855,7 +898,6 @@ describe("syncStreamState", () => {
       id: "S1",
       isStreaming: true,
       rules,
-      rulesEnabled: true,
       visible: false,
       lodMode: "auto",
       selectedLod: null,
@@ -864,8 +906,13 @@ describe("syncStreamState", () => {
     syncStreamState(l, handle as never, memos);
 
     // Rules as DATA — never a compiled SurfaceStyleEvaluator (shared contract
-    // -> Streaming styling).
-    expect(handle.setRules).toHaveBeenCalledWith(rules, true);
+    // -> Streaming styling) — and the EFFECTIVE list, so a streamed cell and a
+    // resident mesh are baked from one answer: the user's rule, then the
+    // trailing unmatched catch-all.
+    expect(handle.setRules).toHaveBeenCalledWith(effectiveRules(l), true);
+    const pushed = handle.setRules.mock.calls[0]![0] as ReadonlyArray<Rule>;
+    expect(pushed[0]).toBe(rules[0]);
+    expect(isSyntheticRule(pushed[pushed.length - 1]!)).toBe(true);
     expect(handle.setLod).toHaveBeenCalledWith("auto", null);
     expect(handle.setVisible).toHaveBeenCalledWith(false);
     expect(handle.setCameraSync).toHaveBeenCalledWith(true);
@@ -956,6 +1003,153 @@ describe("syncStreamState", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Color by
+//
+// One effective rule list, two consumers. The memo on BOTH paths must key on
+// everything that can change the list — including the two colours, which are
+// not rules at all — or a user dragging the unmatched swatch would see nothing
+// move.
+// ---------------------------------------------------------------------------
+
+describe("colorBy", () => {
+  const roofRule: Rule = {
+    id: "r1",
+    name: "flat roofs",
+    color: "#4ec84e",
+    conditions: [],
+    logic: "AND",
+    enabled: true,
+  };
+
+  function live(handle: ReturnType<typeof fakeHandle>) {
+    return new Map<string, LiveLayer>([
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
+    ]);
+  }
+
+  function fakeStreamHandle(id = "S1") {
+    return {
+      id,
+      setHighlight: vi.fn(),
+      resolvePick: vi.fn(),
+      resolveRaycast: vi.fn(),
+      getBoundsGeodetic: vi.fn(),
+      triangleCount: () => 0,
+      onCommit: vi.fn(() => () => undefined),
+      setRules: vi.fn(),
+      setLod: vi.fn(),
+      setVisible: vi.fn(),
+      setCameraSync: vi.fn(),
+      setHiddenTypes: vi.fn(),
+      setAppearance: vi.fn(),
+    };
+  }
+
+  it("repaints a STATIC layer when only the unmatched colour changes", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    const rules = [roofRule];
+    const l = layer({ id: "L1", rules, colorBy: "rules" });
+    syncStyles([l], entries);
+    expect(handle.setStyle).toHaveBeenCalledTimes(1);
+
+    // Same rules array, same mode — only the trailing catch-all's colour moved.
+    syncStyles(
+      [layer({ id: "L1", rules, colorBy: "rules", unmatchedColor: "#010203" })],
+      entries,
+    );
+    expect(handle.setStyle).toHaveBeenCalledTimes(2);
+  });
+
+  it("repaints a STREAMING layer when only the unmatched colour changes", () => {
+    const handle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const rules = [roofRule];
+    const l = layer({ id: "S1", isStreaming: true, rules, colorBy: "rules" });
+    syncStreamState(l, handle as never, memos);
+    handle.setRules.mockClear();
+
+    syncStreamState(
+      layer({
+        id: "S1",
+        isStreaming: true,
+        rules,
+        colorBy: "rules",
+        unmatchedColor: "#010203",
+      }),
+      handle as never,
+      memos,
+    );
+    expect(handle.setRules).toHaveBeenCalledTimes(1);
+    const pushed = handle.setRules.mock.calls[0]![0] as ReadonlyArray<Rule>;
+    expect(pushed[pushed.length - 1]!.color).toBe("#010203");
+  });
+
+  it("repaints when only the single colour changes", () => {
+    const handle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const base = { id: "S1", isStreaming: true, colorBy: "single" } as const;
+    syncStreamState(layer({ ...base }), handle as never, memos);
+    handle.setRules.mockClear();
+    syncStreamState(
+      layer({ ...base, singleColor: "#0f0f0f" }),
+      handle as never,
+      memos,
+    );
+    expect(handle.setRules).toHaveBeenCalledTimes(1);
+    expect(
+      (handle.setRules.mock.calls[0]![0] as ReadonlyArray<Rule>)[0]!.color,
+    ).toBe("#0f0f0f");
+  });
+
+  it("round-trips Rules -> Surface -> Rules on both paths", () => {
+    const staticHandle = fakeHandle("L1");
+    const entries = live(staticHandle);
+    const streamHandle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const rules = [roofRule];
+    const ruled = { rules, colorBy: "rules" } as const;
+    const plain = { rules, colorBy: "surface" } as const;
+
+    syncStyles([layer({ id: "L1", ...ruled })], entries);
+    syncStyles([layer({ id: "L1", ...plain })], entries);
+    syncStyles([layer({ id: "L1", ...ruled })], entries);
+    // Painted, cleared, painted again — and the clear is an explicit
+    // `setStyle(null)`, because a mesh that carries rule colours does not go
+    // back to its semantic palette on its own.
+    expect(staticHandle.setStyle).toHaveBeenCalledTimes(3);
+    expect(staticHandle.setStyle.mock.calls[1]![0]).toBeNull();
+    expect(staticHandle.setStyle.mock.calls[2]![0]).not.toBeNull();
+
+    const stream = (patch: Partial<Layer>) =>
+      syncStreamState(
+        layer({ id: "S1", isStreaming: true, ...patch }),
+        streamHandle as never,
+        memos,
+      );
+    stream(ruled);
+    stream(plain);
+    stream(ruled);
+    expect(streamHandle.setRules).toHaveBeenCalledTimes(3);
+    expect(streamHandle.setRules.mock.calls[1]).toEqual([[], false]);
+  });
+
+  it("does not re-push when nothing about the colouring moved", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    const rules = [roofRule];
+    const same = { id: "L1", rules, colorBy: "rules" } as const;
+    syncStyles([layer({ ...same })], entries);
+    syncStyles([layer({ ...same })], entries);
+    syncStyles([layer({ ...same })], entries);
+    expect(handle.setStyle).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Scene themes
 //
 // A theme's mesh style reaches BOTH layer kinds through the same two sync
@@ -996,6 +1190,8 @@ describe("theme styles", () => {
       setVisible: vi.fn(),
       setCameraSync: vi.fn(),
       setHiddenTypes: vi.fn(),
+      setVisibleObjectIds: vi.fn(),
+      setAppearance: vi.fn(),
       setThemeStyle: vi.fn(),
     };
   }

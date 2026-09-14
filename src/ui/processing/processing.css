@@ -1,0 +1,701 @@
+/* Processing toolbox (spec §4–§6). Soft Utility tokens from flatControls.css. */
+.tools-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 12px;
+}
+.tools-button__dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--lime-500);
+  box-shadow: 0 0 0 2px var(--bg-panel);
+}
+.tools-button__dot[data-tone="failed"] {
+  background: var(--brand-secondary);
+}
+@media (max-width: 1279px) {
+  .tools-button__label {
+    display: none;
+  }
+}
+
+/* ── Right-panel Tools tab (spec §4.2) ─────────────────────────────── */
+/* The tool form's caption column, shared by every labelled row in the panel —
+   §6's TARGET/PARAMETERS/OUTPUT sections read as ONE grid only if the captions
+   and the controls line up across them. 84px is what the widest caption needs
+   ("Flat threshold" measures 70px at 12px); a 64px field column left the
+   slider's control 22px to the right of every select. */
+.processing-panel {
+  --processing-caption: 104px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+.processing-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.processing-tabs__list {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+.processing-tab {
+  display: inline-flex;
+  align-items: center;
+  max-width: 15rem;
+  overflow: hidden;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  /* A tab is a tab, not a field: the shared control fill and 8px radius would
+     read as two buttons over the panel rather than one strip. */
+  background: transparent !important;
+  border: none !important;
+  border-radius: var(--control-radius) var(--control-radius) 0 0 !important;
+  color: var(--fg-muted);
+}
+.processing-tab:hover {
+  color: var(--fg);
+}
+.processing-tab[aria-selected="true"] {
+  color: var(--fg);
+  border-bottom: 2px solid currentColor !important;
+}
+.processing-tab__emphasis {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--lime-500);
+}
+.processing-tab--close {
+  margin-left: auto;
+  padding: 6px;
+}
+.processing-tab--close svg {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* ── Catalogue (spec §5) ───────────────────────────────────────────── */
+.processing-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px 16px;
+}
+.processing-search {
+  width: 100%;
+  min-height: var(--control-height-compact);
+  margin-bottom: 12px;
+}
+.processing-group {
+  margin-bottom: 16px;
+}
+.processing-group__label {
+  margin: 0 0 6px;
+  font: 500 11px/1.4 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.processing-tool-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 2px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  text-align: left;
+  /* A list row, not a control: the shared 38px height and fill would turn the
+     catalogue into a stack of buttons. Only the hover comes from the tokens. */
+  background: transparent !important;
+  border: none !important;
+  min-height: 0 !important;
+}
+.processing-tool-row:hover {
+  background: var(--control-hover) !important;
+}
+.processing-tool-row[aria-disabled="true"] .processing-tool-row__name,
+.processing-tool-row[aria-disabled="true"] .processing-tool-row__desc {
+  opacity: 0.55;
+}
+.processing-tool-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.processing-tool-row__name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.processing-tool-row__desc,
+.processing-tool-row__reason,
+.processing-empty {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.processing-empty {
+  margin: 0;
+}
+.processing-chip {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: var(--lime-100);
+  color: var(--lime-900);
+}
+/* One row and, when its extension failed, its Retry link beside it (spec §5).
+   The wrapper carries the row's bottom margin so the link does not gain one. */
+.processing-tool-row-wrap {
+  display: flex;
+  /* WRAPS so the clipped description below can take a line of its own when
+     focus reveals it, instead of squeezing itself between the row and Retry. */
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.processing-tool-row-wrap .processing-tool-row {
+  /* Basis ZERO, not `auto`: with `flex-wrap` on, a row sized from its content
+     no longer shrinks to make room for Retry — it takes the whole first line and
+     pushes the link onto its own. Growing from nothing keeps them side by side
+     and still lets the revealed description wrap below both. */
+  flex: 1 1 0;
+  min-width: 0;
+  margin-bottom: 0;
+}
+/* A muted chip: still readable, visibly not a capability you have. */
+.processing-chip[data-state="failed"] {
+  background: var(--control-hover);
+  color: var(--fg-muted);
+}
+.processing-chip[data-state="loading"] {
+  opacity: 0.6;
+}
+/* The sentence behind the chip's mouse-only tooltip, for assistive tech: the
+   chip is a `<span>` and cannot be focused, so the row and its Retry link
+   point at this with `aria-describedby`. Clipped rather than `display: none`,
+   which would take it out of the accessibility tree along with the pixels —
+   the same idiom as `.left-rail-count` in `app.css`. */
+.processing-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* And UN-clipped while the row or its Retry has focus.
+   A native `title` is a mouse tooltip: a keyboard user who tabs onto the row or
+   onto Retry gets nothing on screen, and the row's own second line reads "Not
+   available yet" (M2's outranking reason), which explains nothing about a failed
+   download. `aria-describedby` already tells a screen reader; this tells the
+   sighted keyboard user the same thing, in the same words.
+   `:focus-within` on the WRAPPER rather than an adjacent-sibling selector
+   because the two focusable elements sit on either side of this span, and a
+   sibling combinator only reaches forwards. `order` puts the revealed line after
+   both buttons, and the 100% basis drops it onto the wrapper's second row. */
+.processing-tool-row-wrap:focus-within .processing-sr-only {
+  position: static;
+  flex: 1 0 100%;
+  order: 1;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0 10px 2px;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+/* A link, not a control: the row it sits beside is already a 2-line list item,
+   and a 38px filled button next to it would read as the row's primary action.
+   `!important` only because flatControls sets every button's fill, colour and
+   min-height; the focus ring still comes from the shared rule. */
+.processing-retry {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 8px !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  color: var(--accent) !important;
+  font-size: 12px;
+  text-decoration: underline;
+}
+.processing-retry:hover {
+  background: var(--control-hover) !important;
+}
+
+/* ── Tool view (spec §6) ───────────────────────────────────────────── */
+.processing-tool {
+  display: flex;
+  flex-direction: column;
+}
+.processing-tool__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.processing-tool__title {
+  margin: 0;
+  font: 500 16px/1.3 var(--font-display);
+  color: var(--fg);
+}
+.processing-tool__desc {
+  margin: 6px 0 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+/* A back chevron is an icon button, not a field: the shared fill and 38px
+   height would make the form's first row look like a control. Square at the
+   compact field height, so it lines up with the panel's other inline actions;
+   `!important` only because flatControls sets every button's min-height. */
+.processing-back {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  min-height: var(--control-height-compact) !important;
+  padding: 0;
+  font-size: 16px;
+  background: transparent !important;
+}
+.processing-section {
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.processing-field {
+  display: grid;
+  grid-template-columns: var(--processing-caption, 84px) 1fr;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.processing-field > span {
+  color: var(--fg-muted);
+}
+.processing-field select,
+.processing-field input[type="text"],
+.processing-field input[type="number"],
+.processing-field input[type="search"] {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height-compact);
+}
+/* §7.5's field checklist sits in the control column beside its caption, with
+   its search box above it — one grid cell holding two stacked controls. */
+.processing-field > div > input[type="search"] {
+  margin-bottom: 6px;
+}
+.processing-field > div > .processing-checks:last-child {
+  margin-bottom: 0;
+}
+/* One cell of §7.5's field checklist: the label, and under it the collision
+   sentence §6 flags on the second colliding field. */
+.processing-check-cell .processing-error {
+  margin: 2px 0 0 20px;
+}
+/* A checkbox that is a row of its own rather than a cell of the two-column
+   grid: §7.5's match count and §7.7's nearest-feature id. */
+.processing-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+/* §7.6's aggregate rows: an operator, a column and a remove button on one
+   line, with the row's own validation sentence under it (residual B11). */
+.processing-aggregate {
+  margin-bottom: 8px;
+}
+.processing-aggregate__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.processing-aggregate__row select {
+  min-width: 0;
+  min-height: var(--control-height-compact);
+}
+.processing-aggregate__row select:first-child {
+  flex: 0 0 84px;
+}
+.processing-aggregate__row select + select {
+  flex: 1 1 auto;
+}
+.processing-aggregate__remove {
+  flex: 0 0 auto;
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  padding: 0;
+  line-height: 1;
+}
+.processing-aggregate .processing-error {
+  margin: 4px 0 0;
+}
+.processing-add {
+  min-height: var(--control-height-compact);
+  margin-bottom: 8px;
+}
+.processing-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.processing-radios label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+/* §6's two-column checkbox grid. It drops to one column in a narrow panel
+   rather than clipping a label — the panel is resizable. */
+.processing-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 12px;
+  margin-bottom: 10px;
+}
+.processing-checks label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+/* Caption, slider, value — the Sun & shade sheet's shape. The input itself is
+   styled once for the whole app in flatControls.css; nothing here touches it. */
+.processing-slider {
+  display: grid;
+  grid-template-columns: var(--processing-caption, 84px) 1fr 28px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.processing-slider > span:first-child {
+  color: var(--fg-muted);
+}
+.processing-slider__value {
+  text-align: right;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.processing-note,
+.processing-columns,
+.processing-phases,
+.processing-elapsed {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.processing-columns {
+  font-family: var(--font-mono);
+  word-break: break-word;
+  color: var(--fg);
+}
+.processing-error {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--brand-accent);
+}
+.processing-warning {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--brand-secondary);
+}
+
+/* ── Run footer (spec §6.1–§6.3) ───────────────────────────────────── */
+.processing-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-root);
+}
+.processing-footer__row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.processing-footer__row > button {
+  min-height: var(--control-height);
+  min-width: 76px;
+  padding: 0 16px;
+}
+.processing-footer__row .processing-elapsed {
+  margin: 0 auto 0 0;
+}
+.processing-footer .processing-note {
+  margin: 6px 0 0;
+  text-align: right;
+}
+.processing-run {
+  min-height: var(--control-height);
+  padding: 0 16px;
+  font-weight: 600;
+  /* The one filled button of the panel. `!important` because flatControls sets
+     every button's fill with it; the tokens are app.css's shared pair. */
+  background: var(--accent-fill) !important;
+  color: var(--on-accent) !important;
+}
+.processing-run:hover:not(:disabled) {
+  background: var(--accent-fill-hover) !important;
+}
+/* Not a control, so not --control-radius: a 3px indeterminate bar at 8px would
+   be a lozenge. 2px is the radius that reads as a bar at this height. */
+.processing-progress {
+  position: relative;
+  height: 3px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+.processing-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  border-radius: 2px;
+  background: var(--lime-500);
+  animation: processing-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes processing-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(333%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .processing-progress::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+.processing-card {
+  margin-bottom: 8px;
+  padding: 10px;
+  border: 1px solid var(--lime-700);
+  border-radius: var(--control-radius);
+}
+.processing-card--failed {
+  border-color: var(--brand-accent);
+}
+.processing-card__line {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.processing-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.processing-card__actions button {
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+/* ── Recent runs (spec §5) ─────────────────────────────────────────── */
+.processing-run-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.processing-run-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.processing-run-row:first-child {
+  border-top: 0;
+}
+.processing-run-row__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.processing-run-row__dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+}
+.processing-run-row__dot[data-status="done"] {
+  background: var(--lime-500);
+}
+.processing-run-row__dot[data-status="failed"] {
+  background: var(--brand-secondary);
+}
+.processing-run-row__dot[data-status="cancelled"],
+.processing-run-row__dot[data-status="cancelling"] {
+  background: var(--fg-dim);
+}
+.processing-run-row__dot[data-status="running"] {
+  background: var(--lime-500);
+  animation: processing-pulse 1.2s ease-in-out infinite;
+}
+.processing-run-row__dot[data-status="queued"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--fg-dim);
+}
+@keyframes processing-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .processing-run-row__dot[data-status="running"] {
+    animation: none;
+  }
+}
+.processing-run-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.processing-run-row__actions button {
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+/* ── Log view (spec §6.4) ──────────────────────────────────────────── */
+.processing-log__copy {
+  margin-left: auto;
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 12px;
+}
+.processing-log__header {
+  margin: 10px 0 14px;
+}
+.processing-log__row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+.processing-log__row dt {
+  color: var(--fg-muted);
+}
+.processing-log__row dd {
+  margin: 0;
+  color: var(--fg);
+  word-break: break-word;
+}
+.processing-log__entry {
+  margin-bottom: 10px;
+}
+.processing-log__label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.processing-log__entry pre {
+  margin: 0 0 4px;
+  padding: 8px;
+  overflow-x: auto;
+  border-radius: var(--control-radius);
+  background: var(--bg-raised);
+  font: 11px/1.5 var(--font-mono);
+  color: var(--fg);
+}
+
+/* Equal action slots keep the completed run controls on one line. */
+.processing-footer__row--result > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+/* Processing help also opens when its field is reached by keyboard. */
+.processing-panel [data-tooltip]:focus-within::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 300ms;
+}
+.processing-panel .processing-field[data-tooltip]::after,
+.processing-panel .processing-slider[data-tooltip]::after {
+  max-width: min(16rem, 100%);
+}
+
+.processing-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  color: var(--fg-muted);
+  cursor: help;
+  border-radius: var(--control-radius);
+}
+.processing-info svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.processing-info:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

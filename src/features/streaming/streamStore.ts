@@ -11,19 +11,20 @@
  *
  * It is a SEPARATE store from `useLayerStore` on purpose. `layerStore`'s
  * `layers` array is subscribed to WHOLE by `NavaraViewport.tsx`,
- * `InspectorPanel.tsx`, `TablePanel.tsx`, and read field-by-field by
+ * `DetailsPanel.tsx`, `TablePanel.tsx`, and read field-by-field by
  * `App.tsx` for object counts — and Zustand re-evaluates every selector on
  * every store notification to decide whether to re-render. A cell commit
  * happens far more often than a layer is added or removed (every pan/zoom
  * settle, vs. once per file load), so if committing a cell replaced the
  * `layers` array or a `Layer` object, every one of those consumers would
- * re-render — and several of them (InspectorPanel, TablePanel, App's object
+ * re-render — and several of them (DetailsPanel, TablePanel, App's object
  * counts) touch `layer.model`, which is exactly the resident-model
  * materialization this streaming design exists to avoid doing eagerly.
  * Keeping stream state here means a commit only ever changes `streams`,
  * never `useLayerStore.getState().layers` — verified in
  * streamStore.test.ts by reference equality (`toBe`), not deep equality.
  */
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import { create } from "zustand";
 import type {
   FcbHeaderModel,
@@ -71,6 +72,10 @@ export interface StreamState {
    *  toggles read this instead of `Layer.availableObjectTypes`. */
   readonly types: ReadonlyArray<string>;
   readonly typesVersion: number;
+  /** The appearance themes the stream has seen so far (texture themes first),
+   *  from `handle.onAppearanceThemes` — learned like the ladder, and what the
+   *  layer row's appearance dropdown offers for a streaming layer. */
+  readonly appearanceThemes: ReadonlyArray<AppearanceTheme>;
   readonly status: StreamStatus;
   readonly message: string | null;
   /** Bumped on every cell commit. The ONLY thing that changes on a commit —
@@ -104,6 +109,10 @@ export interface StreamStoreActions {
    *  across every commit so far (`handle.onTypes`). Same race tolerance as
    *  `setLadder`: a no-op for an unregistered layer id. */
   setTypes: (layerId: string, types: ReadonlyArray<string>) => void;
+  setAppearanceThemes: (
+    layerId: string,
+    themes: ReadonlyArray<AppearanceTheme>,
+  ) => void;
   /** Mirrors `handle.level` after a commit. Separate from `bumpVersion`
    *  because the two have different audiences — `LodSelector` re-renders on
    *  the level, everything else on the version — and Zustand notifies per
@@ -186,6 +195,18 @@ export const useStreamStore = create<StreamStore>((set, getState) => ({
             types,
             typesVersion: entry.typesVersion + 1,
           },
+        },
+      };
+    }),
+
+  setAppearanceThemes: (layerId, themes) =>
+    set((s) => {
+      const entry = s.streams[layerId];
+      if (!entry) return s;
+      return {
+        streams: {
+          ...s.streams,
+          [layerId]: { ...entry, appearanceThemes: themes },
         },
       };
     }),

@@ -1,3 +1,8 @@
+import { useDrawStore } from "../features/drawing/drawStore";
+import { forwardCloudShadowShader } from "./cloudShadowShader";
+import { captureFrame } from "../features/export/captureFrame";
+import { copySceneImage } from "../features/export/sceneImage";
+import { customBasemapOption } from "../features/basemap/customBasemap";
 /**
  * Navara viewport: owns the `ThreeView` lifecycle and exposes the imperative
  * {@link CitySceneHandle} `App.tsx` drives the camera through.
@@ -41,10 +46,8 @@ import {
 import ThreeView, {
   Color,
   ColorMap,
-  degreeToRadian,
   geodeticToVector3,
   getPickRay,
-  radianToDegree,
   TERRARIUM_ELEVATION_DECODER,
   vector3ToGeodetic,
   type PickedFeature,
@@ -61,6 +64,8 @@ import { ToneMappingMode } from "postprocessing";
 // importable from Node (Global Constraints -> NODE_IMPORT_SAFE = false).
 import { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
 import { FlatCityBufPlugin } from "@cityjson/navara-flatcitybuf/plugin";
+import { geodeticBoundsFromBBox } from "@cityjson/navara-cityjson";
+import type { BBox3 } from "@cityjson/navara-core";
 import type {
   EcefRay,
   GeodeticBounds,
@@ -74,6 +79,13 @@ import { useStreamStore } from "../features/streaming/streamStore";
 import { useTilesStore } from "../features/tiles/tilesStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
 import {
+  filterGeoRecords,
+  geoRecordId,
+  geoRecords,
+} from "../features/geoLayers/geoRecords";
+import { useGeoFeatureVisibilityStore } from "../features/geoLayers/geoFeatureVisibilityStore";
+import { layerQuery, useQueryStore } from "../features/query/queryStore";
+import {
   useBasemapStore,
   type HeatmapSettings,
 } from "../features/basemap/basemapStore";
@@ -85,10 +97,10 @@ import {
   closeAllStreamingLayers,
   closeStreamingLayer,
 } from "../features/streaming/openStreamingLayer";
+import { CITY_COLORS } from "./cityColors";
 import {
   allInteractionHandles,
   interactionHandles,
-  layerHeightOffset,
   syncHighlight,
   syncLayers,
   syncStreamState,
@@ -112,11 +124,7 @@ import {
   sameSelection,
   type EnginePickStash,
 } from "./pickEventHandlers";
-import {
-  createThrottle,
-  crsFromGeodetic,
-  epsgForLayer,
-} from "./cursorCrsReadout";
+import { createThrottle, epsgForLayer } from "./cursorCrsReadout";
 import {
   createNavaraSession,
   NavaraSessionDisposedError,
@@ -134,21 +142,21 @@ import {
 } from "./geographicCamera";
 import {
   northedCamera,
-  tiltedCamera,
   zoomedCamera,
-  TILT_STEP_DEG,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
 } from "./cameraControls";
 import {
   geoLayerIdForEngineLayerId,
   removeAllGeoLayerHandles,
+  syncGeoFeatureVisibility,
   syncGeoHighlight,
   syncGeoLayers,
   type LiveGeoLayer,
 } from "./geoLayerSync";
 import { publishCameraPose } from "./cameraPose";
 import { useViewModeStore } from "../features/viewMode/viewModeStore";
+import { selectedObjectBounds } from "./selectedObjectBounds";
 import {
   entryCameraFor,
   VIEW_MODE_ENTRY_MS,
@@ -156,15 +164,14 @@ import {
 } from "./viewModePolicy";
 import { googleTilesConfig } from "./googleTiles";
 import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
+import { shadowTuningFor } from "./shadowQuality";
 import { sceneThemePolicy, type ThemeEnvironment } from "./sceneThemePolicy";
 import { bloomEffectConfig, registerBloomEffect } from "./bloomEffect";
 import { basemapById, type BasemapOption } from "./basemaps";
 import { TERRAIN, TERRAIN_ATTRIBUTION } from "./terrain";
 import { isAutoFitSuppressed } from "./autoFitSuppression";
 import { addQueryBox, type QueryBoxMesh } from "./streamQueryBox";
-import { AddressSearch } from "../ui/viewport/AddressSearch";
 import { AttributionOverlay } from "../ui/viewport/AttributionOverlay";
-import { CameraControls } from "../ui/viewport/CameraControls";
 import { ScaleBar } from "../ui/viewport/ScaleBar";
 import { StreamQueryBoxOverlay } from "../ui/viewport/StreamQueryBoxOverlay";
 
@@ -174,7 +181,7 @@ import { StreamQueryBoxOverlay } from "../ui/viewport/StreamQueryBoxOverlay";
  * `.setHex()` rather than a constructor argument: the engine's `Color`
  * declares NO constructor parameters, and the documented forms are
  * `new Color().setHex(...)` / `.setStyle(...)` — the same class every mesh desc
- * insists on (CLAUDE.md, Known Issue (i): a bare hex makes `addMesh` throw).
+ * insists on (docs/architecture-notes.md, Known Issue (i): a bare hex makes `addMesh` throw).
  *
  * A module-level BINDING but not a module-level INSTANCE: the six viewport test
  * suites mock `@navaramap/three`, and a `new Color()` evaluated at import time
@@ -186,13 +193,29 @@ import { StreamQueryBoxOverlay } from "../ui/viewport/StreamQueryBoxOverlay";
 const makeEngineColor = (hex: number): unknown => new Color().setHex(hex);
 
 export interface CitySceneHandle {
+  projectDrawingPoint?: (
+    point: readonly [number, number, number],
+  ) => { x: number; y: number } | null;
+  pickDrawingPoint?: (
+    x: number,
+    y: number,
+  ) => readonly [number, number, number] | null;
+  captureImage: (
+    credits: readonly string[],
+  ) => Promise<import("../features/export/sceneImage").SceneImage>;
   fitAll: () => void;
   fitLayer: (layerId: string) => void;
+  /** Frame exactly the selected source objects and their child parts. */
+  fitObjects: (layerId: string, objectIds: readonly string[]) => void;
   /** Fly to frame caller-supplied bounds — the geo-layer fit, whose extents
    *  the app computes itself (`geoLayerBounds.ts`); the engine has no bounds
    *  API for its own geo layers. Same framing and settle suppression as
    *  `fitLayer`. */
   fitBounds: (bounds: GeodeticBounds) => void;
+  /** Imperative camera commands for App-owned map controls. */
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetNorth: () => void;
   alignView: (direction: ViewDirection) => void;
   getCameraState: () => GeographicCameraState | null;
   setCameraState: (state: GeographicCameraState) => void;
@@ -226,10 +249,13 @@ export interface CitySceneHandle {
 export interface NavaraViewportProps {
   readonly onTriangleCount: (count: number) => void;
   readonly onFps?: (fps: number) => void;
+  /** WGS84 [longitude, latitude, ellipsoidal height] from the depth hit. */
   readonly onCursorPosition?: (
-    pos: readonly [number, number, number] | null,
+    pos: readonly [lng: number, lat: number, ellipsoidalHeight: number] | null,
   ) => void;
   readonly onLayerError?: (layerId: string, message: string) => void;
+  /** Active licence lines, mirrored in the expanded data drawer. */
+  readonly onAttributionChange?: (lines: readonly string[]) => void;
 }
 
 type ViewInstance = InstanceType<typeof ThreeView>;
@@ -431,53 +457,37 @@ function applyToEngine(what: string, mutate: () => void): void {
 }
 
 /**
- * Switch the scene from SCENE LIGHTS to the PHYSICAL ATMOSPHERE.
+ * State the lighting calibration: the engine's own FORWARD-LIT default.
  *
- * `AerialPerspective` defaults to `irradiance: false` — it only adds
- * transmittance and inscatter over whatever the scene lights produced. Turning
- * it on sets `sunLight = skyLight = true` on the pass, which re-shades the
- * g-buffer ALBEDO with the atmosphere's own sun and sky irradiance. That is
- * what Navara's `/sky/sun-time` sample does, and it is the calibration
- * `DEFAULT_EXPOSURE = 10` belongs to.
+ * `addDefaultPhotorealScene()` adds a `SunLightDesc` (direction and colour
+ * from the atmosphere, cascaded shadow maps) and a `SkyLightProbeDesc`, and
+ * every LIT material — the terrain, the draped basemap, Google's tiles, and
+ * the city meshes, which `@cityjson/navara-cityjson` draws with a Lambert
+ * material registered for the shadow maps — is shaded by those two in the
+ * forward pass. The aerial-perspective pass then only hazes what they
+ * produced (`irradiance: false`, its default), and the tone mapper runs at
+ * `DEFAULT_EXPOSURE = 10`, the exposure the engine's own samples sit at.
  *
- * It is also the reason the city meshes are `MeshBasicMaterial`
- * (`@cityjson/navara-cityjson`): every surface must reach this pass as unlit
- * albedo. Running both models at once — a lit material under `SunLightDesc` +
- * `skyLightProbe`, then this pass on top, at exposure 10 — is precisely what
- * clipped the whole scene to white. See
- * docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md.
+ * The DEFERRED alternative the app ran until issue #13 — `view.lit = false`
+ * with the pass in `irradiance` mode, re-lighting the G-buffer albedo from the
+ * atmosphere — is deliberately NOT used any more. It is a fine calibration for
+ * imagery on terrain, but it cannot show a cast shadow: the irradiance term
+ * reads the normal buffer only, and no built-in effect reads the shadow
+ * G-buffer the lit pipeline writes, so a building could darken a wall by its
+ * normal but never by the tower next to it. Mixing the two calibrations — lit
+ * materials AND the irradiance pass, at exposure 10 — is what once clipped
+ * the whole scene to white; the pass is therefore never written from here.
  *
- * `useNormalBuffer: true` DEPENDS ON THE TERRAIN LAYER — do not remove one
- * without the other. In irradiance mode the pass reads a per-fragment normal
- * from the MRT g-buffer's normal attachment, and the globe contributes normals
- * to it only when a terrain (or hillshade) layer supplies them; the `useNormal`
- * view option that would otherwise provide them does not exist in 0.0.5.
- *
- * Before `terrain.ts` was added, that attachment was unusable and this had to
- * be `false`: with a raster basemap on the globe every texel read back as
- * half-float NaN (0x7e00) across the whole frame — measured with
- * `readRenderTargetPixels` on `mrt.gbufferRenderTarget` texture 1 — because
- * `packNormalToVec2` divides by `abs(x)+abs(y)+abs(z)` and a zero normal in the
- * globe pass produces NaN, which made the irradiance term NaN and rendered the
- * whole frame BLACK. With the basemap off it read (0,0,0), which the pass's own
- * `degenerate` test skipped lighting for. Re:Earth's quantized-mesh terrain,
- * requested with `requestVertexNormals`, is what fills it with real normals;
- * browser-verified with the Esri basemap draped on top, the exact case that
- * used to go black. The cost of the old workaround — every fragment lit by the
- * ellipsoid normal, so a north wall received the same irradiance as a south
- * roof — is gone with it.
- *
- * Reported rather than propagated, like every other engine push in this file:
- * an engine build that refuses the update leaves a dim scene, not a dead one.
+ * `lit` is written rather than inherited: the engine defaults to `true`, but
+ * this app's calibration should be stated where its exposure and its "no
+ * ambient fill" rule are, so a future default flip cannot silently take the
+ * shadows with it. Reported rather than propagated, like every other engine
+ * push in this file.
  */
-function enableAtmosphericLighting(scene: PhotorealScene | undefined): void {
-  const aerialPerspective = scene?.aerialPerspective;
-  if (!aerialPerspective) return;
-  applyToEngine("the atmospheric irradiance lighting mode", () =>
-    aerialPerspective.update({
-      aerialPerspective: { irradiance: true, useNormalBuffer: true },
-    }),
-  );
+function applyForwardLighting(view: Pick<ThreeView, "lit">): void {
+  applyToEngine("the forward-lit calibration", () => {
+    view.lit = true;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +499,7 @@ function enableAtmosphericLighting(scene: PhotorealScene | undefined): void {
 //
 //   * a theme NEVER writes a user store, and never touches `atmosphere.date`
 //     (solar time — see the spec's solar-hygiene note). It darkens a scene with
-//     exposure, albedo scale, probe intensity and sky visibility, all of which
+//     exposure, sun intensity, probe intensity and sky visibility, all of which
 //     are presentation;
 //   * leaving a theme RESTORES, and restores to the engine's own defaults —
 //     which is why the four constants below are values read out of the 0.0.5
@@ -505,8 +515,12 @@ const PHOTOREAL_STARS = { pointSize: 1, intensity: 10 } as const;
  *  option straight through and adds no default of its own. */
 const PHOTOREAL_SKY_LIGHT_PROBE_INTENSITY = 1;
 
-/** `AerialPerspectiveEffect`'s default: full albedo through the atmosphere. */
-const PHOTOREAL_AP_ALBEDO_SCALE = 1;
+/** `SunLightOptions.intensity`'s default in `@navaramap/three-default-descs`. */
+const PHOTOREAL_SUN_INTENSITY = 1;
+
+/** The sun's cascaded-shadow-map tuning lives in `shadowQuality.ts` (one
+ *  row per quality level; the store picks the level) and is written together
+ *  with `castShadow` below. */
 
 /** `DEFAULT_TONE_MAPPING_OPTIONS.mode` in the same bundle. */
 const PHOTOREAL_TONE_MAPPING_MODE = ToneMappingMode.AGX;
@@ -648,7 +662,7 @@ function createThemeEnvironmentState(): ThemeEnvironmentState {
 /**
  * Add a theme-owned mesh ONCE, then toggle and update it.
  *
- * Never added and deleted per switch, for the reason CLAUDE.md's Known Issue
+ * Never added and deleted per switch, for the reason docs/architecture-notes.md's Known Issue
  * (f) records for effects and which applies just as well here: a create/destroy
  * cycle per theme change is a cost (and a potential leak) paid every time the
  * user tries the menu, where `visible` is a flag flip.
@@ -887,24 +901,17 @@ function applyThemeEnvironment(
     );
   }
 
-  const aerialPerspective = scene?.aerialPerspective;
-  if (aerialPerspective) {
-    // The FULL calibration every time, never `albedoScale` alone. The live
-    // pass applies updates per-field, but `onUpdateConfig` also does
-    // `Object.assign(this.config, e)` — REPLACING the whole
-    // `aerialPerspective` key in the stored config — and any later internal
-    // pass rebuild reconstructs from that config. An albedoScale-only write
-    // therefore stripped `irradiance`/`useNormalBuffer` from the config, and
-    // the first rebuild after a theme switch reconstructed the pass without
-    // the irradiance term: every albedo pixel black at any exposure, with
-    // only HDR edge lines surviving (browser-diagnosed, 2026-08-06).
-    applyToEngine("the theme's aerial-perspective albedo scale", () =>
-      aerialPerspective.update({
-        aerialPerspective: {
-          irradiance: true,
-          useNormalBuffer: true,
-          albedoScale: env.apAlbedoScale ?? PHOTOREAL_AP_ALBEDO_SCALE,
-        },
+  const sun = scene?.sun;
+  if (sun) {
+    // The key light. `SunLightDesc.onUpdateConfig` MERGES a partial `sun`
+    // block into its stored config and applies each field live, so this
+    // write and the shadow toggle's `castShadow` write (a separate effect)
+    // never clobber each other — unlike the aerial-perspective pass, whose
+    // config keys are REPLACED whole (Known Issue (j)) and which a theme
+    // therefore never writes at all.
+    applyToEngine("the theme's sun intensity", () =>
+      sun.update({
+        sun: { intensity: env.sunIntensity ?? PHOTOREAL_SUN_INTENSITY },
       }),
     );
   }
@@ -1193,7 +1200,13 @@ function removeGoogleTiles(handles: SourceLayerHandles): void {
 
 export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
   function NavaraViewport(props, ref) {
-    const { onFps, onTriangleCount, onLayerError, onCursorPosition } = props;
+    const {
+      onFps,
+      onTriangleCount,
+      onLayerError,
+      onCursorPosition,
+      onAttributionChange,
+    } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<ViewInstance | null>(null);
     const cityPluginRef = useRef<CityJSONPlugin | null>(null);
@@ -1247,6 +1260,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const tilesWanted = useTilesStore((s) => s.enabled);
     /** Which basemap the user picked. */
     const basemapId = useBasemapStore((s) => s.basemapId);
+    const customBasemap = useBasemapStore((s) => s.custom);
     const heatmapSettings = useBasemapStore((s) => s.heatmap);
     /** Photoreal / cartoon / cyber / wireframe. What it MEANS is
      *  `sceneThemePolicy.ts`; this component only applies it. */
@@ -1271,6 +1285,39 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /** The user's own GeoJSON / XYZ / 3D-Tiles layers. Reconciled into engine
      *  source+layer pairs by `geoLayerSync.ts`. */
     const geoLayers = useGeoLayerStore((s) => s.layers);
+    const geoQueries = useQueryStore((s) => s.queries);
+    const geoVisibleFeatureIds = useMemo(
+      () =>
+        Object.fromEntries(
+          geoLayers
+            .filter((layer) => layer.kind === "geojson")
+            .map((layer) => {
+              const applied = layerQuery(
+                { queries: geoQueries },
+                layer.id,
+              ).applied;
+              return [
+                layer.id,
+                applied === null
+                  ? null
+                  : new Set<string>(
+                      filterGeoRecords(
+                        geoRecords(layer.config.preparedData),
+                        applied,
+                      ).map((row) => geoRecordId(row)),
+                    ),
+              ];
+            }),
+        ),
+      [geoLayers, geoQueries],
+    );
+    /** Pulled out as a scalar so the layer-sync effect can count the workspace
+     *  (and re-run when a geo layer comes or goes) without depending on the
+     *  array itself. */
+    useEffect(() => {
+      useGeoFeatureVisibilityStore.setState({ visible: geoVisibleFeatureIds });
+    }, [geoVisibleFeatureIds]);
+    const geoLayerCount = geoLayers.length;
     /** 2D / 2.5D / 3D. What it MEANS is `viewModePolicy.ts`; this component
      *  only applies it to the engine (controller flags + one entry flight). */
     const viewMode = useViewModeStore((s) => s.mode);
@@ -1293,6 +1340,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       (s) => s.aerialPerspectiveEnabled,
     );
     const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
+    const shadowQuality = useRenderDebugStore((s) => s.shadowQuality);
     const exposure = useRenderDebugStore((s) => s.exposure);
     /** The exposure actually written to the engine: the theme's, or — when the
      *  theme names none — the user's Advanced Settings slider. The store is
@@ -1318,12 +1366,26 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /** The coverage the pass should be BORN with. A ref, so the add effect
      *  below can read the current value without depending on it. */
     const cloudCoverageRef = useRef(cloudCoverage);
-    /** Bumped by the sync effect when a layer was newly added, which is the
-     *  only thing that triggers an automatic fit. */
+    /** Bumped by the sync effect when the FIRST layer of an empty workspace
+     *  was added, which is the only thing that triggers an automatic fit. */
     const [fitToken, setFitToken] = useState(0);
     /** The last `fitToken` the fit effect below acted on (or deliberately
      *  dropped), so one token can never be served twice. */
     const handledFitTokenRef = useRef(0);
+    // A restored viewpoint outranks first-layer framing even when React syncs
+    // the model after App has released its temporary restore suppression.
+    const restoredCameraRef = useRef(false);
+    /**
+     * How many layers the workspace held at the end of the last sync — city
+     * rows (static AND streaming) plus geo overlays.
+     *
+     * This, not `liveRef.size`, is what "an empty workspace" means. `liveRef`
+     * holds static handles only: a workspace whose first layer is a `.fcb` or
+     * a GeoJSON overlay has NO live handle, so keying the fit on that count
+     * would yank the camera away from what the user is already looking at the
+     * moment their first CityJSON file lands beside it (Task 6, M12.1).
+     */
+    const previousLayerCountRef = useRef(0);
     const layers = useLayerStore((s) => s.layers);
     /**
      * Which layer ids currently have a stream registered, as one string.
@@ -1437,7 +1499,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           // holds the view before init has started, so the ordered list is the
           // ONLY registration point.
           const defaultPlugin = new DefaultPlugin();
-          const cityPlugin = new CityJSONPlugin();
+          // Both plugins take the SAME brand colours, so a picked surface is
+          // painted identically whether it came from a file or a stream.
+          const cityPlugin = new CityJSONPlugin({
+            colors: CITY_COLORS,
+          });
           // Streaming is the one OPTIONAL capability of the three: a build (or
           // a browser) in which this constructor throws must still show static
           // layers, so the failure is recorded and re-raised only at the point
@@ -1454,6 +1520,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                 width: container.clientWidth,
                 height: container.clientHeight,
               }),
+              colors: CITY_COLORS,
             });
             flatPluginErrorRef.current = null;
           } catch (error) {
@@ -1502,7 +1569,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                 // rather than a call next to the constructor. The RETURN VALUE
                 // is kept: those handles are the only way to drive the sky,
                 // the sun and the post chain afterwards (see PhotorealScene).
-                afterInit: () => {
+                afterInit: (liveView) => {
                   const scene = defaultPlugin.addDefaultPhotorealScene() as
                     | PhotorealScene
                     | undefined;
@@ -1515,7 +1582,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                   // through the previous engine's handles over a live view.
                   if (cancelled) return;
                   photorealRef.current = scene ?? null;
-                  enableAtmosphericLighting(scene);
+                  // The session hands the hook its `NavaraViewLike` slice; it
+                  // IS the `ThreeView` built by `createView` above.
+                  applyForwardLighting(liveView as ThreeView);
                 },
               },
               { key: "cityjson", instance: cityPlugin },
@@ -1528,6 +1597,16 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           const result = await session.ready;
           if (cancelled) return;
 
+          // Allow manual rotation immediately. Navara needs a nonzero spin
+          // duration for drag updates; 1 ms avoids noticeable release inertia.
+          result.view.camera.options = {
+            enableSpin: viewModePolicy(useViewModeStore.getState().mode)
+              .enableSpin,
+            // A zero duration also disables manual spin in Navara.
+            spinDuration: 1,
+            enableTilt: viewModePolicy(useViewModeStore.getState().mode)
+              .enableTilt,
+          };
           viewRef.current = result.view;
           cityPluginRef.current = cityPlugin;
           flatPluginRef.current = flatPlugin;
@@ -1612,6 +1691,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // mount re-adds every layer from the store instead of trusting stale
         // entries whose meshes have been disposed.
         live.clear();
+        // With them, the workspace size the fit is keyed on: refs survive a
+        // remount of the same instance, and a rebuilt view comes up on the
+        // default globe camera. Those re-added layers are the first content of
+        // the new scene and must earn their one fit (Task 6).
+        previousLayerCountRef.current = 0;
+        restoredCameraRef.current = false;
         // Same reasoning for the geospatial pairs, but they are DELETED rather
         // than merely forgotten: they are ordinary engine layers and sources,
         // and this runs before `session.dispose()` (which only happens once
@@ -1716,7 +1801,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // The theme's override wins over the picker while it is in force, and
       // the picker wins again the moment it is not.
       const option = applyHeatmapSettings(
-        basemapById(effectiveBasemapId),
+        (effectiveBasemapId === "custom"
+          ? customBasemapOption(customBasemap)
+          : null) ?? basemapById(effectiveBasemapId),
         heatmapSettings,
       );
       const handles = addBasemap(view, option);
@@ -1727,7 +1814,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setActiveBasemap(null);
         if (viewRef.current === view) removeBasemap(handles);
       };
-    }, [engineReady, effectiveBasemapId, heatmapSettings]);
+    }, [engineReady, effectiveBasemapId, heatmapSettings, customBasemap]);
 
     // --- The user's geospatial layers (GeoJSON / XYZ raster / 3D Tiles) ---
     //
@@ -1757,6 +1844,36 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         makeEngineColor,
       );
     }, [engineReady, geoLayers]);
+
+    // The engine's default forward-lighting shader samples cloud shadows but
+    // discards their transmittance. Bridge that branch without re-lighting albedo.
+    useEffect(() => {
+      if (!engineReady || !cloudsWanted || !postProcessingEnabled) return;
+      const ap = photorealRef.current?.aerialPerspective as unknown as
+        | {
+            ref?: {
+              raw?: {
+                rawEffect?: {
+                  getFragmentShader: () => string;
+                  setFragmentShader: (shader: string) => void;
+                };
+              };
+            };
+          }
+        | undefined;
+      const effect = ap?.ref?.raw?.rawEffect;
+      if (!effect) return;
+      const original = effect.getFragmentShader();
+      try {
+        effect.setFragmentShader(forwardCloudShadowShader(original));
+      } catch (error) {
+        console.error("Cloud shadows could not be restored", error);
+        return;
+      }
+      return () => {
+        effect.setFragmentShader(original);
+      };
+    }, [engineReady, cloudsWanted, postProcessingEnabled]);
 
     // --- Volumetric clouds ---
     //
@@ -1814,6 +1931,15 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // per pointer move. The separate effect below pushes it instead.
     }, [engineReady, postProcessingEnabled, cloudsWanted]);
 
+    // Cloud shadows are a separate engine flag from the sun's geometry maps.
+    useEffect(() => {
+      const handle = cloudsHandleRef.current;
+      if (!handle) return;
+      applyToEngine("cloud shadows", () =>
+        handle.update({ clouds: { shadows: sunShadowsEnabled } }),
+      );
+    }, [engineReady, cloudsWanted, postProcessingEnabled, sunShadowsEnabled]);
+
     // Coverage -> the live pass, without rebuilding it.
     useEffect(() => {
       cloudCoverageRef.current = cloudCoverage;
@@ -1837,10 +1963,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // physically-scaled radiance, so at exposure 1 the whole city sits in the
     // bottom of the curve — dim, low-contrast and blue-grey.
     //
-    // 10 is not a taste setting, it is the exposure the PHYSICAL-ATMOSPHERE
-    // calibration is defined at, which is why the rest of the scene had to move
-    // to that calibration rather than the exposure move to the scene: unlit
-    // albedo everywhere, lit by `enableAtmosphericLighting`, no ambient fill.
+    // 10 is not a taste setting, it is the exposure the engine's forward-lit
+    // calibration is defined at (`applyForwardLighting`): the sun and the sky
+    // probe carry physically-scaled radiance, and no ambient fill is stacked
+    // on top of them.
     // Driven from the store so the slider in Advanced Settings is the same knob
     // rather than a second one.
     useEffect(() => {
@@ -1856,12 +1982,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
 
     // NO ambient fill light. The app used to add one
     // (`view.addLight({ ambient })`, default intensity 0.6) on top of the
-    // photoreal scene's sun and sky probe, which made sense while the city
-    // meshes were lit materials. They are unlit albedo now and the
-    // aerial-perspective pass lights the frame from the physical atmosphere
-    // (`enableAtmosphericLighting`), so a flat fill term is energy stacked on
-    // an image already calibrated for exposure 10 — one of the three things
-    // that pushed every roof to white.
+    // photoreal scene's sun and sky probe. The sky probe IS the ambient term
+    // — sampled from the atmosphere, so it follows the time of day — and a
+    // flat fill on top of it is energy stacked on an image already calibrated
+    // for exposure 10, one of the three things that once pushed every roof to
+    // white. A theme that wants its ground darker turns the sun and the probe
+    // down (`sceneThemePolicy`), never adds a light.
 
     // --- The post chain: aerial perspective, lens flare, antialiasing ---
     //
@@ -1915,7 +2041,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // --- The scene theme's environment ---
     //
     // One effect for the sky, the stars, the two theme-owned meshes, the globe,
-    // the tone curve, the aerial-perspective albedo and the sky-light probe —
+    // the tone curve, the sun's intensity and the sky-light probe —
     // everything `sceneThemePolicy.ts` puts in the `environment` block. The
     // exposure, the basemap, the Google tiles, the clouds and the lens flare
     // are deliberately NOT here: each already has one owner, and the theme is
@@ -1960,15 +2086,25 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     //
     // `SunLightDesc` owns the cascaded shadow maps, so the switch is a config
     // update on its handle (`{ sun: { castShadow } }`) rather than a `visible`
-    // — hiding the light would take the scene's only key light with it.
+    // — hiding the light would take the scene's only key light with it. The
+    // quality row (map size, bias, margin — see `shadowQuality.ts`) rides
+    // along, re-written whole on a level change; the theme's `intensity` is
+    // a separate write, which is safe because the descriptor MERGES partial
+    // `sun` blocks. The engine re-allocates the maps on a live `shadowMapSize`
+    // write (browser-probed: the render-time lights' `shadow.map` follows).
     useEffect(() => {
       const scene = photorealRef.current;
       if (!engineReady || scene?.sun === undefined) return;
       const sun = scene.sun;
       applyToEngine("the sun shadow toggle", () =>
-        sun.update({ sun: { castShadow: sunShadowsEnabled } }),
+        sun.update({
+          sun: {
+            castShadow: sunShadowsEnabled,
+            ...shadowTuningFor(shadowQuality),
+          },
+        }),
       );
-    }, [engineReady, sunShadowsEnabled]);
+    }, [engineReady, sunShadowsEnabled, shadowQuality]);
 
     // --- Container resize -> engine resize ---
     //
@@ -2158,7 +2294,17 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      * rejection with no stack pointing here (Task C13 fold-in); the no-plugin
      * branch above, by contrast, throws synchronously into its caller.
      */
-    const withSettleSuppressed = useCallback((move: () => void): void => {
+    // `move` may return the engine's `flyTo` promise, and every flight here
+    // does: since Navara 0.1.0 that promise settles at the END of the flight
+    // (`true`), or when a newer flight or a `setCamera` supersedes it
+    // (`false`, never a rejection), so `suppressSettleThenCommit` holds the
+    // gate for the whole animation and fires the owed commit `FLYTO_QUIET_MS`
+    // after the camera has landed — the destination the user is looking at,
+    // not a point along the way. 0.0.5's `flyTo` returned nothing, so the
+    // quiet window used to start at TAKE-OFF and could expire mid-flight on a
+    // long one. Returning the promise from every site, rather than `void`ing
+    // it at some, is what keeps a search flight and a fit on one timing.
+    const withSettleSuppressed = useCallback((move: () => unknown): void => {
       const plugin = flatPluginRef.current;
       if (!plugin) {
         move();
@@ -2205,6 +2351,38 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         withSettleSuppressed(() => view.flyTo(framedForMode(bounds)));
       },
       [boundsOf, framedForMode, withSettleSuppressed],
+    );
+
+    const fitObjects = useCallback(
+      (layerId: string, objectIds: readonly string[]) => {
+        if (objectIds.length === 0) return;
+        const view = viewRef.current;
+        const layer = layers.find((entry) => entry.id === layerId);
+        if (!view || !layer) return;
+        // A stream only retains cells near the camera. A missing selection must
+        // stay unavailable; falling back to its header would be a whole-layer fit.
+        const model = layer.isStreaming
+          ? useStreamStore
+              .getState()
+              .streams[layerId]?.handle.getResidentModel()
+          : layer.model;
+        if (!model) return;
+        const bbox: BBox3 | null = selectedObjectBounds(model, objectIds);
+        const epsg = epsgForLayer(layer.model.metadata.referenceSystem);
+        if (!bbox || epsg === null) return;
+        const rawBounds = geodeticBoundsFromBBox(bbox, epsg);
+        const heightOffset =
+          liveRef.current.get(layerId)?.handle.heightOffset?.() ??
+          streamsRef.current.get(layerId)?.heightOffset?.() ??
+          0;
+        const bounds: GeodeticBounds = {
+          ...rawBounds,
+          minHeight: rawBounds.minHeight + heightOffset,
+          maxHeight: rawBounds.maxHeight + heightOffset,
+        };
+        withSettleSuppressed(() => view.flyTo(framedForMode(bounds)));
+      },
+      [framedForMode, layers, withSettleSuppressed],
     );
 
     const fitBounds = useCallback(
@@ -2287,7 +2465,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           roll: 0,
         };
         withSettleSuppressed(() =>
-          view.flyTo(next, durationMs ?? SEARCH_FLIGHT_MS),
+          view.flyTo(next, { duration: durationMs ?? SEARCH_FLIGHT_MS }),
         );
       },
       [withSettleSuppressed],
@@ -2302,6 +2480,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const plugin = cityPluginRef.current;
       if (!engineReady || !plugin) return;
       const before = liveRef.current.size;
+      // Read BEFORE the sync updates it below: this is the workspace as it was
+      // when this effect last ran.
+      const workspaceWasEmpty = previousLayerCountRef.current === 0;
       syncLayers(
         {
           get: (id) => plugin.getHandle(id),
@@ -2313,6 +2494,13 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
               // Built filtered, so a restored layer never renders one frame of
               // the geometry it was saved with hidden.
               hiddenTypes: layer.hiddenTypes,
+              appearance: layer.selectedAppearance,
+              // Texture images are the DATASET's: a relative `image` path
+              // resolves against the URL the layer came from, never against
+              // the app. A local file has no URL, so its relative images
+              // stay unresolved (the mesh warns once and draws colours).
+              textureBaseUrl:
+                layer.modelRef.type === "url" ? layer.modelRef.url : null,
             }),
         },
         layers,
@@ -2335,25 +2523,48 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       onTriangleCount(
         totalTriangles(layers, liveRef.current, streamsRef.current),
       );
-      // Only a NEW layer earns a camera move: a visibility toggle, a LoD
-      // change or a rule edit must not yank the camera out from under the user.
-      if (liveRef.current.size > before) setFitToken((t) => t + 1);
+      // The workspace count as of THIS pass, for the next one to compare
+      // against. Streaming layers are rows of `layerStore` like any other
+      // (`openStreamingLayer` mints one), so `layers.length` already counts
+      // them — `streamsRef` would double-count.
+      if (
+        previousLayerCountRef.current > 0 &&
+        layers.length + geoLayerCount === 0
+      ) {
+        // Removing every layer starts a fresh scene, even when App retains
+        // the mounted viewport. Its next first layer should frame normally.
+        restoredCameraRef.current = false;
+      }
+      previousLayerCountRef.current = layers.length + geoLayerCount;
+      // Only the FIRST layer of an empty workspace earns a camera move. A
+      // visibility toggle, a LoD change or a rule edit adds no handle; a second
+      // file adds one, but the user has already framed a view and an automatic
+      // flight would steal it — "Zoom to layer" is how they go and look at the
+      // new one (Task 6, M12.1). Both halves matter: `> before` is what makes
+      // this an ADD, and `workspaceWasEmpty` is what makes it the first.
+      if (liveRef.current.size > before && workspaceWasEmpty) {
+        setFitToken((t) => t + 1);
+      }
       // `themePolicy.meshStyle` is a dependency, not a ref read: a theme change
       // has to bring this effect back so the live handles are re-styled.
+      // `geoLayerCount` likewise: the count above has to stay current, or a
+      // city layer landing in a geo-only workspace would read it as empty.
     }, [
       engineReady,
       layers,
+      geoLayerCount,
       onTriangleCount,
       onLayerError,
       themePolicy.meshStyle,
     ]);
 
-    // Fit once whenever a layer is newly added. Separate from the sync effect
-    // so the fit runs after the handles exist and `boundsOf` can see them.
+    // Fit once whenever the first layer of an empty workspace is added.
+    // Separate from the sync effect so the fit runs after the handles exist
+    // and `boundsOf` can see them.
     useEffect(() => {
       if (fitToken === 0) return;
       // ONCE per token, and consumed even when the fit is skipped below. Two
-      // reasons: `fitAll`'s identity changes whenever `boundsOf` does, which
+      // reasons: `boundsOf` changes when the layer bounds change, which
       // re-runs this effect on a token it has already served; and a fit
       // suppressed by a restore must be DROPPED, not left pending to fire
       // after that restore's camera has landed.
@@ -2362,9 +2573,25 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // A restore adds layers to get where it is going and then sets the
       // camera it saved. Fitting to those layers would overwrite exactly that
       // camera — see `autoFitSuppression.ts` (Task C26).
-      if (isAutoFitSuppressed()) return;
-      fitAll();
-    }, [fitToken, fitAll]);
+      if (isAutoFitSuppressed() || restoredCameraRef.current) return;
+      const view = viewRef.current;
+      const bounds = boundsOf();
+      if (!view || !bounds) return;
+      // Initial content should appear in place, without a flight from the globe.
+      const next = framedForMode(bounds);
+      withSettleSuppressed(() => {
+        view.setCamera(next);
+        publishCommandedPose(next);
+        requestPoseSeed();
+      });
+    }, [
+      fitToken,
+      boundsOf,
+      framedForMode,
+      withSettleSuppressed,
+      publishCommandedPose,
+      requestPoseSeed,
+    ]);
 
     // --- stream store -> the interaction registry (Task C13) ---
     //
@@ -2380,9 +2607,42 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const store = useStreamStore.getState();
       const unsubscribes: Array<() => void> = [];
       const present = new Set<string>();
-      /** A streaming layer joined the registry on this pass — the streaming
-       *  half of the layer effect's "only a NEW layer earns a camera move". */
-      let added = false;
+      /**
+       * A stream registered on this pass into a workspace that holds NOTHING
+       * but that stream's own row — the streaming half of "only the first
+       * layer of an empty workspace earns a camera move".
+       */
+      let fitFirstStream = false;
+      /**
+       * The workspace as ROWS, which is the one authority both fit producers
+       * answer to (Task 22, M12.2). The static side has always counted rows
+       * (`previousLayerCountRef`); this side used to count the two live
+       * REGISTRIES instead, and the two disagreed in both directions:
+       *
+       *   * a static row whose add is still in flight — or one the engine
+       *     refused — never reaches `liveRef`, so a registry test called a
+       *     workspace with a visible row in it empty and flew away from it;
+       *   * a geo-only workspace was invisible to it entirely.
+       *
+       * Read imperatively rather than from the effect's `layers`/`geoLayers`
+       * closures because what matters is the workspace AT REGISTRATION: this
+       * effect is re-entered by `streamIds` when an open lands, and the stores
+       * are the freshest account of what the user is looking at by then.
+       *
+       * The stream's OWN row already exists when its handle registers
+       * (`openStreamingLayer` mints the row first and registers the handle
+       * only when the header lands), which is why the predicate is "one row,
+       * and it is mine" rather than "no rows" — a plain emptiness test would
+       * drop the very fit a first `.fcb` needs most. Any OTHER city row —
+       * registered or not — means the workspace was not empty, and so does any
+       * geo row.
+       */
+      const cityRows = useLayerStore.getState().layers;
+      const geoRows = useGeoLayerStore.getState().layers;
+      const isOnlyRow = (layerId: string): boolean =>
+        cityRows.length === 1 &&
+        cityRows[0]!.id === layerId &&
+        geoRows.length === 0;
 
       for (const layer of layers) {
         if (!layer.isStreaming) continue;
@@ -2398,7 +2658,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         )?.handle;
         if (!handle) continue;
         present.add(layer.id);
-        if (!streams.has(layer.id)) added = true;
+        if (!streams.has(layer.id) && isOnlyRow(layer.id)) {
+          fitFirstStream = true;
+        }
         streams.set(layer.id, handle);
         // Rules, LoD and visibility — the streaming replacement for
         // `syncLayers` + `syncStyles`, memoised per layer (`handleSync.ts`).
@@ -2440,15 +2702,21 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       }
 
       onTriangleCount(totalTriangles(layers, liveRef.current, streams));
-      // A newly opened stream earns the same one-off fit a newly added static
-      // layer does — and needs it MORE: a streaming layer only fetches cells
-      // once the camera is close enough for the cover to fit the budget, so a
-      // `.fcb` opened as the first layer would otherwise sit on a whole-globe
-      // camera reporting "Zoom in to load features" forever, with nothing on
-      // screen to aim at. `getBoundsGeodetic` answers from the header extent
-      // (plugin, Task C14), so this frames the file before a single cell has
-      // arrived.
-      if (added) setFitToken((t) => t + 1);
+      // The FIRST stream of an empty workspace earns the same one-off fit the
+      // first static layer does — and needs it MORE: a streaming layer only
+      // fetches cells once the camera is close enough for the cover to fit the
+      // budget, so a `.fcb` opened into an empty viewer would otherwise sit on
+      // a whole-globe camera reporting "Zoom in to load features" forever, with
+      // nothing on screen to aim at. `getBoundsGeodetic` answers from the
+      // header extent (plugin, Task C14), so this frames the file before a
+      // single cell has arrived.
+      //
+      // A stream joining a workspace that already has something in it — a city
+      // row, registered or not, or a geospatial overlay — does NOT fit: the
+      // rule is about layers, not formats, and the camera the user arranged
+      // around what is already there outranks the new file (Task 6, M12.1;
+      // Task 22, M12.2). "Zoom to layer" is how they go and look at it.
+      if (fitFirstStream) setFitToken((t) => t + 1);
       return () => {
         for (const off of unsubscribes) off();
       };
@@ -2651,9 +2919,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       let lights: unknown[];
       try {
         lights = sites.map((site) => ({
+          // DEGREES: since Navara 0.1.0 every geodetic helper takes and
+          // returns degrees (`flyTo` and `camera.positionGeographic` always
+          // did); the radian conversion 0.0.5 needed here is gone.
           position: geodeticToVector3({
-            lng: degreeToRadian(site.lng),
-            lat: degreeToRadian(site.lat),
+            lng: site.lng,
+            lat: site.lat,
             height: site.height,
           }),
           color: site.color,
@@ -2733,9 +3004,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const height = (bounds?.maxHeight ?? 0) + PRECIPITATION_HEIGHT_M;
       let mesh: { delete: () => void } | null = null;
       try {
+        // Degrees in, as everywhere in the 0.1.x API.
         const position = geodeticToVector3({
-          lng: degreeToRadian(latLon.lon),
-          lat: degreeToRadian(latLon.lat),
+          lng: latLon.lon,
+          lat: latLon.lat,
           height,
         });
         mesh = view.addMesh(
@@ -2921,11 +3193,24 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // geo sync effect uses, because `geoLayerSync` keeps it on the entry to
       // re-apply through when the engine recreates a feature set.
       syncGeoHighlight(geoSelection, geoLiveRef.current, makeEngineColor);
+      syncGeoFeatureVisibility(
+        geoVisibleFeatureIds,
+        geoLiveRef.current,
+        makeEngineColor,
+      );
       // `streamIds`: a handle that joins the registry AFTER its layer appeared
       // (the open resolves a tick later) must be told the current selection,
       // not only whatever arrives next. The memo is keyed by handle identity,
       // so this costs one push per newly opened stream and nothing else.
-    }, [engineReady, layers, streamIds, selections, hovered, geoSelection]);
+    }, [
+      engineReady,
+      layers,
+      streamIds,
+      selections,
+      hovered,
+      geoSelection,
+      geoVisibleFeatureIds,
+    ]);
 
     // --- engine pointer events -> pick intents + the cursor readout ---
     useEffect(() => {
@@ -2969,7 +3254,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const throttleCursor = createThrottle(66);
       const clickGate = createClickGate();
 
-      const reportCursor = (point: ScreenPoint, hitLayerId?: string) => {
+      const reportCursor = (point: ScreenPoint) => {
         if (!onCursorPosition) return;
         throttleCursor(() => {
           const ecef = view.pickDepthPosition(point.x, point.y);
@@ -2980,50 +3265,26 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             onCursorPosition(null);
             return;
           }
-          // No hit means the cursor is on the terrain rather than a model; the
-          // readout then speaks the first layer's CRS, which is the only CRS
-          // the user has asked to see.
-          const layerId = hitLayerId ?? layers[0]?.id;
-          const layer = layers.find((l) => l.id === layerId);
-          const epsg = epsgForLayer(layer?.model.metadata.referenceSystem);
-          if (epsg === null) {
-            onCursorPosition(null);
-            return;
-          }
+          // Status coordinates are always WGS84, including terrain with no
+          // city layer. Do not reuse the source-CRS cursor conversion here.
           const lle = vector3ToGeodetic(ecef);
-          onCursorPosition(
-            crsFromGeodetic(
-              // RADIANS in, degrees out. Evidence, not assumption: the B1 spike
-              // placed its probe mesh with the exact inverse of this call —
-              // `geodeticToVector3({ lng: degreeToRadian(site.lng), lat:
-              // degreeToRadian(site.lat), height })` (`src/spike/
-              // navaraMrtSpike.ts`) — and the mesh rendered at the right place
-              // on the globe in the browser. The engine's `LatLngHeight` is
-              // degrees elsewhere in its own API (`flyTo`,
-              // `camera.positionGeographic`), so this must stay explicit.
-              radianToDegree(lle.lng),
-              radianToDegree(lle.lat),
-              // ELLIPSOIDAL -> ORTHOMETRIC. The layer sits `heightOffset`
-              // metres up because its geodetic heights were raised by the geoid
-              // undulation (Global Constraints -> Vertical datum); subtracting
-              // it again yields the z the source file actually contains.
-              lle.height -
-                layerHeightOffset(layerId, liveRef.current, streamsRef.current),
-              epsg,
-            ),
-          );
+          onCursorPosition([lle.lng, lle.lat, lle.height]);
         });
       };
 
       /**
-       * The last mousemove the ENGINE reported, by object identity.
+       * The last pointermove the ENGINE reported, by object identity.
        *
-       * `convertMouseEventToMapEvent` `Object.assign`s `{ map }` onto the very
-       * DOM event it received and returns `null` when the screen ray misses the
-       * ellipsoid — so the object the engine emits IS the object our own DOM
-       * listener sees afterwards (the engine binds to the canvas, we bind to its
-       * parent, so bubbling puts the engine first). Comparing them is therefore
-       * an exact "did the engine handle this move?" test.
+       * `convertToMapEvent` `Object.assign`s `{ map }` onto the very DOM
+       * `PointerEvent` it received and returns `null` when the screen ray
+       * misses the ellipsoid — so the object the engine emits IS the object our
+       * own DOM listener sees afterwards (the engine binds to the canvas, we
+       * bind to its parent, so bubbling puts the engine first). Comparing them
+       * is therefore an exact "did the engine handle this move?" test — which
+       * is also why the container MUST listen to `pointermove`, not
+       * `mousemove`: the compatibility mouse event the browser synthesises
+       * after a pointer event is a DIFFERENT object, and comparing against it
+       * would read every move as "sky".
        */
       let lastEngineMove: unknown = null;
 
@@ -3059,13 +3320,14 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
               };
       };
 
-      const onMouseDown = (e: MouseEvent) => {
+      const onPointerDown = (e: PointerEvent) => {
         // A new gesture: whatever the last one picked is no longer the answer.
         geoPickStashRef.current = null;
         clickGate.down(canvasPointOf(e));
       };
 
-      const onMouseMove = (e: MouseEvent) => {
+      const onPointerMove = (e: PointerEvent) => {
+        if (useDrawStore.getState().active) return;
         lastEngineMove = e;
         const point = canvasPointOf(e);
         clickGate.move(point);
@@ -3086,15 +3348,19 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             store,
           );
         }
-        reportCursor(point, hit?.layerId);
+        reportCursor(point);
       };
 
-      const onClick = (e: MouseEvent) => {
+      const onClick = (e: PointerEvent) => {
+        if (useDrawStore.getState().active) return;
         const store = useSelectionStore.getState();
         if (!acceptsPointer(store.toolMode, "click")) return;
-        // The engine's `click` is the raw DOM click and fires at the end of a
-        // camera orbit too; without this, every gesture would clear the
-        // selection on mouseup.
+        // Since 0.1.1 the engine's `click` is a GESTURE (a primary-pointer
+        // press and release within `CLICK_PIXEL_TOLERANCE`), no longer the raw
+        // DOM click that used to fire at the end of every camera orbit. The
+        // gate mirrors that tolerance and is kept as defence in depth: a click
+        // whose press this component never saw (a `pointercancel` in between,
+        // a gesture begun over the sky) must not commit a selection.
         if (!clickGate.isClean()) return;
         const hit = narrowToMode(pickAt(canvasPointOf(e)), store.mode);
         // CONSUMED, whatever happens next: one engine pick belongs to one
@@ -3126,20 +3392,23 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       };
 
       /**
-       * SKY DETECTOR, and the reason the two listeners below exist at all.
+       * SKY DETECTOR, and the reason the DOM listeners below exist at all.
        *
-       * The engine emits NO pointer event — not `mousemove`, not even
-       * `mouseleave` — when the screen ray misses the ellipsoid, because
-       * `convertMouseEventToMapEvent` returns null and the emit is skipped.
-       * Relying on engine events alone therefore freezes the hover highlight
-       * and the status bar at their last on-globe values the moment the cursor
-       * moves onto the sky, and leaves them frozen if the pointer exits the
-       * canvas across a sky pixel.
+       * The engine emits NO pointer event — not `pointermove`, not even
+       * `pointerleave` — when the screen ray misses the ellipsoid, because
+       * `convertToMapEvent` returns null and the emit is skipped (still true on
+       * 0.1.1). Relying on engine events alone therefore freezes the hover
+       * highlight and the status bar at their last on-globe values the moment
+       * the cursor moves onto the sky, and leaves them frozen if the pointer
+       * exits the canvas across a sky pixel.
        *
        * The DOM always fires, so the container listens too: a move the engine
-       * did NOT claim is a move over the sky.
+       * did NOT claim is a move over the sky. POINTER events, for the identity
+       * test documented on `lastEngineMove` — and because the engine itself
+       * moved to pointer events in 0.1.1 (touch included), so listening to
+       * the mouse compatibility events here would miss every touch gesture.
        */
-      const onDomMouseMove = (e: MouseEvent) => {
+      const onDomPointerMove = (e: PointerEvent) => {
         // Feed the drag gate from here as well: a gesture that starts or moves
         // over the sky is invisible to the engine, and a stale gate would let
         // the click that ends it commit a selection.
@@ -3147,13 +3416,21 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         if (lastEngineMove === e) return;
         clearCursorState();
       };
-      const onDomMouseDown = (e: MouseEvent) => {
+      const onDomPointerDown = (e: PointerEvent) => {
         geoPickStashRef.current = null;
         clickGate.down(canvasPointOf(e));
       };
       // Leaving the canvas: unconditional, and the one case the engine's own
-      // `mouseleave` cannot be trusted for.
-      const onDomMouseLeave = () => clearCursorState();
+      // `pointerleave` cannot be trusted for.
+      const onDomPointerLeave = () => clearCursorState();
+      // The browser took the gesture over (a scroll, a system gesture, an app
+      // switch): the engine drops its pending click, and so must the gate —
+      // otherwise the next `click` the engine emits could ride on a press this
+      // component saw before the cancellation.
+      const onDomPointerCancel = () => {
+        geoPickStashRef.current = null;
+        clickGate.cancel();
+      };
 
       // The two pick paths are COMPLEMENTARY, and each covers what the other
       // cannot.
@@ -3163,35 +3440,42 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // engine's pick could only ever name a layer, never the surface inside
       // it. Geospatial layers are the mirror image — the engine draws them, the
       // app has no geometry to raycast, and the engine's per-feature batch id
-      // is exactly the granularity they need. So `pick` is subscribed, but only
-      // ever STASHED: the click below decides, and a city hit wins outright.
+      // is exactly the granularity they need. So `featureClick` (0.1.0's name
+      // for the old `pick`; the hover variants are deliberately NOT subscribed
+      // — each costs a GPU pick per frame and re-bakes the draped atlases) is
+      // subscribed, but only ever STASHED: the click below decides, and a city
+      // hit wins outright.
       //
-      // Known, accepted asymmetry: the engine skips its pick pass on ANY
-      // mousemove between mousedown and mouseup (zero tolerance), while
-      // `createClickGate` allows CLICK_DRAG_TOLERANCE_PX. A click with a 1 px
-      // jitter therefore still selects a city object but CLEARS instead of
-      // selecting a geo feature. That threshold is the engine's, not ours, and
-      // 0.0.5 exposes no way to widen it.
-      view.on("pick", onEnginePick);
-      view.on("mousedown", onMouseDown);
-      view.on("mousemove", onMouseMove);
+      // ORDER, which the stash depends on: the engine's `PickHelper` binds its
+      // `pointerup` listener before the view's own, and its click pick is
+      // synchronous, so `featureClick` always arrives BEFORE the `click` of
+      // the same gesture. Both are gated by the same `CLICK_PIXEL_TOLERANCE`
+      // (5 px; 30 for touch), which `CLICK_DRAG_TOLERANCE_PX` mirrors — the
+      // 0.0.5 asymmetry, where the engine's pick had zero tolerance and a 1 px
+      // jitter cleared a geo selection while still selecting a city object, is
+      // gone.
+      view.on("featureClick", onEnginePick);
+      view.on("pointerdown", onPointerDown);
+      view.on("pointermove", onPointerMove);
       view.on("click", onClick);
 
       const host = containerRef.current;
-      host?.addEventListener("mousemove", onDomMouseMove);
-      host?.addEventListener("mousedown", onDomMouseDown);
-      host?.addEventListener("mouseleave", onDomMouseLeave);
+      host?.addEventListener("pointermove", onDomPointerMove);
+      host?.addEventListener("pointerdown", onDomPointerDown);
+      host?.addEventListener("pointerleave", onDomPointerLeave);
+      host?.addEventListener("pointercancel", onDomPointerCancel);
 
       return () => {
-        // `pick` included: this effect re-runs on every city-layer edit, and a
-        // handler left behind would accumulate one per edit.
-        view.off("pick", onEnginePick);
-        view.off("mousedown", onMouseDown);
-        view.off("mousemove", onMouseMove);
+        // `featureClick` included: this effect re-runs on every city-layer
+        // edit, and a handler left behind would accumulate one per edit.
+        view.off("featureClick", onEnginePick);
+        view.off("pointerdown", onPointerDown);
+        view.off("pointermove", onPointerMove);
         view.off("click", onClick);
-        host?.removeEventListener("mousemove", onDomMouseMove);
-        host?.removeEventListener("mousedown", onDomMouseDown);
-        host?.removeEventListener("mouseleave", onDomMouseLeave);
+        host?.removeEventListener("pointermove", onDomPointerMove);
+        host?.removeEventListener("pointerdown", onDomPointerDown);
+        host?.removeEventListener("pointerleave", onDomPointerLeave);
+        host?.removeEventListener("pointercancel", onDomPointerCancel);
       };
     }, [engineReady, layers, onCursorPosition]);
 
@@ -3224,6 +3508,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       (state: GeographicCameraState) => {
         const view = viewRef.current;
         if (!view) return;
+        restoredCameraRef.current = true;
         // A restore is the sharpest case of a move that is not a gesture:
         // without the bracket, reopening a share link would re-fetch tiles for
         // a camera the user never touched.
@@ -3320,6 +3605,8 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const policy = viewModePolicy(viewMode);
       view.camera.options = {
         enableSpin: policy.enableSpin,
+        // A zero duration also disables manual spin in Navara.
+        spinDuration: 1,
         enableTilt: policy.enableTilt,
       };
 
@@ -3331,7 +3618,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       if (current === null) return;
       const entry = entryCameraFor(policy, current);
       if (entry === null) return;
-      withSettleSuppressed(() => view.flyTo(entry, VIEW_MODE_ENTRY_MS));
+      withSettleSuppressed(() =>
+        view.flyTo(entry, { duration: VIEW_MODE_ENTRY_MS }),
+      );
     }, [engineReady, viewMode, getCameraState, withSettleSuppressed]);
 
     /**
@@ -3376,29 +3665,6 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       () => nudgeCamera((s) => zoomedCamera(s, ZOOM_OUT_FACTOR)),
       [nudgeCamera],
     );
-    // The tilt buttons carry the MODE's clamp, not their own: `viewModePolicy`
-    // pins min === max in 2D and 2.5D, so a click there lands back on exactly
-    // the mode's angle instead of stepping out of it.
-    const tiltUp = useCallback(
-      () =>
-        nudgeCamera((s) =>
-          tiltedCamera(s, TILT_STEP_DEG, {
-            minDeg: viewModePolicy(viewMode).minPitchDeg,
-            maxDeg: viewModePolicy(viewMode).maxPitchDeg,
-          }),
-        ),
-      [nudgeCamera, viewMode],
-    );
-    const tiltDown = useCallback(
-      () =>
-        nudgeCamera((s) =>
-          tiltedCamera(s, -TILT_STEP_DEG, {
-            minDeg: viewModePolicy(viewMode).minPitchDeg,
-            maxDeg: viewModePolicy(viewMode).maxPitchDeg,
-          }),
-        ),
-      [nudgeCamera, viewMode],
-    );
     const resetNorth = useCallback(
       () => nudgeCamera(northedCamera),
       [nudgeCamera],
@@ -3426,12 +3692,55 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         );
       }, []);
 
+    const captureImage = useCallback((credits: readonly string[]) => {
+      const view = viewRef.current;
+      const canvas = containerRef.current?.querySelector("canvas");
+      if (!view || !canvas)
+        return Promise.reject(new Error("The scene is not ready to capture."));
+      return captureFrame({
+        subscribe: (callback) => {
+          view.on("postRender", callback);
+          return () => view.off("postRender", callback);
+        },
+        requestRender: () => view.forceUpdate(),
+        copy: () => copySceneImage(canvas, credits),
+      });
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
+        projectDrawingPoint: (point: readonly [number, number, number]) => {
+          const view = viewRef.current;
+          if (!view) return null;
+          const vector = geodeticToVector3({
+            lng: point[0],
+            lat: point[1],
+            height: point[2],
+          }).project(view.camera.raw);
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (!rect) return null;
+          return {
+            x: ((vector.x + 1) * rect.width) / 2,
+            y: ((1 - vector.y) * rect.height) / 2,
+          };
+        },
+        pickDrawingPoint: (x: number, y: number) => {
+          // Installed TerrainPicker samples canvas-local CSS pixels directly,
+          // despite the public method comment describing client coordinates.
+          const point = viewRef.current?.pickDepthPosition(x, y);
+          if (!point) return null;
+          const geo = vector3ToGeodetic(point);
+          return [geo.lng, geo.lat, geo.height] as const;
+        },
+        captureImage,
         fitAll,
         fitLayer,
+        fitObjects,
         fitBounds,
+        zoomIn,
+        zoomOut,
+        resetNorth,
         alignView,
         getCameraState,
         setCameraState,
@@ -3452,9 +3761,14 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         },
       }),
       [
+        captureImage,
         fitAll,
         fitLayer,
+        fitObjects,
         fitBounds,
+        zoomIn,
+        zoomOut,
+        resetNorth,
         alignView,
         getCameraState,
         setCameraState,
@@ -3473,23 +3787,6 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             The 3D engine failed to start: {initError}
           </div>
         )}
-        {/* Top-left, the one free corner (legend and scale bottom-left,
-            compass bottom-right, panels top-right) and where a map's search
-            belongs — on the map, not in the chrome. Takes `flyTo` directly
-            rather than through the app, exactly as the compass cluster below
-            takes `zoomIn`. */}
-        <AddressSearch onFlyTo={flyTo} />
-        {/* Bottom-right, above the attribution strip: the top-right is the
-            panels that open over the scene, and the bottom left is the legend
-            and the sun scrubber. Subscribes to the camera's pose itself, so a
-            moving camera never re-renders this component. */}
-        <CameraControls
-          onResetNorth={resetNorth}
-          onZoomIn={zoomIn}
-          onZoomOut={zoomOut}
-          onTiltUp={tiltUp}
-          onTiltDown={tiltDown}
-        />
         {/* The numbers behind the blue ground outline the effect above draws.
             Renders nothing unless the diagnostic is on AND a streaming layer
             has actually queried. */}
@@ -3506,6 +3803,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           googleTiles={tilesEnabled}
           basemapAttribution={activeBasemap?.attribution}
           terrainAttribution={terrainEnabled ? TERRAIN_ATTRIBUTION : undefined}
+          onLinesChange={onAttributionChange}
         />
       </div>
     );

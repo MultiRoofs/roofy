@@ -1,8 +1,8 @@
-# MultiRoof Viewer — Project Overview
+# Roofy — Project Overview
 
 ## Purpose
 
-MultiRoof Viewer is a web-based viewer and analysis workspace for 3D city models, built for the MultiRoofs project at TU Delft. The focus is urban rooftop analysis for planning, simulation, and communication.
+Roofy is a web-based viewer and analysis workspace for 3D city models, built for the MultiRoofs project at TU Delft. The focus is urban rooftop analysis for planning, simulation, and communication.
 
 ## Current Phase
 
@@ -32,7 +32,7 @@ Browser-first, no backend, no login in v1. Separated concerns:
 
 - `src/domain/` — domain types and parsing (citymodel, cityjson)
 - `src/scene/` — Three.js scene rendering
-- `src/analytics/` — DuckDB-wasm queries
+- `src/insights/` — DuckDB-wasm queries
 - `src/persistence/` — persistence interfaces (DI-based)
 - `src/features/` — feature modules
 - `src/app/` — application shell (App.tsx)

@@ -28,6 +28,67 @@ const cityparquet = vi.hoisted(() => ({
   loadCityParquetFromFiles: vi.fn(),
 }));
 
+/**
+ * The TABLE REGISTRY is faked; the call INTO it is not.
+ *
+ * Every static add now goes through `addCityLayer`, so without this the real
+ * `enqueueLayerTable` runs on every file drop in this file: it awaits
+ * `initDuckDB`, which imports `@duckdb/duckdb-wasm`, runs `selectBundle` and
+ * reaches `new Worker` under jsdom. The failure is caught and recorded, so
+ * nothing goes red — but the boot attempt outlives the test that started it
+ * and the engine's module state accumulates across this whole file. What these
+ * tests are ABOUT is routing, so the registry is the right seam to cut.
+ *
+ * `enqueueLayerTable` is the only value `addCityLayer` imports from the module
+ * (`LayerTableSource`/`SourceProvider` are types and erase), so a bare factory
+ * is enough — no `importOriginal` spread.
+ */
+const tables = vi.hoisted(() => ({
+  // Typed rather than bare, so `mock.calls[0]` is a two-element tuple a test
+  // can destructure instead of the empty one a zero-parameter fake implies.
+  enqueueLayerTable: vi.fn<(layerId: string, source: unknown) => Promise<void>>(
+    async () => {},
+  ),
+}));
+
+vi.mock("../../../../src/insights/layerTables", () => ({
+  enqueueLayerTable: tables.enqueueLayerTable,
+  // A derived layer's publication (Task 21) reaches the module through these
+  // two; the graph under test imports them whether or not this file calls one.
+  nextTableName: vi.fn(() => "layer_99"),
+  adoptLayerTable: vi.fn(),
+}));
+
+/**
+ * `loadFromUrl` PASSED THROUGH, with its arguments recorded.
+ *
+ * The URL city path hands the resolved encoding to the parser as a third
+ * argument, and nothing else in this file can see that it did — the fetch
+ * fails under Node either way, so a dropped override would look exactly like
+ * an honoured one. The real function still runs, so every other test in this
+ * file behaves as it did.
+ */
+const loadCityModel = vi.hoisted(() => ({
+  loadFromUrlArgs: vi.fn<(...args: unknown[]) => void>(),
+}));
+
+vi.mock(
+  "../../../../src/domain/citymodel/loadCityModel",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../../src/domain/citymodel/loadCityModel")
+      >();
+    return {
+      ...actual,
+      loadFromUrl: (...args: Parameters<typeof actual.loadFromUrl>) => {
+        loadCityModel.loadFromUrlArgs(...args);
+        return actual.loadFromUrl(...args);
+      },
+    };
+  },
+);
+
 vi.mock(
   "../../../../src/features/cityparquet/loadCityParquet",
   async (importOriginal) => ({
@@ -61,29 +122,39 @@ const HEADER: FcbHeaderModel = {
  *  Constraints -> NODE_IMPORT_SAFE = false). */
 let openStream: ReturnType<typeof vi.fn>;
 
+/** The handle `openStream` resolves with. Named so a test that has to control
+ *  WHEN the open resolves (the pending-row tests) can hand back the same shape
+ *  the default fake would have. */
+function fakeHandle(id: string): FcbStreamLayerHandle {
+  return {
+    id,
+    grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 3 },
+    header: HEADER,
+    level: null,
+    ladder: [],
+    typesSeen: [],
+    status: "idle",
+    message: null,
+    version: 0,
+    onStatus: () => () => undefined,
+    onLadder: () => () => undefined,
+    onTypes: () => () => undefined,
+    onAppearanceThemes: () => () => {},
+    appearanceThemes: [],
+    onCommit: () => () => undefined,
+  } as unknown as FcbStreamLayerHandle;
+}
+
 function installPlugin(): void {
   openStream = vi.fn((opts: { id: string }) =>
-    Promise.resolve({
-      id: opts.id,
-      grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 3 },
-      header: HEADER,
-      level: null,
-      ladder: [],
-      typesSeen: [],
-      status: "idle",
-      message: null,
-      version: 0,
-      onStatus: () => () => undefined,
-      onLadder: () => () => undefined,
-      onTypes: () => () => undefined,
-      onCommit: () => () => undefined,
-    } as unknown as FcbStreamLayerHandle),
+    Promise.resolve(fakeHandle(opts.id)),
   );
   setStreamPlugin({ openStream, remove: vi.fn() } as unknown as StreamPlugin);
 }
 
 beforeEach(() => {
   installPlugin();
+  tables.enqueueLayerTable.mockClear();
   useLayerStore.getState().removeAllLayers();
   useStreamStore.setState({ streams: {} });
 });
@@ -97,7 +168,9 @@ describe("useLayerFileLoader — .fcb routing", () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
     await act(async () => {
-      await result.current.addLayerFromUrl("https://x/delft.fcb");
+      await result.current.addLayerFromUrl("https://x/delft.fcb", {
+        attributeOrders: { Building: ["height", "name"] },
+      });
     });
     expect(openStream).toHaveBeenCalledTimes(1);
     expect(
@@ -107,6 +180,9 @@ describe("useLayerFileLoader — .fcb routing", () => {
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
     expect(layers[0]!.isStreaming).toBe(true);
+    expect(layers[0]!.attributeOrders).toEqual({
+      Building: ["height", "name"],
+    });
     expect(result.current.error).toBeNull();
   });
 
@@ -197,14 +273,14 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
     await act(async () => {
       await result.current.addLayerFromFile(file, {
         rules: [rule],
-        rulesEnabled: false,
+        colorBy: "surface",
         visible: false,
       });
     });
 
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.rules).toEqual([rule]);
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
   });
 
@@ -214,13 +290,13 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
 
     await act(async () => {
       await result.current.addLayerFromFile(file, {
-        rulesEnabled: false,
+        colorBy: "surface",
         visible: false,
       });
     });
 
     const layer = useLayerStore.getState().layers[0]!;
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
   });
 
@@ -268,6 +344,36 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
     expect(layers[0]!.name).toBe("compressed.city.json.gz");
   });
 
+  it("enqueues the dropped file's table under that layer's id, from its bytes", async () => {
+    // The other half of `addCityLayer`: a layer that reached the store without
+    // its table would have no table panel, no filter and no export, and
+    // nothing else in this file would notice.
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File([MINIMAL_CITYJSON], "tabled.city.json");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+
+    const layerId = useLayerStore.getState().layers[0]!.id;
+    expect(tables.enqueueLayerTable).toHaveBeenCalledTimes(1);
+    const [enqueuedId, enqueuedSource] =
+      tables.enqueueLayerTable.mock.calls[0]!;
+    const source = enqueuedSource as {
+      kind: string;
+      reader?: string;
+      extension?: string;
+      bytes?: Uint8Array;
+    };
+    expect(enqueuedId).toBe(layerId);
+    // Reader-backed, not the flat fallback: the loader HELD the bytes, so
+    // DuckDB reads the file itself rather than a flattened copy of the model.
+    expect(source.kind).toBe("bytes");
+    expect(source.reader).toBe("read_cityjson");
+    expect(source.extension).toBe("city.json");
+    expect(new TextDecoder().decode(source.bytes)).toBe(MINIMAL_CITYJSON);
+  });
+
   it("with no overrides, behaves exactly as before (fresh-layer defaults)", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
     const file = new File([MINIMAL_CITYJSON], "plain.city.json");
@@ -278,7 +384,8 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
 
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.rules).toEqual([]);
-    expect(layer.rulesEnabled).toBe(true);
+    // A fresh layer has no rules, so it colours by surface type.
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(true);
     expect(layer.lodMode).toBe("auto");
   });
@@ -380,12 +487,12 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     await act(async () => {
       await result.current.addLayerFromFiles(
         [pickedFile("delft/building.parquet")],
-        { rulesEnabled: false, visible: false },
+        { colorBy: "surface", visible: false },
       );
     });
 
     const layer = useLayerStore.getState().layers[0]!;
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
   });
 
@@ -511,5 +618,396 @@ describe("useLayerFileLoader — CityGML ZIP routing", () => {
       "The archive contains no CityGML (.gml) file.",
     );
     expect(useLayerStore.getState().layers).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-flight and failed adds — the layer list's own rows (Task 17).
+//
+// A failed add used to leave nothing on screen but a transient banner: the
+// row the user was expecting simply never appeared. `pending` and `failed`
+// give the list something to render for both halves of an add's life, so a
+// failure always leaves a visible row with a Retry on it.
+// ---------------------------------------------------------------------------
+
+describe("useLayerFileLoader — pending and failed adds", () => {
+  it("lists an in-flight add in `pending`, and drops it when the add settles", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    let release!: (handle: FcbStreamLayerHandle) => void;
+    openStream.mockReturnValueOnce(
+      new Promise<FcbStreamLayerHandle>((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    let add!: Promise<string | null>;
+    act(() => {
+      add = result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+
+    expect(result.current.pending.map((p) => p.name)).toEqual(["delft.fcb"]);
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      release(fakeHandle("l1"));
+      await add;
+    });
+
+    expect(result.current.pending).toHaveLength(0);
+    expect(result.current.failed).toHaveLength(0);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("leaves a failed add in `failed`, carrying the reason, with nothing left pending", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("refused: degrees"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/degrees.fcb");
+    });
+
+    expect(result.current.pending).toHaveLength(0);
+    expect(result.current.failed).toHaveLength(1);
+    expect(result.current.failed[0]!.name).toBe("degrees.fcb");
+    expect(result.current.failed[0]!.message).toMatch(/refused: degrees/);
+    // The old surface is untouched: App and the landing page read these.
+    expect(result.current.error).toMatch(/refused: degrees/);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("`retry()` re-runs the same add, and a second success clears the failed row", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("network down"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+    expect(result.current.failed).toHaveLength(1);
+
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    // The SAME source, asked for again.
+    expect(
+      (openStream.mock.calls.at(-1)![0] as { source: unknown }).source,
+    ).toEqual({ url: "https://x/delft.fcb" });
+    expect(result.current.failed).toHaveLength(0);
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+  });
+
+  it("`retry()` on a failed FILE add re-reads the same file", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("network down"));
+    const file = new File(["fake fcb bytes"], "local.fcb");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+    expect(result.current.failed).toHaveLength(1);
+
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    const source = (
+      openStream.mock.calls.at(-1)![0] as { source: { blob: Blob } }
+    ).source;
+    expect(source.blob).toBe(file);
+    expect(result.current.failed).toHaveLength(0);
+  });
+
+  it("`dismissFailed(id)` drops just that row", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("one"));
+    openStream.mockRejectedValueOnce(new Error("two"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/one.fcb");
+      await result.current.addLayerFromUrl("https://x/two.fcb");
+    });
+    expect(result.current.failed).toHaveLength(2);
+
+    const first = result.current.failed[0]!.id;
+    act(() => {
+      result.current.dismissFailed(first);
+    });
+
+    expect(result.current.failed.map((f) => f.name)).toEqual(["two.fcb"]);
+  });
+});
+
+describe("useLayerFileLoader — several adds at once, and retrying", () => {
+  it("stays loading until BOTH concurrent adds settle, one pending row each", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    let releaseFirst!: (handle: FcbStreamLayerHandle) => void;
+    let releaseSecond!: (handle: FcbStreamLayerHandle) => void;
+    openStream.mockReturnValueOnce(
+      new Promise<FcbStreamLayerHandle>((resolve) => {
+        releaseFirst = resolve;
+      }),
+    );
+    openStream.mockReturnValueOnce(
+      new Promise<FcbStreamLayerHandle>((resolve) => {
+        releaseSecond = resolve;
+      }),
+    );
+
+    let first!: Promise<string | null>;
+    let second!: Promise<string | null>;
+    act(() => {
+      first = result.current.addLayerFromUrl("https://x/one.fcb");
+      second = result.current.addLayerFromUrl("https://x/two.fcb");
+    });
+
+    expect(result.current.pending.map((p) => p.name)).toEqual([
+      "one.fcb",
+      "two.fcb",
+    ]);
+    // Distinct ids: they are React keys, and two rows sharing one would
+    // collapse into a single loading row.
+    expect(new Set(result.current.pending.map((p) => p.id)).size).toBe(2);
+
+    await act(async () => {
+      releaseFirst(fakeHandle("l1"));
+      await first;
+    });
+    // The FIRST to settle must not clear the spinner the second is still
+    // using — the race the old boolean `loading` lost.
+    expect(result.current.loading).toBe(true);
+    expect(result.current.pending.map((p) => p.name)).toEqual(["two.fcb"]);
+
+    await act(async () => {
+      releaseSecond(fakeHandle("l2"));
+      await second;
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.pending).toHaveLength(0);
+  });
+
+  it("a retry that fails again REPLACES its row rather than adding a second", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("first attempt"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+    expect(result.current.failed).toHaveLength(1);
+
+    openStream.mockRejectedValueOnce(new Error("second attempt"));
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    expect(result.current.failed).toHaveLength(1);
+    expect(result.current.failed[0]!.message).toMatch(/second attempt/);
+  });
+
+  it("a retry keeps the overrides the original add was given", async () => {
+    // The re-link path: a snapshot-restored layer carries its saved rules,
+    // visibility and LoD into the add. A retry that dropped them would
+    // silently revert the layer to fresh-layer defaults — the exact failure
+    // `applyPostCreateOverrides` exists to prevent.
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("network down"));
+    const file = new File(["fake fcb bytes"], "restored.fcb");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file, {
+        colorBy: "surface",
+        visible: false,
+      });
+    });
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.colorBy).toBe("surface");
+    expect(layer.visible).toBe(false);
+  });
+
+  it("never shows a bald 'Error · ' for a rejection carrying no message", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error(""));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+
+    expect(result.current.failed[0]!.message).toBe(
+      "Failed to load remote file.",
+    );
+    expect(result.current.error).toBe("Failed to load remote file.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The ENCODING override — the Add Layer dialog's correction control.
+//
+// Detection from a name is a guess (a server that serves FlatCityBuf from
+// `/model.json` is not exotic), so the dialog shows what it guessed and lets
+// the user correct it. That correction is worth nothing unless it reaches the
+// ROUTING: which arm of the loader takes the source, and which parser reads
+// the bytes. These are the end-to-end checks that it does.
+// ---------------------------------------------------------------------------
+
+describe("useLayerFileLoader — the encoding override", () => {
+  it("takes the STREAMING route for a `.json` URL overridden to FlatCityBuf", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/model.json", {
+        encoding: "flatcitybuf",
+      });
+    });
+
+    expect(openStream).toHaveBeenCalledTimes(1);
+    expect(
+      (openStream.mock.calls[0]![0] as { source: unknown }).source,
+    ).toEqual({ url: "https://x/model.json" });
+    expect(useLayerStore.getState().layers[0]!.isStreaming).toBe(true);
+  });
+
+  it("takes the STREAMING route for a `.json` FILE overridden to FlatCityBuf, as a Blob", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File(["fake fcb bytes"], "model.json");
+    const textSpy = vi.spyOn(file, "text");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file, { encoding: "flatcitybuf" });
+    });
+
+    const source = (openStream.mock.calls[0]![0] as { source: { blob: Blob } })
+      .source;
+    expect(source.blob).toBe(file);
+    expect(textSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a `.fcb` FILE off the streaming route when the override says CityJSON — and really parses it", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    // CityJSON bytes under a `.fcb` name: the override is the only thing that
+    // can route this, and the layer that lands is the proof it was honoured —
+    // "openStream was not called" alone would also be true of a crash.
+    const file = new File([MINIMAL_CITYJSON], "model.fcb");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file, { encoding: "cityjson" });
+    });
+
+    expect(openStream).not.toHaveBeenCalled();
+    const layers = useLayerStore.getState().layers;
+    expect(layers).toHaveLength(1);
+    expect(layers[0]!.isStreaming).toBe(false);
+    expect(layers[0]!.model.sourceEncoding).toBe("cityjson");
+  });
+
+  it("hands the override to `loadFromUrl` for a remote city model", async () => {
+    loadCityModel.loadFromUrlArgs.mockClear();
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/model.json", {
+        encoding: "cityjsonseq",
+      });
+    });
+
+    // The fetch fails here (no network), which is beside the point: what is
+    // pinned is that the corrected encoding reached the reader rather than
+    // being re-derived from the URL's `.json`.
+    expect(loadCityModel.loadFromUrlArgs.mock.calls[0]).toEqual([
+      "https://x/model.json",
+      undefined,
+      "cityjsonseq",
+    ]);
+  });
+
+  it("routes an extensionless URL into the CityParquet arm when the override says so", async () => {
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft-package", {
+        encoding: "cityparquet",
+      });
+    });
+
+    expect(cityparquet.loadCityParquetFromUrl).toHaveBeenCalledWith(
+      "https://x/delft-package",
+    );
+    expect(useLayerStore.getState().layers[0]!.model.sourceEncoding).toBe(
+      "cityparquet",
+    );
+  });
+
+  it("keeps a `.parquet` URL OUT of the CityParquet arm when the override says CityJSON", async () => {
+    // The reader fake is module-level and keeps its calls across this file.
+    cityparquet.loadCityParquetFromUrl.mockClear();
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/building.parquet", {
+        encoding: "cityjson",
+      });
+    });
+
+    expect(cityparquet.loadCityParquetFromUrl).not.toHaveBeenCalled();
+  });
+
+  it("hands the override to the PARSER: one text, two readings", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    // A single CityJSON line IS a one-line CityJSONSeq document, so the same
+    // bytes parse under either reader — which makes the resulting model's
+    // `sourceEncoding` a clean witness for which one ran.
+    const file = new File([MINIMAL_CITYJSON], "ambiguous.city.json");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file, {
+        encoding: "cityjsonseq",
+      });
+    });
+
+    expect(useLayerStore.getState().layers[0]!.model.sourceEncoding).toBe(
+      "cityjsonseq",
+    );
+  });
+
+  it("routes a `.city.json` file with NO override as CityJSON, exactly as before", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File([MINIMAL_CITYJSON], "delft.city.json");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+
+    expect(openStream).not.toHaveBeenCalled();
+    expect(useLayerStore.getState().layers[0]!.model.sourceEncoding).toBe(
+      "cityjson",
+    );
+  });
+
+  it("a retry re-runs the add with the SAME override", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("network down"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/model.json", {
+        encoding: "flatcitybuf",
+      });
+    });
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    // Twice: the retry took the streaming route too. Without the override in
+    // the closure it would have fetched `/model.json` as CityJSON instead.
+    expect(openStream).toHaveBeenCalledTimes(2);
+    expect(useLayerStore.getState().layers[0]!.isStreaming).toBe(true);
   });
 });

@@ -1,3 +1,4 @@
+import { customBasemapOption, type CustomBasemap } from "./customBasemap";
 /**
  * Zustand store for the selected basemap.
  *
@@ -38,11 +39,13 @@ export const HEATMAP_SETTINGS_DEFAULTS: HeatmapSettings = {
 
 export interface BasemapState {
   readonly basemapId: BasemapId;
+  readonly custom: CustomBasemap | null;
   readonly heatmap: HeatmapSettings;
 }
 
 export interface BasemapActions {
   setBasemapId: (id: BasemapId) => void;
+  setCustom: (custom: CustomBasemap) => void;
   /**
    * Merge a partial edit into the heatmap settings, keeping them SANE rather
    * than trusting the inputs: non-finite numbers are dropped, and a range
@@ -57,6 +60,10 @@ export type BasemapStore = BasemapState & BasemapActions;
 
 export const useBasemapStore = create<BasemapStore>((set, get) => ({
   basemapId: DEFAULT_BASEMAP_ID,
+  custom: null,
+  setCustom: (custom) => {
+    if (customBasemapOption(custom)) set({ custom, basemapId: "custom" });
+  },
   heatmap: HEATMAP_SETTINGS_DEFAULTS,
 
   setBasemapId: (basemapId) => set({ basemapId }),

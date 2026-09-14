@@ -43,6 +43,7 @@ function makeStreamState(overrides: Partial<StreamState> = {}): StreamState {
     ladderVersion: 0,
     types: [],
     typesVersion: 0,
+    appearanceThemes: [],
     status: "idle",
     message: null,
     version: 0,
@@ -63,7 +64,6 @@ function addLayer(): string {
     modelRef: { type: "url", url: "https://x/s.fcb" },
     visible: true,
     rules: [],
-    rulesEnabled: true,
   });
 }
 

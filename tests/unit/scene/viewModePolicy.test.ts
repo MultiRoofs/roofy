@@ -36,7 +36,7 @@ const CAMERA = {
 };
 
 describe("viewModePolicy", () => {
-  it("leaves 3D exactly as the viewer has always behaved", () => {
+  it("disables spin in 3D while retaining tilt", () => {
     const policy = viewModePolicy("3d");
     expect(policy.enableSpin).toBe(true);
     expect(policy.enableTilt).toBe(true);
@@ -45,7 +45,7 @@ describe("viewModePolicy", () => {
     expect(policy.entryPitchDeg).toBeNull();
   });
 
-  it("keeps rotation but locks tilt in 2.5D", () => {
+  it("disables spin and locks tilt in 2.5D", () => {
     const policy = viewModePolicy("2.5d");
     expect(policy.enableSpin).toBe(true);
     expect(policy.enableTilt).toBe(false);
@@ -58,7 +58,7 @@ describe("viewModePolicy", () => {
 
   it("locks both rotation and tilt in 2D, and faces north", () => {
     const policy = viewModePolicy("2d");
-    expect(policy.enableSpin).toBe(false);
+    expect(policy.enableSpin).toBe(true);
     expect(policy.enableTilt).toBe(false);
     expect(policy.minPitchDeg).toBe(PLAN_PITCH_DEG);
     expect(policy.maxPitchDeg).toBe(PLAN_PITCH_DEG);

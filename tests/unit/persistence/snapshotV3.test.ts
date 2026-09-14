@@ -1,11 +1,12 @@
 /**
  * `normalizeLayers` — what used to be `migrateSnapshot`.
  *
- * Snapshot v3 rejects older documents outright (see captureRestore.test.ts),
- * so there is no cross-VERSION migration left. What survives is the per-layer
- * normalisation that is right for any v3 document: default `lodMode` to
- * "auto" when the field is absent, and flag a file-backed streaming layer
- * `unavailable` because its bytes cannot survive a reload.
+ * The cross-VERSION migration lives in `migrateSnapshot` (v3 -> v4; see
+ * snapshotV4.test.ts) and is not what this file is about. What is here is the
+ * per-layer normalisation that is right for a document of ANY accepted
+ * version: default `lodMode` to "auto" when the field is absent, and flag a
+ * file-backed streaming layer `unavailable` because its bytes cannot survive
+ * a reload.
  */
 import { describe, it, expect } from "vitest";
 import {

@@ -1,0 +1,669 @@
+/* Approved direction B: Soft utility. Visual-only overrides are
+   intentionally authoritative over component chrome; geometry stays local. */
+:root {
+  --control-radius: 8px;
+  --control-height-compact: 30px;
+  --control-height: 38px;
+  --control-rest: #252c32;
+  --control-hover: #343d42;
+  --control-selected: #35452c;
+  --control-selected-fg: #dcebcf;
+  --layer-selected: #28332b;
+}
+html[data-theme="light"] {
+  --control-rest: #f2f4ee;
+  --control-hover: #e1e6da;
+  --control-selected: #eaf2df;
+  --control-selected-fg: #304d1d;
+  --layer-selected: #e8ece3;
+}
+body button {
+  border-color: transparent !important;
+  border-radius: var(--control-radius) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  background: var(--control-rest) !important;
+  color: var(--fg) !important;
+}
+/* Inline actions and disclosure rows belong to their containing surface. */
+body
+  button:is(
+    .layer-row-eye,
+    .layer-row-menu-btn,
+    .active-layer-section-header,
+    .active-layer-subdisclosure,
+    .legend-collapse,
+    .legend-group-title,
+    .data-sort-button,
+    .rule-drag-handle,
+    .details-close,
+    .details-copy,
+    .map-sheet__close,
+    .modal-close,
+    .address-search-close,
+    .workspace-name-btn,
+    .menu-item
+  ) {
+  background: transparent !important;
+}
+body button:hover:not(:disabled) {
+  background: var(--control-hover) !important;
+}
+body
+  button:is(
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    .is-active,
+    .is-selected,
+    .is-on,
+    .tb-btn-active,
+    .view-mode-btn-active,
+    .scene-theme-option-active
+  ),
+body .table-action-btn[aria-expanded="true"] {
+  background: var(--control-selected) !important;
+  color: var(--control-selected-fg) !important;
+}
+body button:disabled {
+  opacity: 0.45;
+}
+body button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.viewer-shell .left-panel-list {
+  padding-inline: 8px;
+}
+.viewer-shell .layer-list {
+  gap: 4px;
+}
+.viewer-shell .layer-row {
+  border: 0;
+  border-radius: var(--control-radius);
+  padding: 0.625rem 0.75rem;
+  background: transparent;
+  box-shadow: none;
+}
+.viewer-shell .layer-row:hover {
+  background: var(--control-rest);
+}
+.viewer-shell .layer-row-active,
+.viewer-shell .layer-row-active:hover {
+  background: var(--layer-selected);
+}
+.viewer-shell
+  :is(
+    .camera-cluster,
+    .select-mode-control,
+    .legend-card,
+    .address-search-open,
+    .address-search-list,
+    .map-sheet,
+    .columns-popover
+  ) {
+  border-radius: var(--control-radius);
+  background: var(--bg-panel);
+  backdrop-filter: none;
+  box-shadow: none;
+}
+.viewer-shell :is(.camera-cluster, .select-mode-control, .legend-card) {
+  border: 0;
+}
+.viewer-shell .select-mode-segment {
+  background: var(--control-rest);
+  border-radius: var(--control-radius);
+}
+.viewer-shell .rule-item {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--bg-panel);
+}
+body
+  :is(
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea
+  ) {
+  border-radius: var(--control-radius);
+}
+body :is(.modal, .header-popover, .workspace-menu) {
+  border-radius: var(--control-radius);
+  background: var(--bg-panel);
+}
+
+body button.menu-item-danger {
+  color: var(--danger) !important;
+}
+
+/* Main controls use the approved 38px rhythm; dense data actions stay compact. */
+body
+  .viewer-shell
+  :is(
+    .header-action,
+    .left-panel-add,
+    .rule-select,
+    .style-field input:not([type="color"]),
+    .menu-item
+  ),
+body .source-picker button {
+  min-height: var(--control-height);
+}
+body :is(.header-popover, .workspace-menu),
+body .viewer-shell :is(.columns-popover, .address-search-list) {
+  border: 0;
+  padding: 6px;
+  box-shadow: 0 5px 18px rgb(18 30 16 / 16%);
+}
+body .menu-item {
+  padding: 9px 10px;
+  margin: 2px 0;
+}
+body
+  :is(
+    select,
+    textarea,
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not(
+        [type="color"]
+      )
+  ) {
+  background-color: var(--control-rest);
+  border: 1px solid var(--border);
+  padding-inline: 10px;
+}
+body :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+body :is(.filter-select, .filter-value) {
+  min-height: var(--control-height-compact);
+}
+body :is(.camera-cluster, .select-mode-control) {
+  padding: 5px;
+  gap: 4px;
+}
+body .column-stats-popover {
+  border-radius: var(--control-radius);
+}
+/* Customizable native selects retain keyboard navigation and form semantics.
+   Engines without support keep the rounded native select above. */
+@supports (appearance: base-select) {
+  body select,
+  body select::picker(select) {
+    appearance: base-select;
+  }
+  body select {
+    align-items: center;
+    gap: 8px;
+  }
+  body select::picker(select) {
+    background: var(--bg-panel);
+    color: var(--fg);
+    border: 0;
+    border-radius: var(--control-radius);
+    padding: 6px;
+    margin-block: 5px;
+    box-shadow: 0 5px 18px rgb(18 30 16 / 18%);
+    max-height: 320px;
+    overflow: auto;
+  }
+  body select option {
+    min-height: var(--control-height);
+    padding: 9px 10px;
+    border-radius: 6px;
+    gap: 10px;
+  }
+  body select option:hover,
+  body select option:focus {
+    background: var(--control-hover);
+  }
+  body select option:checked {
+    background: var(--control-selected);
+    color: var(--control-selected-fg);
+  }
+  body select::picker-icon {
+    transition: transform 120ms ease-out;
+  }
+  body select:open::picker-icon {
+    transform: rotate(180deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  body select::picker-icon {
+    transition: none;
+  }
+}
+
+/* Shared slider treatment across the app. */
+body input[type="range"] {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  cursor: pointer;
+}
+body input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  background: var(--fg-dim);
+  border: 0;
+  border-radius: 0;
+}
+body input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+body input[type="range"]::-moz-range-track {
+  height: 3px;
+  background: var(--fg-dim);
+  border: 0;
+}
+body input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+body input[type="range"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+body input[type="range"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+:root {
+  --action-gap: 8px;
+}
+.button-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--action-gap);
+}
+.scene-settings-sheet details[open] > .button-group {
+  margin-block: 10px;
+}
+
+.action-icon {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+body :is(.active-layer-action, .left-panel-add, .select-mode-segment button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.active-layer-actions {
+  flex-wrap: wrap;
+}
+
+body .column-drag-grip {
+  cursor: grab;
+  padding: 3px;
+  flex: 0 0 22px;
+  background: transparent !important;
+}
+body .column-drag-grip:active {
+  cursor: grabbing;
+}
+.column-drag-grip svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.column-picker-row.column-dragging {
+  opacity: 0.45;
+}
+.column-picker-row.column-drop-target {
+  background: var(--control-selected);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+/* Drawer hierarchy: layout in its header, table tools, then record navigation. */
+.table-layout-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--action-gap);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.table-view-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.table-view-controls .data-drawer-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+}
+.table-record-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-left: auto;
+}
+.table-record-controls .table-sync-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+body .table-panel .table-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.table-panel .table-panel-actions {
+  padding-block: 8px;
+  gap: var(--action-gap);
+}
+.table-panel-header {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.computed-attribute-badge {
+  display: inline-flex;
+  position: relative;
+  align-items: center;
+  flex: 0 0 14px;
+  color: var(--fg-muted);
+  cursor: help;
+  text-transform: none;
+}
+.computed-attribute-badge svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.computed-attribute-tooltip {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  padding: 6px 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--fg);
+  /* A provenance line ("Height from extent · LoD 2.2 · All 1,115 buildings ·
+     2026-09-10 14:02") is far longer than the generic sentence this bubble
+     used to hold, so it WRAPS inside a bounded width instead of running off
+     the panel. */
+  max-width: 280px;
+  white-space: normal;
+  font: 12px/1.4 var(--font-ui);
+}
+.computed-attribute-badge:is(:hover, :focus-visible)
+  .computed-attribute-tooltip {
+  display: block;
+}
+.computed-attribute-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.draw-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+}
+.draw-canvas {
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+.draw-instructions {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: min(440px, calc(100% - 24px));
+  padding: 16px;
+  border-radius: var(--control-radius);
+  background: var(--bg-panel);
+  color: var(--fg);
+}
+.draw-instructions p {
+  margin: 8px 0 12px;
+}
+.draw-instructions input {
+  width: 90px;
+}
+.draw-instructions button {
+  padding: 8px 12px;
+}
+.viewer-shell .scene-buttons {
+  z-index: 8;
+}
+.draw-instructions fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.collapsed-table-handle {
+  position: relative;
+  flex: 0 0 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 12px 2px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+.collapsed-table-handle[hidden] {
+  display: none;
+}
+.collapsed-table-handle .resize-handle-y {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 10px;
+  cursor: ns-resize;
+}
+.collapsed-table-handle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.collapsed-table-handle > span {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.active-layer-actions .geo-record-actions {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+}
+.collapsed-table-handle .resize-handle-y::after {
+  content: "";
+  position: absolute;
+  width: 36px;
+  height: 3px;
+  left: calc(50% - 18px);
+  top: 3px;
+  background: var(--fg-muted);
+  border-radius: 2px;
+}
+.collapsed-table-handle .resize-handle-y {
+  touch-action: none;
+}
+/* Scene hierarchy: a real toolbar row, then the viewport, then the data drawer. */
+.viewer-shell .map-column {
+  position: relative;
+}
+.viewer-shell .map-tool-header {
+  position: static;
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 12px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  z-index: 12;
+}
+.map-tool-header__editing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.map-mode-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.map-mode-control select {
+  min-width: 148px;
+}
+.viewer-shell .map-tool-header .scene-buttons {
+  position: static;
+  max-width: none;
+  flex-shrink: 0;
+}
+.map-tool-header .scene-buttons__sheet {
+  position: absolute;
+  top: 52px;
+  right: 12px;
+  width: 340px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - var(--drawer-h) - 210px);
+  margin: 0;
+  z-index: 14;
+}
+.viewer-shell.drawer-expanded .map-tool-header {
+  display: none;
+}
+.viewer-shell .draw-instructions {
+  top: 12px;
+}
+@container (max-width: 640px) {
+  .viewer-shell .map-tool-header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .map-tool-header .scene-buttons {
+    margin-left: auto;
+  }
+  .map-tool-header .scene-buttons__sheet {
+    top: 94px;
+    max-height: calc(100% - var(--drawer-h) - 252px);
+  }
+}
+.map-tool-header .address-search {
+  position: relative;
+  top: auto;
+  left: auto;
+  min-width: 32px;
+}
+.map-tool-header .address-search-open {
+  width: 240px;
+  max-width: 35vw;
+}
+
+/* Compact fields retain the same shape and usable height across panels. */
+body
+  :is(
+    select,
+    textarea,
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not(
+        [type="color"]
+      ):not([type="hidden"])
+  ) {
+  min-height: var(--control-height-compact);
+  box-sizing: border-box;
+  font-size: 12px;
+}
+.viewer-shell .geo-style-fields {
+  gap: 8px;
+}
+.viewer-shell .geo-style-field {
+  font-size: 12px;
+}
+.viewer-shell .geo-style-number {
+  width: 80px;
+}
+.viewer-shell .geo-style-color {
+  width: 80px;
+  height: var(--control-height-compact);
+  padding: 4px;
+}
+.viewer-shell .geo-style-slider {
+  width: 80px;
+}
+
+.draw-edge-length,
+.draw-feedback {
+  position: absolute;
+  pointer-events: none;
+  padding: 6px 8px;
+  border-radius: var(--control-radius);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: 500 12px/1.5 var(--font-ui);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 16%);
+}
+.draw-edge-length {
+  font-variant-numeric: tabular-nums;
+}
+.draw-feedback {
+  top: 12px;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  margin: 0;
+}
+
+.draw-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Walkthrough primary actions share the processing Run emphasis. */
+body button.walkthrough-primary {
+  background: var(--accent) !important;
+  color: #182408 !important;
+}
+body button.walkthrough-primary:hover:not(:disabled) {
+  background: var(--accent) !important;
+  filter: brightness(0.95);
+}

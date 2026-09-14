@@ -25,6 +25,25 @@ export interface SelectionState {
    * feature clears the city selections.
    */
   readonly geoSelection: GeoFeatureSelection | null;
+  /**
+   * How many times the SELECTION has been set — a pick counter, bumped by
+   * every action that chooses what is selected (`select`, `toggleSelect`,
+   * `selectMany`, `selectGeoFeature`, `clear`) and by NOTHING else.
+   *
+   * It exists because a subscriber cannot otherwise tell a pick from the other
+   * writes this store carries: `hover` fires on every mouse move, `setToolMode`
+   * and `setMode` fire on a toolbar click, and `setMode("object")` even
+   * REBUILDS the selections array (it narrows surface picks to their objects),
+   * so neither the state's identity nor the selected ids answer the question.
+   * `layerCoordination`'s rule 2 — "a pick activates the layer it landed on" —
+   * compares this and only this, which is what lets a user re-pick the
+   * building they already had selected and be taken back to its layer (gate
+   * defect F5, round 3) without a hover doing the same thing.
+   *
+   * Monotonic within a session and never read as an identity: the only
+   * question asked of it is "is this a later pick than the one I saw?".
+   */
+  readonly selectionVersion: number;
 }
 
 export interface SelectionActions {
@@ -59,55 +78,96 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   selections: [],
   hovered: null,
   geoSelection: null,
+  selectionVersion: 0,
 
   // A city pick — including a miss (`null`) — always ends any geo selection.
   select: (selection) =>
-    set({ selections: selection ? [selection] : [], geoSelection: null }),
+    set((state) => ({
+      selections: selection ? [selection] : [],
+      geoSelection: null,
+      selectionVersion: state.selectionVersion + 1,
+    })),
 
   toggleSelect: (selection) => {
     const { selections } = get();
     const idx = selections.findIndex((s) => selectionEquals(s, selection));
+    const version = get().selectionVersion + 1;
     if (idx >= 0) {
       set({
         selections: selections.filter((_, i) => i !== idx),
         geoSelection: null,
+        selectionVersion: version,
       });
     } else {
       // Only allow multi-select within the same layer
       const filtered = selections.filter(
         (s) => s.layerId === selection.layerId,
       );
-      set({ selections: [...filtered, selection], geoSelection: null });
+      set({
+        selections: [...filtered, selection],
+        geoSelection: null,
+        selectionVersion: version,
+      });
     }
   },
 
   selectMany: (selections) => {
+    const version = get().selectionVersion + 1;
     if (selections.length === 0) {
-      set({ selections: [], geoSelection: null });
+      set({ selections: [], geoSelection: null, selectionVersion: version });
       return;
     }
     const layerId = selections[0]!.layerId;
     set({
       selections: selections.filter((s) => s.layerId === layerId),
       geoSelection: null,
+      selectionVersion: version,
     });
   },
 
   // Picking a geo feature ends any city selection; clearing it (`null`)
   // touches nothing else, so a city pick that follows one survives.
   selectGeoFeature: (selection) =>
-    set(
-      selection
+    set((state) => ({
+      ...(selection
         ? { geoSelection: selection, selections: [] }
-        : { geoSelection: null },
-    ),
+        : { geoSelection: null }),
+      selectionVersion: state.selectionVersion + 1,
+    })),
 
   hover: (hovered) => set({ hovered }),
 
+  // Switching pick mode CONVERTS what is selected; it never wipes it. Going
+  // to "surface" keeps object selections as they are (there is no surface to
+  // narrow them to, and picking one is the user's next act); going to
+  // "object" collapses every surface pick to its owning object, deduplicated,
+  // so two faces of one building read as one selected building. The geo
+  // selection is untouched either way — pick mode is a city-object concept.
   setMode: (mode) =>
-    set({ mode, selections: [], hovered: null, geoSelection: null }),
+    set((state) => {
+      if (mode === "surface") return { mode, hovered: null };
+      const seen = new Set<string>();
+      const narrowed: Selection[] = [];
+      for (const s of state.selections) {
+        const key = `${s.layerId} ${s.objectId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        narrowed.push({
+          kind: "object",
+          layerId: s.layerId,
+          objectId: s.objectId,
+        });
+      }
+      return { mode, selections: narrowed, hovered: null };
+    }),
 
   setToolMode: (toolMode) => set({ toolMode, hovered: null }),
 
-  clear: () => set({ selections: [], hovered: null, geoSelection: null }),
+  clear: () =>
+    set((state) => ({
+      selections: [],
+      hovered: null,
+      geoSelection: null,
+      selectionVersion: state.selectionVersion + 1,
+    })),
 }));

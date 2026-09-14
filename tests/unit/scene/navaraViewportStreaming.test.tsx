@@ -209,6 +209,9 @@ import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Selection } from "../../../src/domain/selection/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
+import { normalizeColorBy } from "../../../src/features/rules/colorBy";
 
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
@@ -241,13 +244,21 @@ function makeModel(): CityModel {
 }
 
 function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
+  // Same derivation the store applies, so a fixture is never left with an
+  // undefined mode or an undefined catch-all colour.
+  const colorBy = normalizeColorBy({
+    colorBy: patch.colorBy,
+    singleColor: patch.singleColor,
+    unmatchedColor: patch.unmatchedColor,
+    rules: patch.rules,
+  });
   return {
+    ...colorBy,
     name: patch.id,
     model: makeModel(),
     modelRef: { type: "url", url: `https://example.test/${patch.id}` },
     visible: true,
     rules: [],
-    rulesEnabled: true,
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
@@ -262,10 +273,13 @@ function makeStaticHandle(id: string, triangles = 10) {
     id,
     setVisible: vi.fn(),
     setLod: vi.fn(),
+    setVisibleObjectIds: vi.fn(),
     setStyle: vi.fn(),
     // The real `CityModelHandle` gained this with the scene themes; the
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(() => null as unknown),
     resolveRaycast: vi.fn(() => null as unknown),
@@ -334,6 +348,7 @@ function makeFakeStreamHandle(
     // The real `FcbStreamLayerHandle` gained this with the scene themes: the
     // viewport pushes the active theme's mesh style on the same beat as rules.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
     delete: vi.fn(),
     onStatus: vi.fn(() => () => undefined),
     onLadder: vi.fn(() => () => undefined),
@@ -434,9 +449,14 @@ describe("NavaraViewport streaming wiring", () => {
     cityPluginInstance.addCityModel.mockImplementation(
       (_model: unknown, opts: { id: string }) => makeStaticHandle(opts.id),
     );
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useStreamStore.setState({ streams: {} });
     useQueryRegionStore.setState({ regions: {} });
+    // Geo records outlive the viewport in production, and so would they here:
+    // one left behind would change what "an empty workspace" means for every
+    // later case.
+    useGeoLayerStore.setState({ layers: [] });
     // The fetch-box diagnostic is OFF by default; the cases that need it turn
     // it on explicitly, which is also what proves the gate works.
     useRenderDebugStore.getState().setStreamQueryBoxEnabled(false);
@@ -452,9 +472,11 @@ describe("NavaraViewport streaming wiring", () => {
     pendingInitRelease?.();
     pendingInitRelease = null;
     cleanup();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useStreamStore.setState({ streams: {} });
     useQueryRegionStore.setState({ regions: {} });
+    useGeoLayerStore.setState({ layers: [] });
     useRenderDebugStore.getState().setStreamQueryBoxEnabled(false);
   });
 
@@ -618,7 +640,7 @@ describe("NavaraViewport streaming wiring", () => {
       expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
     );
     // The automatic fit for the newly added layer already went through it.
-    await waitFor(() => expect(flyTo).toHaveBeenCalled());
+    await waitFor(() => expect(setCamera).toHaveBeenCalled());
     flatPluginInstance.suppressSettleThenCommit.mockClear();
 
     act(() => ref.current!.fitAll());
@@ -627,8 +649,8 @@ describe("NavaraViewport streaming wiring", () => {
     expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(
       3,
     );
-    expect(flyTo).toHaveBeenCalledTimes(3); // 1 auto-fit + fitAll + fitLayer
-    expect(setCamera).toHaveBeenCalledTimes(1);
+    expect(flyTo).toHaveBeenCalledTimes(2); // fitAll + fitLayer
+    expect(setCamera).toHaveBeenCalledTimes(2); // auto-fit + alignView
   });
 
   it("reports a camera move that throws inside the suppression window instead of leaving an unhandled rejection", async () => {
@@ -753,7 +775,7 @@ describe("NavaraViewport streaming wiring", () => {
     await waitFor(() =>
       expect(on.mock.calls.some((c) => c[0] === "click")).toBe(true),
     );
-    emitViewEvent("mousedown", mouse(100, 100));
+    emitViewEvent("pointerdown", mouse(100, 100));
     emitViewEvent("click", mouse(100, 100));
     await waitFor(() =>
       expect(useSelectionStore.getState().selections[0]?.objectId).toBe("B4"),
@@ -799,7 +821,8 @@ describe("NavaraViewport streaming wiring", () => {
     const streamHandle = makeFakeStreamHandle({ triangles: 10 });
     registerStreamingLayer("S1", streamHandle);
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
+    expect(flyTo).not.toHaveBeenCalled();
     expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
     // Through `suppressSettleThenCommit`, so the fit does not fetch along its
     // flight path AND does not leave its destination empty — without the
@@ -816,7 +839,101 @@ describe("NavaraViewport streaming wiring", () => {
       })),
     );
     await waitFor(() => expect(streamHandle.setVisible).toHaveBeenCalled());
-    expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(setCamera).toHaveBeenCalledTimes(1);
+  });
+
+  // Task 6 (M12.1), streaming half. "Only the first layer of an empty
+  // workspace fits" is a rule about LAYERS, not about formats: a `.fcb` opened
+  // beside a CityJSON model the user is already looking at must not fly the
+  // camera off to its header extent either.
+  it("does not fit when a streaming layer joins a workspace that already has a static layer", async () => {
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    // The static layer's own fit — the one the workspace was entitled to.
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
+
+    const streamHandle = makeFakeStreamHandle({ triangles: 10 });
+    act(() => registerStreamingLayer("S1", streamHandle));
+
+    // The stream really did register (`onCommit` is subscribed by exactly the
+    // effect under test), and the camera still stayed put.
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+    expect(setCamera).toHaveBeenCalledTimes(1);
+    // Nothing flew, so nothing went through the settle bracket either — the
+    // one call is the static layer's own fit from before the stream landed.
+    expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(
+      1,
+    );
+  });
+
+  // DELETED (Task 22, M12.2): "fits the first stream of a scene even when geo
+  // rows outlived the last one". It pinned the geo term's ABSENCE from the
+  // stream predicate, on the grounds that a geo row could only ever be a
+  // leftover from a scene that had already been closed — the viewport used to
+  // unmount the moment the last CITY layer went (App mounted it on
+  // `hasLayers`), so a mounted geo-only workspace was unreachable. It is
+  // reachable now: `hasWorkspace` puts a geo-only workspace in the viewer, the
+  // user frames it, and a `.fcb` opened next must not fly away from it. The
+  // case the deleted test defended cannot arise any more, and the case it
+  // broke is the one below.
+  it("does not fit when a stream joins a geo-only workspace", async () => {
+    // The engine mock here has no `addSource`, so the pair build fails and is
+    // caught by `geoLayerSync` (it logs and carries on). Irrelevant to the
+    // fit — what is under test is the STORE row — but the log is muted so the
+    // suite stays readable.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      useGeoLayerStore.getState().addGeoLayer({
+        name: "overlay",
+        kind: "raster-xyz",
+        config: { urlTemplate: "https://tile.example/{z}/{x}/{y}.png" },
+      });
+      const streamHandle = makeFakeStreamHandle({ triangles: 10 });
+      registerStreamingLayer("S1", streamHandle);
+      render(<NavaraViewport onTriangleCount={() => {}} />);
+
+      // The stream really did register — `onCommit` is subscribed by exactly
+      // the effect under test — and the camera stayed on the view the user
+      // arranged around their overlay.
+      await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+      expect(flyTo).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("does not fit when a stream joins a static row whose handle has not registered yet", async () => {
+    // The registry-based predicate this replaced read "no live handles and no
+    // streams" as "empty workspace" — but a static layer that has not reached
+    // `liveRef` yet (its add is still in flight, or the engine refused it) is
+    // a ROW the user can already see in the layer list, and a workspace with a
+    // row in it is not empty. Here the city plugin refuses the add, so
+    // `liveRef` stays empty for good and the two predicates disagree for as
+    // long as the test runs.
+    cityPluginInstance.addCityModel.mockImplementation(() => {
+      throw new Error("no reference system");
+    });
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    const onTriangleCount = vi.fn();
+    render(
+      <NavaraViewport
+        onTriangleCount={onTriangleCount}
+        onLayerError={() => {}}
+      />,
+    );
+    // The sync effect's own footprint: it runs to the end of every pass, past
+    // the `engineReady` gate. The static layer earned no fit (it never became
+    // a handle), which is what leaves the camera untouched below.
+    await waitFor(() => expect(onTriangleCount).toHaveBeenCalled());
+    expect(flyTo).not.toHaveBeenCalled();
+
+    const streamHandle = makeFakeStreamHandle({ triangles: 10 });
+    act(() => registerStreamingLayer("S1", streamHandle));
+
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+    expect(flyTo).not.toHaveBeenCalled();
   });
 
   it("pushes the selection to a streaming handle, hidden or not", async () => {
@@ -856,12 +973,25 @@ describe("NavaraViewport streaming wiring", () => {
 
     act(() => {
       useLayerStore.setState((s) => ({
-        layers: s.layers.map((l) => (l.id === "S1" ? { ...l, rules } : l)),
+        layers: s.layers.map((l) =>
+          // The MODE is what makes rules paint now; the array alone is inert.
+          l.id === "S1" ? { ...l, rules, colorBy: "rules" as const } : l,
+        ),
       }));
     });
     await waitFor(() =>
-      expect(streamHandle.setRules).toHaveBeenCalledWith(rules, true),
+      expect(streamHandle.setRules).toHaveBeenLastCalledWith(
+        expect.anything(),
+        true,
+      ),
     );
+    const calls = streamHandle.setRules.mock.calls;
+    const [pushed] = calls[calls.length - 1]! as [ReadonlyArray<Rule>, boolean];
+    // The user's rule, then the trailing unmatched catch-all — the EFFECTIVE
+    // list, still plain data, still never a compiled evaluator.
+    expect(pushed[0]).toBe(rules[0]);
+    expect(pushed).toHaveLength(2);
+    expect(pushed[1]!.color).toMatch(/^#[0-9a-f]{6}$/i);
     // An unrelated store change must not re-push: every push re-bakes every
     // resident cell in the worker.
     streamHandle.setRules.mockClear();

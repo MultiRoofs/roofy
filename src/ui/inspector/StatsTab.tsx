@@ -1,9 +1,17 @@
 /**
- * Statistics tab in the inspector panel.
+ * Model and object statistics.
  *
- * Shows model-level aggregate stats when nothing is selected,
- * and per-object stats when a building is selected.
- * Optionally shows DuckDB SQL-derived analytics when available.
+ * UNMOUNTED since 12.3: its host (`InspectorPanel`) was deleted when the
+ * details panel replaced it. Kept, with its test, because 12.4 folds this
+ * content into the drawer's Summary view — that is where these model/object
+ * aggregates come back. Do not delete without first building that view.
+ *
+ * Shows model-level aggregate stats when nothing is selected, and per-object
+ * stats when a building is selected. The DuckDB section summarises the
+ * DISPLAYED LAYER'S OWN table — the one `layerTables` built for it — grouped
+ * by `object_type`. There is no global `city_objects` table any more, so
+ * nothing DuckDB-ish renders until that layer's entry in `useLayerTableStore`
+ * reaches `ready`.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -12,26 +20,28 @@ import type { Selection } from "../../domain/selection/types";
 import {
   computeModelStats,
   computeObjectStats,
-} from "../../analytics/computeStats";
-import { queryDuckDB } from "../../analytics/duckdb";
-import type { QueryResult } from "../../analytics/duckdb";
+} from "../../insights/computeStats";
+import { runQuery } from "../../insights/duckdb";
+import { useLayerTableStore } from "../../insights/layerTables";
+import { quoteIdent } from "../../insights/sql";
 
 interface StatsTabProps {
   readonly model: CityModel;
   readonly selection: Selection | null;
-  readonly duckdbModelLoaded?: boolean;
+  /** Whose DuckDB table to summarise — the layer the inspector is showing,
+   *  which follows the SELECTION when there is one. `null` while no layer has
+   *  a table, in which case the pure model statistics stand alone. */
+  readonly layerId: string | null;
 }
 
 interface DuckDBStats {
-  readonly rowCount: number;
+  /** `null` when the table's COUNT could not be taken — see
+   *  `LayerTable.rowCount`. Rendered as "unknown", never as 0. */
+  readonly rowCount: number | null;
   readonly typeBreakdown: ReadonlyArray<{ type: string; count: number }>;
 }
 
-export function StatsTab({
-  model,
-  selection,
-  duckdbModelLoaded,
-}: StatsTabProps) {
+export function StatsTab({ model, selection, layerId }: StatsTabProps) {
   const modelStats = useMemo(() => computeModelStats(model), [model]);
 
   const objectStats = useMemo(
@@ -39,36 +49,39 @@ export function StatsTab({
     [model, selection],
   );
 
+  // Subscribed to the entry, not read imperatively: the table is built
+  // asynchronously after the layer lands, so the panel has to re-render when
+  // it becomes ready.
+  const tableState = useLayerTableStore((s) =>
+    layerId === null ? undefined : s.tables[layerId],
+  );
+  const table = tableState?.state === "ready" ? tableState.info : null;
+
   const [duckdbStats, setDuckdbStats] = useState<DuckDBStats | null>(null);
 
   useEffect(() => {
-    if (!duckdbModelLoaded) {
+    if (table === null) {
       setDuckdbStats(null);
       return;
     }
-
     let cancelled = false;
-
-    async function fetchStats() {
-      const [countResult, typeResult] = await Promise.all([
-        queryDuckDB("SELECT COUNT(*) AS cnt FROM city_objects"),
-        queryDuckDB(
-          "SELECT type, COUNT(*) AS cnt FROM city_objects GROUP BY type ORDER BY cnt DESC",
-        ),
-      ]);
-
+    void (async () => {
+      // `object_type`, not `type`: that is the column the cityjson reader
+      // writes, and the one the flat fallback was aligned to. The old query
+      // named `type`, which no layer table has ever had.
+      const result = await runQuery(
+        `SELECT "object_type", COUNT(*) AS "n" FROM ${quoteIdent(table.table)} GROUP BY 1 ORDER BY 2 DESC`,
+      );
       if (cancelled) return;
-
-      const rowCount = extractCount(countResult);
-      const typeBreakdown = extractTypeBreakdown(typeResult);
-      setDuckdbStats({ rowCount, typeBreakdown });
-    }
-
-    void fetchStats();
+      setDuckdbStats({
+        rowCount: table.rowCount,
+        typeBreakdown: result.ok ? extractTypeBreakdown(result.rows) : [],
+      });
+    })();
     return () => {
       cancelled = true;
     };
-  }, [duckdbModelLoaded]);
+  }, [table]);
 
   return (
     <>
@@ -166,7 +179,17 @@ export function StatsTab({
           <div className="attr-section-title" style={{ color: "var(--teal)" }}>
             DuckDB Analytics
           </div>
-          <StatRow label="Rows loaded" value={String(duckdbStats.rowCount)} />
+          <StatRow
+            label="Rows loaded"
+            // "unknown", not "0" and not "null": a count nobody could take and
+            // a table with nothing in it are different facts, and only one of
+            // them is worth acting on.
+            value={
+              duckdbStats.rowCount === null
+                ? "unknown"
+                : String(duckdbStats.rowCount)
+            }
+          />
           {duckdbStats.typeBreakdown.map((t) => (
             <StatRow key={t.type} label={t.type} value={String(t.count)} />
           ))}
@@ -191,6 +214,18 @@ function StatRow({
   );
 }
 
+function extractTypeBreakdown(
+  rows: ReadonlyArray<Record<string, unknown>>,
+): Array<{ type: string; count: number }> {
+  return rows.map((row) => ({
+    type:
+      typeof row.object_type === "string"
+        ? row.object_type
+        : JSON.stringify(row.object_type ?? "unknown"),
+    count: typeof row.n === "number" ? row.n : Number(row.n) || 0,
+  }));
+}
+
 function cardinalFromDeg(deg: number): string {
   if (deg >= 337.5 || deg < 22.5) return "N";
   if (deg < 67.5) return "NE";
@@ -200,23 +235,4 @@ function cardinalFromDeg(deg: number): string {
   if (deg < 247.5) return "SW";
   if (deg < 292.5) return "W";
   return "NW";
-}
-
-function extractCount(result: QueryResult | null): number {
-  if (!result || result.rows.length === 0) return 0;
-  const val = result.rows[0]!.cnt;
-  return typeof val === "number" ? val : Number(val) || 0;
-}
-
-function extractTypeBreakdown(
-  result: QueryResult | null,
-): Array<{ type: string; count: number }> {
-  if (!result) return [];
-  return result.rows.map((row) => ({
-    type:
-      typeof row.type === "string"
-        ? row.type
-        : JSON.stringify(row.type ?? "unknown"),
-    count: typeof row.cnt === "number" ? row.cnt : Number(row.cnt) || 0,
-  }));
 }
