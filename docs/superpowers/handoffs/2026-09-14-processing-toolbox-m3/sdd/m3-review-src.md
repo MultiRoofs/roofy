@@ -1,0 +1,9 @@
+1. **MAJOR — [buildingProxy.ts:170](/data2/hideba/multiroof-viewer/src/features/processing/buildingProxy.ts:170):** All-scope footprint reads include every object in the reread file. If the source gains buildings, the one-way identity check passes and Aggregate counts buildings absent from the loaded layer. Restrict reader rows to the scoped parent-table IDs before constructing feature proxies; reject changed scoped identities.
+
+2. **MAJOR — [computedColumns.ts:41](/data2/hideba/multiroof-viewer/src/insights/computedColumns.ts:41):** `ADD COLUMN IF NOT EXISTS` preserves an overwritten computed column’s old type. Replacing a DOUBLE Join output with BOOLEAN can store `1/0` while model attributes contain `true/false`; text replacement can fail conversion. Transactionally migrate replacement columns to their declared types, keeping metadata consistent and restoring the original schema on Undo. Apply this to inherited derived-layer columns too.
+
+3. **MAJOR — [useToolForm.ts:125](/data2/hideba/multiroof-viewer/src/ui/processing/useToolForm.ts:125):** One polygon makes a mixed polygon/point layer eligible for area tools. Execution retains the points and ignores `polygonOnly`, so Join can select a coincident point instead of an area, and Aggregate writes building counts onto points. Require polygonal eligibility in both the form and execution preflight for §7.5/§7.6.
+
+4. **MAJOR — [distanceToNearest.ts:127](/data2/hideba/multiroof-viewer/src/features/processing/tools/distanceToNearest.ts:127):** The distance join feeds every within-limit pair, including source properties, into a partitioned sort. Dense 100k-building × 100k-source inputs can produce 10 billion intermediate rows; the distance limit provides no cardinality bound. Use spatial candidate pruning and bounded nearest-candidate reduction, fetching properties only after selecting winners. Retain `ST_Distance_GEOS` and source-order ties.
+
+Not yet
