@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roofy walkthrough — wireframe</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      body {
+        margin: 0;
+        background: #f5f5f3;
+        color: #202522;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+      header.review {
+        padding: 20px 24px;
+        background: white;
+        border-bottom: 1px solid #ddd;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0;
+      }
+      header.review p {
+        margin: 4px 0 0;
+        color: #666;
+        font-size: 12px;
+      }
+      .review-label {
+        margin-left: auto;
+        border: 1px solid #aaa;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+      .chapters {
+        display: flex;
+        gap: 6px;
+        padding: 12px 24px;
+        flex-wrap: wrap;
+      }
+      .chapters button {
+        border: 1px solid #ccc;
+        background: white;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+      .chapters button[aria-current="true"] {
+        background: #303631;
+        color: white;
+        border-color: #303631;
+      }
+      .stage {
+        position: relative;
+        margin: 0 24px 20px;
+        height: min(660px, calc(100vh - 180px));
+        min-height: 540px;
+        background: white;
+        border: 1px solid #bbb;
+        overflow: hidden;
+        display: grid;
+        grid-template-columns: 205px minmax(180px, 1fr) 250px;
+        grid-template-rows: 48px 42px 1fr 190px;
+      }
+      .bar {
+        grid-column: 1/-1;
+        border-bottom: 1px solid #ccc;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 14px;
+        background: #fafaf8;
+      }
+      .bar strong {
+        margin-right: 8px;
+      }
+      .bar small {
+        color: #666;
+      }
+      .bar .space {
+        flex: 1;
+      }
+      .control {
+        background: #f0f1ee;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 7px 10px;
+        font-size: 12px;
+      }
+      .left {
+        grid-column: 1;
+        grid-row: 2/5;
+        border-right: 1px solid #ccc;
+        padding: 16px 12px;
+      }
+      .muted {
+        color: #777;
+      }
+      .section-title {
+        font-weight: 600;
+        font-size: 12px;
+        margin: 18px 0 10px;
+      }
+      .layer {
+        padding: 12px 8px;
+        border: 1px solid #bbb;
+        background: #f5f5f3;
+        font-size: 12px;
+        margin: 12px 0 18px;
+      }
+      .left .control {
+        display: block;
+        width: 100%;
+        text-align: left;
+        margin: 8px 0;
+      }
+      .toolbar {
+        grid-column: 2;
+        grid-row: 2;
+        display: flex;
+        gap: 8px;
+        padding: 5px 10px;
+        border-bottom: 1px solid #ccc;
+      }
+      .map {
+        grid-column: 2;
+        grid-row: 3/5;
+        position: relative;
+        background: #eceee9;
+        overflow: hidden;
+      }
+      .map.table-open {
+        grid-row: 3;
+      }
+      .map-label {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        color: #747c73;
+        font-size: 12px;
+      }
+      .blocks {
+        position: absolute;
+        inset: 60px 40px 45px;
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 16px;
+        transform: rotate(-12deg);
+      }
+      .building {
+        background: #c5cbc0;
+        border: 1px solid #9ca693;
+        border-radius: 2px;
+      }
+      .building.picked {
+        background: #a7b394;
+        border: 2px solid #5c6a4f;
+      }
+      .building.coloured {
+        background: #b4bda3;
+      }
+      .map-note {
+        position: absolute;
+        bottom: 20px;
+        right: 18px;
+        color: #687362;
+        font-size: 12px;
+      }
+      .right {
+        grid-column: 3;
+        grid-row: 2/5;
+        border-left: 1px solid #ccc;
+        padding: 16px 14px;
+        font-size: 12px;
+      }
+      .right h2 {
+        font-size: 14px;
+        margin: 0 0 16px;
+      }
+      .pair {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 14px 0;
+      }
+      .rule {
+        padding: 10px;
+        border: 1px solid #ccc;
+        background: #f6f7f3;
+        margin-top: 10px;
+      }
+      .table {
+        grid-column: 2;
+        grid-row: 4;
+        border-top: 1px solid #aaa;
+        background: white;
+        padding: 12px;
+        font-size: 12px;
+        z-index: 1;
+      }
+      .table .row {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr;
+        padding: 8px;
+        border-bottom: 1px solid #e1e1df;
+      }
+      .table-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .table-head b {
+        margin-right: auto;
+      }
+      .ghost {
+        height: 8px;
+        background: #e2e5de;
+        margin: 14px 0;
+        border-radius: 2px;
+      }
+      .spotlight {
+        position: absolute;
+        z-index: 3;
+        border: 2px solid #68785b;
+        border-radius: 6px;
+        box-shadow: 0 0 0 200vmax #17201480;
+        pointer-events: none;
+      }
+      .card {
+        position: absolute;
+        z-index: 4;
+        width: 300px;
+        background: white;
+        border-radius: 8px;
+        padding: 18px;
+        box-shadow: 0 5px 20px #0003;
+      }
+      .card h2 {
+        font-size: 16px;
+        margin: 0 22px 8px 0;
+      }
+      .card .progress {
+        color: #777;
+        font-size: 11px;
+        margin: 0 0 12px;
+      }
+      .card p {
+        line-height: 1.5;
+        font-size: 13px;
+        margin: 10px 0;
+      }
+      .card .task {
+        background: #eff1ec;
+        padding: 10px;
+        border-radius: 6px;
+        font-weight: 500;
+      }
+      .card .close {
+        position: absolute;
+        right: 10px;
+        top: 10px;
+        border: 0;
+        background: transparent;
+        font-size: 18px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+        align-items: center;
+      }
+      .actions button {
+        border: 1px solid #ccc;
+        background: #f3f4f0;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+      .actions .next {
+        margin-left: auto;
+        background: #303b2b;
+        color: white;
+        border-color: #303b2b;
+      }
+      .actions .skip {
+        background: transparent;
+        border: 0;
+        color: #666;
+      }
+      .notes {
+        margin: 0 24px 28px;
+        padding: 14px 0;
+        max-width: 900px;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+      .notes strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .mode-tabs {
+        display: flex;
+        gap: 6px;
+        margin: 10px 0;
+      }
+      .mode-tabs button {
+        padding: 6px 8px;
+        font-size: 11px;
+        border: 1px solid #ccc;
+        background: #f4f5f1;
+        border-radius: 4px;
+      }
+      .mode-tabs button.active {
+        background: #dce2d4;
+      }
+      button:focus-visible {
+        outline: 2px solid #526944;
+        outline-offset: 3px;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      @media (max-width: 900px) {
+        .stage {
+          margin: 0 12px;
+          height: 730px;
+          grid-template-columns: 155px minmax(140px, 1fr) 205px;
+        }
+        .card {
+          width: 270px;
+          padding: 14px;
+        }
+        .chapters {
+          padding: 12px;
+        }
+        .bar small {
+          display: none;
+        }
+        .review-label {
+          display: none;
+        }
+        .toolbar {
+          gap: 4px;
+        }
+        .toolbar .control {
+          padding: 6px;
+          font-size: 10px;
+        }
+        .blocks {
+          inset: 65px 15px;
+          gap: 10px;
+        }
+        .left,
+        .right {
+          padding: 12px 8px;
+        }
+        .notes {
+          margin: 0 12px;
+        }
+        .stage {
+          min-width: 650px;
+        }
+        header.review {
+          padding: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="review">
+      <div>
+        <h1>Roofy walkthrough</h1>
+        <p>Wireframe for discussion · illustrative workspace</p>
+      </div>
+      <span class="review-label">Direction preview</span>
+    </header>
+    <nav class="chapters" aria-label="Preview chapters"></nav>
+    <main class="stage">
+      <div class="bar">
+        <strong>Roofy</strong><small>Untitled workspace</small
+        ><span class="space"></span>
+        <div id="export-share">
+          <button class="control">Export</button>
+          <button class="control">Share</button>
+        </div>
+        <button class="control">Preferences</button>
+      </div>
+      <aside class="left">
+        <strong>Layers</strong
+        ><button class="control" id="sample">Load Delft sample</button>
+        <div class="layer">
+          delft.city.jsonl<br /><small class="muted">1,115 buildings</small>
+        </div>
+        <div id="style">
+          <div class="section-title">Style</div>
+          <span class="muted">Color by</span
+          ><button class="control">Rules ▾</button
+          ><button class="control">Solar suitable</button>
+          <div class="rule">
+            ■ Solar suitable<br /><small class="muted"
+              >Slope · orientation · roof area</small
+            >
+          </div>
+        </div>
+        <div class="section-title">Filter</div>
+        <div class="ghost"></div>
+        <div class="section-title">Details</div>
+        <div class="ghost"></div>
+      </aside>
+      <div class="toolbar">
+        <button class="control">Pick feature</button
+        ><button class="control">Tools</button><span style="flex: 1"></span
+        ><button class="control">Sun &amp; shade</button>
+      </div>
+      <div class="map" id="map">
+        <span class="map-label">Map · Delft</span>
+        <div class="blocks"></div>
+        <span class="map-note">Click a building to inspect</span>
+      </div>
+      <aside class="right" id="panel"></aside>
+      <section class="table" id="table" hidden></section>
+      <div class="spotlight" aria-hidden="true"></div>
+      <section class="card" aria-label="Walkthrough preview">
+        <button class="close" aria-label="Return to first chapter">×</button>
+        <h2 id="title"></h2>
+        <p class="progress"></p>
+        <p id="copy"></p>
+        <div class="mode-tabs" hidden></div>
+        <p class="task"></p>
+        <div class="actions">
+          <button class="back">Back</button><button class="skip">Skip</button
+          ><button class="next">Next</button>
+        </div>
+      </section>
+    </main>
+    <section class="notes">
+      <strong>Proposed interaction</strong>Users act through the spotlight on
+      the real map and controls. The guide confirms each completed action, then
+      lets them continue. Back, Skip and Close stay available. First-time users
+      get an invitation; Preferences offers replay. The location-join exercise
+      stays optional until the Delft 2D sample is ready.
+    </section>
+    <script>
+      const chapters = [
+        {
+          label: "1 · Load",
+          title: "Start with Delft",
+          target: "sample",
+          copy: "Load the example city model to start exploring roofs and buildings.",
+          task: "Click “Load Delft sample”.",
+          panel: "empty",
+        },
+        {
+          label: "2 · Inspect",
+          title: "Pick a building",
+          target: "map",
+          copy: "Click a building on the map. Then inspect its attributes in the right panel.",
+          task: "Try selecting a building.",
+          panel: "inspect",
+        },
+        {
+          label: "3 · Style",
+          title: "Find roofs with a rule",
+          target: "style",
+          copy: "Choose Rules, then the Solar suitable preset. Watch the matching roof surfaces change colour.",
+          task: "Apply the preset and compare the map.",
+          panel: "inspect",
+        },
+        {
+          label: "4 · Filter & stats",
+          title: "Explore matching buildings",
+          target: "table",
+          copy: "Filter the table by an attribute. Then switch to Summary to understand the matching buildings.",
+          task: "Apply a filter, then open Summary → Matching.",
+          panel: "inspect",
+        },
+        {
+          label: "5 · Volume",
+          title: "Calculate building volume",
+          target: "panel",
+          copy: "Open Tools → Measure solids. Keep Volume selected, choose a scope, then Run.",
+          task: "Wait for the result, then inspect the new attributes.",
+          panel: "volume",
+        },
+        {
+          label: "6 · Join",
+          title: "Connect buildings to areas",
+          target: "panel",
+          copy: "Use Join attributes by location to copy values from a 2D area layer onto the buildings it contains.",
+          task: "Optional — Delft 2D sample to be supplied.",
+          panel: "join",
+        },
+        {
+          label: "7 · Sun & shade",
+          title: "Explore sun and shade",
+          target: "panel",
+          copy: "Enable shadows and change the date or time. Compare how neighbouring buildings shade the roofs.",
+          task: "Try a morning and an afternoon view.",
+          panel: "sun",
+        },
+        {
+          label: "8 · Export / share",
+          title: "Take your work with you",
+          target: "export-share",
+          copy: "Export an image of the view, or create a link to share the current project.",
+          task: "Choose Export or Share.",
+          panel: "inspect",
+        },
+      ];
+      let index = 0,
+        substep = "filter";
+      const $ = (s) => document.querySelector(s),
+        stage = $(".stage");
+      $(".blocks").innerHTML = Array.from(
+        { length: 30 },
+        (_, i) => `<div class="building ${i === 14 ? "picked" : ""}"></div>`,
+      ).join("");
+      $(".chapters").innerHTML = chapters
+        .map(
+          (c, i) =>
+            `<button data-step="${i}" aria-current="${i === 0}">${c.label}</button>`,
+        )
+        .join("");
+      $(".chapters").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-step]");
+        if (b) {
+          index = Number(b.dataset.step);
+          render();
+        }
+      });
+      $(".back").onclick = () => {
+        index = Math.max(0, index - 1);
+        render();
+      };
+      $(".next").onclick = $(".skip").onclick = () => {
+        index = (index + 1) % chapters.length;
+        render();
+      };
+      $(".close").onclick = () => {
+        index = 0;
+        render();
+      };
+      const inspect =
+        '<h2>Building · …028-0</h2><div class="section-title">Summary</div><div class="pair"><span>Roof area</span><b>… m²</b></div><div class="pair"><span>Mean slope</span><b>… °</b></div><div class="section-title">Attributes</div><div class="pair"><span>b3_h_dak_max</span><span>22.5</span></div><div class="pair"><span>Year built</span><span>1955</span></div><div class="pair"><span>Status</span><span>In use</span></div>';
+      function render() {
+        const c = chapters[index];
+        $("#title").textContent = c.title;
+        $(".progress").textContent = `${index + 1} of 8 · Delft walkthrough`;
+        $("#copy").textContent = c.copy;
+        $(".task").textContent = c.task;
+        $(".back").disabled = index === 0;
+        $(".next").textContent = index === 7 ? "Finish" : "Next";
+        $(".chapters")
+          .querySelectorAll("button")
+          .forEach((b, i) =>
+            b.setAttribute("aria-current", String(i === index)),
+          );
+        $("#map").classList.toggle("table-open", index === 3);
+        $("#table").hidden = index !== 3;
+        $(".mode-tabs").hidden = index !== 3;
+        $(".mode-tabs").innerHTML =
+          '<button data-view="filter">Filter</button><button data-view="stats">Summary</button>';
+        $(".mode-tabs")
+          .querySelectorAll("button")
+          .forEach((b) => {
+            b.classList.toggle("active", b.dataset.view === substep);
+            b.onclick = () => {
+              substep = b.dataset.view;
+              render();
+            };
+          });
+        $("#table").innerHTML =
+          substep === "filter"
+            ? '<div class="table-head"><b>Records</b><button class="control">Summary</button></div><div class="rule">b3_h_dak_max &nbsp; &gt; &nbsp; 15 &nbsp; <button class="control">Apply</button></div><div class="row"><b>Building</b><b>Height</b><b>Roof area</b></div><div class="row"><span>…028-0</span><span>22.5 m</span><span>… m²</span></div>'
+            : '<div class="table-head"><b>Summary</b><button class="control">All</button><button class="control">Matching</button></div><div class="row"><span>Matching buildings</span><b>40</b></div><div class="row"><span>Total roof area</span><b>… m²</b></div><div class="row"><span>Roof type breakdown</span><b>…</b></div>';
+        $("#panel").innerHTML =
+          c.panel === "volume"
+            ? '<h2>Tools / Measure solids</h2><div class="section-title">Target</div><div class="rule">delft.city.jsonl · LoD 2.2</div><div class="pair">Scope <span>All / Matching / Selected</span></div><div class="section-title">Parameters</div><p>☑ Volume (m³)</p><p>☐ Envelope area</p><p>☐ Height</p><div class="section-title">Output</div><p>Write to this layer</p><div class="rule">solid_volume_m3</div><button class="control" style="margin-top:24px">Run</button>'
+            : c.panel === "join"
+              ? '<h2>Tools / Join by location</h2><div class="section-title">Target</div><div class="rule">Delft buildings</div><div class="section-title">Source</div><div class="rule">Delft 2D areas<br><small class="muted">Example dataset pending</small></div><div class="section-title">Attributes to copy</div><div class="ghost"></div><div class="ghost"></div>'
+              : c.panel === "sun"
+                ? '<h2>Sun &amp; shade</h2><div class="pair">Date <span>21 June</span></div><div class="pair">Time <span>09:00</span></div><input type="range" aria-label="Illustrative time slider" style="width:100%"><div class="pair">Shadows <span>On</span></div><div class="mode-tabs"><button>Morning</button><button>Afternoon</button></div>'
+                : c.panel === "empty"
+                  ? '<h2 class="muted">Inspect a feature</h2><p class="muted">Attributes appear here after a selection.</p>'
+                  : inspect;
+        $(".blocks")
+          .querySelectorAll(".building")
+          .forEach((b, i) =>
+            b.classList.toggle("coloured", index >= 2 && i % 4 === 0),
+          );
+        requestAnimationFrame(position);
+      }
+      function position() {
+        const c = chapters[index],
+          r = document.getElementById(c.target).getBoundingClientRect(),
+          s = stage.getBoundingClientRect(),
+          card = $(".card"),
+          spot = $(".spotlight");
+        const x = r.left - s.left,
+          y = r.top - s.top,
+          w = r.width,
+          h = r.height;
+        Object.assign(spot.style, {
+          left: x - 5 + "px",
+          top: y - 5 + "px",
+          width: w + 10 + "px",
+          height: h + 10 + "px",
+        });
+        const cw = card.offsetWidth,
+          ch = card.offsetHeight;
+        let left = x + w + 16,
+          top = y;
+        if (left + cw > stage.clientWidth - 12) {
+          left = x - cw - 16;
+        }
+        if (left < 12) {
+          left = x;
+          top = y - ch - 16;
+        }
+        if (top < 12) {
+          left = x + 18;
+          top = stage.clientHeight - ch - 20;
+        }
+        left = Math.max(12, Math.min(left, stage.clientWidth - cw - 12));
+        top = Math.max(12, Math.min(top, stage.clientHeight - ch - 12));
+        card.style.left = left + "px";
+        card.style.top = top + "px";
+      }
+      window.addEventListener("resize", position);
+      render();
+    </script>
+  </body>
+</html>

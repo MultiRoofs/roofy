@@ -2561,7 +2561,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     useEffect(() => {
       if (fitToken === 0) return;
       // ONCE per token, and consumed even when the fit is skipped below. Two
-      // reasons: `fitAll`'s identity changes whenever `boundsOf` does, which
+      // reasons: `boundsOf` changes when the layer bounds change, which
       // re-runs this effect on a token it has already served; and a fit
       // suppressed by a restore must be DROPPED, not left pending to fire
       // after that restore's camera has landed.
@@ -2571,8 +2571,24 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // camera it saved. Fitting to those layers would overwrite exactly that
       // camera — see `autoFitSuppression.ts` (Task C26).
       if (isAutoFitSuppressed() || restoredCameraRef.current) return;
-      fitAll();
-    }, [fitToken, fitAll]);
+      const view = viewRef.current;
+      const bounds = boundsOf();
+      if (!view || !bounds) return;
+      // Initial content should appear in place, without a flight from the globe.
+      const next = framedForMode(bounds);
+      withSettleSuppressed(() => {
+        view.setCamera(next);
+        publishCommandedPose(next);
+        requestPoseSeed();
+      });
+    }, [
+      fitToken,
+      boundsOf,
+      framedForMode,
+      withSettleSuppressed,
+      publishCommandedPose,
+      requestPoseSeed,
+    ]);
 
     // --- stream store -> the interaction registry (Task C13) ---
     //

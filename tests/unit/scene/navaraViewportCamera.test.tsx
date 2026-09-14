@@ -381,7 +381,8 @@ describe("NavaraViewport camera controls", () => {
     await act(async () => {
       useLayerStore.setState({ layers: [makeLayer("new")] });
     });
-    expect(flyTo).toHaveBeenCalledOnce();
+    expect(flyTo).not.toHaveBeenCalled();
+    expect(setCamera).toHaveBeenCalledTimes(2); // restore + new first layer
   });
 
   it("subscribes to the CAMERA's move events, not the view's", async () => {
@@ -404,6 +405,23 @@ describe("NavaraViewport camera controls", () => {
       pitch: -60,
       lat: 52,
       zoom: 15.5,
+    });
+  });
+
+  it("publishes the first layer camera after the initial globe pose was seeded", async () => {
+    await mount();
+    cameraThrows = false;
+    fireView("postRender");
+    cityPluginInstance.addCityModel.mockImplementation(() => makeHandle("a"));
+    await act(async () => {
+      useLayerStore.setState({ layers: [makeLayer("a")] });
+    });
+    const framed = lastCamera();
+    expect(flyTo).not.toHaveBeenCalled();
+    expect(getCameraPose()).toMatchObject({
+      heading: framed.heading,
+      pitch: framed.pitch,
+      lat: framed.lat,
     });
   });
 

@@ -657,3 +657,13 @@ body
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Walkthrough primary actions share the processing Run emphasis. */
+body button.walkthrough-primary {
+  background: var(--accent) !important;
+  color: #182408 !important;
+}
+body button.walkthrough-primary:hover:not(:disabled) {
+  background: var(--accent) !important;
+  filter: brightness(0.95);
+}

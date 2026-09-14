@@ -640,7 +640,7 @@ describe("NavaraViewport streaming wiring", () => {
       expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
     );
     // The automatic fit for the newly added layer already went through it.
-    await waitFor(() => expect(flyTo).toHaveBeenCalled());
+    await waitFor(() => expect(setCamera).toHaveBeenCalled());
     flatPluginInstance.suppressSettleThenCommit.mockClear();
 
     act(() => ref.current!.fitAll());
@@ -649,8 +649,8 @@ describe("NavaraViewport streaming wiring", () => {
     expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(
       3,
     );
-    expect(flyTo).toHaveBeenCalledTimes(3); // 1 auto-fit + fitAll + fitLayer
-    expect(setCamera).toHaveBeenCalledTimes(1);
+    expect(flyTo).toHaveBeenCalledTimes(2); // fitAll + fitLayer
+    expect(setCamera).toHaveBeenCalledTimes(2); // auto-fit + alignView
   });
 
   it("reports a camera move that throws inside the suppression window instead of leaving an unhandled rejection", async () => {
@@ -821,7 +821,8 @@ describe("NavaraViewport streaming wiring", () => {
     const streamHandle = makeFakeStreamHandle({ triangles: 10 });
     registerStreamingLayer("S1", streamHandle);
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
+    expect(flyTo).not.toHaveBeenCalled();
     expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
     // Through `suppressSettleThenCommit`, so the fit does not fetch along its
     // flight path AND does not leave its destination empty — without the
@@ -838,7 +839,7 @@ describe("NavaraViewport streaming wiring", () => {
       })),
     );
     await waitFor(() => expect(streamHandle.setVisible).toHaveBeenCalled());
-    expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(setCamera).toHaveBeenCalledTimes(1);
   });
 
   // Task 6 (M12.1), streaming half. "Only the first layer of an empty
@@ -849,7 +850,7 @@ describe("NavaraViewport streaming wiring", () => {
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     render(<NavaraViewport onTriangleCount={() => {}} />);
     // The static layer's own fit — the one the workspace was entitled to.
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
 
     const streamHandle = makeFakeStreamHandle({ triangles: 10 });
     act(() => registerStreamingLayer("S1", streamHandle));
@@ -857,7 +858,7 @@ describe("NavaraViewport streaming wiring", () => {
     // The stream really did register (`onCommit` is subscribed by exactly the
     // effect under test), and the camera still stayed put.
     await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
-    expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(setCamera).toHaveBeenCalledTimes(1);
     // Nothing flew, so nothing went through the settle bracket either — the
     // one call is the static layer's own fit from before the stream landed.
     expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(

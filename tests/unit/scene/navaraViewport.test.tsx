@@ -989,9 +989,10 @@ describe("NavaraViewport lifecycle", () => {
   it("fits when the first layer of an empty workspace lands, and not when one is merely toggled", async () => {
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
+    expect(flyTo).not.toHaveBeenCalled();
     // A camera derived from the handle's real bounds, not a NaN jump.
-    const camera = flyTo.mock.calls[0]![0] as Record<string, number>;
+    const camera = setCamera.mock.calls[0]![0] as Record<string, number>;
     expect(camera.lng).toBeCloseTo(4.355, 6);
     // South of the box centre (52.005) and above it, looking north — the
     // default framing, derived from the handle's own bounds.
@@ -1008,13 +1009,13 @@ describe("NavaraViewport lifecycle", () => {
         cityPluginInstance.addCityModel.mock.results[0]!.value.setVisible,
       ).toHaveBeenCalledWith(false),
     );
-    expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(setCamera).toHaveBeenCalledTimes(1);
   });
 
   it("does not fit when a SECOND static layer lands", async () => {
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
 
     useLayerStore.setState({
       layers: [makeLayer({ id: "a" }), makeLayer({ id: "b" })],
@@ -1025,7 +1026,7 @@ describe("NavaraViewport lifecycle", () => {
     await waitFor(() =>
       expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(2),
     );
-    expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(setCamera).toHaveBeenCalledTimes(1);
   });
 
   it("does not fit when a static layer joins a workspace that already has a streaming layer", async () => {
@@ -1093,8 +1094,8 @@ describe("NavaraViewport lifecycle", () => {
     useViewModeStore.setState({ mode: "2d" });
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(flyTo).toHaveBeenCalled());
-    const fit = flyTo.mock.calls.at(-1)![0] as Record<string, number>;
+    await waitFor(() => expect(setCamera).toHaveBeenCalled());
+    const fit = setCamera.mock.calls.at(-1)![0] as Record<string, number>;
     expect(fit.pitch).toBeCloseTo(-89.9, 6);
     expect(fit.heading).toBeCloseTo(0, 6);
     // Still framed on the layer's bounds — the mode changes the angle, not
@@ -1160,7 +1161,7 @@ describe("NavaraViewport lifecycle", () => {
     await waitFor(() => expect(handle.delete).toHaveBeenCalledTimes(1));
 
     useLayerStore.setState({ layers: [makeLayer({ id: "b" })] });
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(setCamera).toHaveBeenCalledTimes(1));
   });
 
   it("deletes the handle of a layer that left the store", async () => {
@@ -1207,7 +1208,7 @@ describe("NavaraViewport lifecycle", () => {
 
     // alignView reads the same union, so it aligns against real bounds too.
     ref.current!.alignView("top");
-    expect(setCamera).toHaveBeenCalledTimes(1);
+    expect(setCamera).toHaveBeenCalledTimes(2); // initial framing + alignment
   });
 
   // -------------------------------------------------------------------------

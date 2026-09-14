@@ -75,3 +75,19 @@
 .summary-bar b {
   font-variant-numeric: tabular-nums;
 }
+
+/* Keep summary rows at their content height inside a short, scrollable drawer.
+   Auto-sized grid tracks otherwise compress the scope switch to its border. */
+.data-drawer-summary {
+  grid-auto-rows: max-content;
+  align-content: start;
+}
+.data-drawer-summary .summary-scope {
+  min-height: var(--control-height-compact);
+  overflow: visible;
+  border: 0;
+  gap: 8px;
+}
+.data-drawer-summary .summary-scope button {
+  min-height: var(--control-height-compact);
+}
