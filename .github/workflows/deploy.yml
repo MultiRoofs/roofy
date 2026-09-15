@@ -45,7 +45,7 @@ jobs:
           # repository variable (Settings → Variables) is the right scope.
           # dotenvx run does not overwrite vars already in the environment, so
           # this reaches vite.config.ts / import.meta.env unchanged.
-          VITE_GA_ID: ${{ vars.VITE_GA_ID }}
+          VITE_GA_ID: ${{ secrets.VITE_GA_ID }}
 
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v4
