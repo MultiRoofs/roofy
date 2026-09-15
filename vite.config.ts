@@ -1,6 +1,40 @@
 import { resolve } from "node:path";
-import { defineConfig } from "vite-plus";
+import { defineConfig, type Plugin } from "vite-plus";
 import react from "@vitejs/plugin-react";
+
+// Injects the Google Analytics gtag.js snippet into `index.html` only when a
+// measurement ID is configured (VITE_GA_ID). Keeping it out of the HTML source
+// means local/dev builds stay analytics-free and no placeholder ID ships.
+function googleAnalyticsPlugin(measurementId: string | undefined): Plugin {
+  return {
+    name: "roofy:google-analytics",
+    transformIndexHtml() {
+      if (!measurementId) {
+        return [];
+      }
+      return [
+        {
+          tag: "script",
+          attrs: {
+            async: true,
+            src: `https://www.googletagmanager.com/gtag/js?id=${measurementId}`,
+          },
+          injectTo: "head",
+        },
+        {
+          tag: "script",
+          children: [
+            "window.dataLayer = window.dataLayer || [];",
+            "function gtag() { dataLayer.push(arguments); }",
+            'gtag("js", new Date());',
+            `gtag("config", ${JSON.stringify(measurementId)});`,
+          ].join("\n"),
+          injectTo: "head",
+        },
+      ];
+    },
+  };
+}
 
 export default defineConfig({
   base: process.env.BASE_PATH || "/",
@@ -134,6 +168,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    googleAnalyticsPlugin(process.env.VITE_GA_ID),
     // Suppress missing source map warnings from node_modules (e.g. @duckdb/duckdb-wasm
     // ships a worker.js referencing a .map file that doesn't exist in the package)
     {
