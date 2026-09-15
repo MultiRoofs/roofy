@@ -56,7 +56,6 @@ jobs:
         run: npm run build
         env:
           DOTENV_PRIVATE_KEY: ${{ secrets.DOTENV_PRIVATE_KEY }}
-          # Same as deploy.yml: repository variable, not a secret.
           VITE_GA_ID: ${{ secrets.VITE_GA_ID }}
 
       # The alias is the branch name made DNS-safe: lowercase letters, digits
