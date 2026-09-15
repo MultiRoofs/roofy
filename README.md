@@ -6,7 +6,6 @@
   </picture>
 </p>
 
-
 <p align="center"><strong>Your city, roof by roof.</strong><br>
 A browser-based 3D city model viewer and analyser, rendered on a real globe with photorealistic terrain.</p>
 
@@ -17,7 +16,6 @@ A browser-based 3D city model viewer and analyser, rendered on a real globe with
      rule for font-unguaranteed contexts: bare mark + real text. -->
 
 <img width="2992" height="1472" alt="CleanShot 2026-09-14 at 21 23 46@2x" src="https://github.com/user-attachments/assets/5d1f3cd6-4610-45da-856a-a20d0ccaf335" />
-
 
 ## What it does
 
