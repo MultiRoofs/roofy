@@ -782,3 +782,32 @@ It is persisted in workspaces and URL shares, restored on file relinking,
 and copied to derived layers. Older workspace single-LoD choices remain exact.
 Export and analysis retain their explicit single-LoD controls. Streaming
 FlatCityBuf's zoom-driven/manual policy is unchanged.
+
+### A LoD change rebuilds only when some object's drawn LoD changes
+
+`CityModelMesh.setLod` always records the new selection (every later rebuild —
+hidden types, id filter, appearance, placement — reads it) but calls
+`rebuildGeometry` only when `sameLodGeometry` (navara-core `lodSelection.ts`)
+finds an object whose drawn LoD differs. The store hands `setLod` a fresh array
+on every checkbox toggle, so the old identity check rebuilt every time:
+Nishitokyo `[2,1,0] → [2,1]` changes no object's winner yet re-triangulated all
+1.9 M triangles (~2.7 s, M4 Max, dev build).
+
+- The builder and the comparison share `selectedSurfaceLod`; never give the
+  comparison its own copy of the winner rule, or a skip silently draws stale
+  geometry. `lodSelection.test.ts` checks the helper against the real builder
+  for every pair of a set of selections.
+- A legacy string is the one-element selection (it draws exactly the same
+  surfaces). `null` equals only `null`: it also draws unlabelled surfaces.
+- Hidden and id-filtered objects are compared too. Skipping them would save a
+  rare rebuild but couple the comparison to the filters; revealing an object
+  rebuilds with the recorded selection anyway.
+- Cost: equal LoD sets answer without visiting objects; otherwise one pass over
+  the surfaces' LoD labels, no geometry copied. On a synthetic model with
+  Nishitokyo's LoD shape (1.7 M triangles; Linux, Node 24, not a browser):
+  `[2,1,0] → [2,1]` 6.0 s → 95 ms, reordering 6.3 s → 0.1 ms, while
+  `[2] → [2,1]` still rebuilds (7.3 s). Logs:
+  `docs/performance/cityparquet-2026-09-21/lod-switch-synthetic-*.jsonl`;
+  rerun with `npx vitest run -c scripts/performance/vitest.config.ts lod-switch`
+  (`AUDIT_FILE=<nishitokyo parquet>` for the real dataset).
+- Streaming layers (`FcbStreamLayerHandle.setLod`) are untouched.

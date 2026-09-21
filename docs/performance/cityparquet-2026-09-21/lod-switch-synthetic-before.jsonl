@@ -1,0 +1,8 @@
+{"source":"synthetic","step":"construct [2,1,0]","ms":10062.6,"rebuilds":0,"triangles":1697240,"heapMB":731}
+{"source":"synthetic","step":"[2,1,0] -> [2]","ms":195.6,"rebuilds":1,"triangles":9360,"heapMB":729}
+{"source":"synthetic","step":"[2] -> [2,1,0]","ms":8185.5,"rebuilds":1,"triangles":1697240,"heapMB":741}
+{"source":"synthetic","step":"[2,1,0] -> [2,1]","ms":6035,"rebuilds":1,"triangles":1697240,"heapMB":742}
+{"source":"synthetic","step":"[2,1] -> [1,2] (reordered)","ms":6268.8,"rebuilds":1,"triangles":1697240,"heapMB":744}
+{"source":"synthetic","step":"[1,2] -> [2]","ms":118.6,"rebuilds":1,"triangles":9360,"heapMB":730}
+{"source":"synthetic","step":"[2] -> [2,1]","ms":7277.5,"rebuilds":1,"triangles":1697240,"heapMB":738}
+{"source":"synthetic","step":"forced rebuild under [2,1] (pre-fix cost)","ms":6052.6,"rebuilds":1,"triangles":1697240,"heapMB":737}

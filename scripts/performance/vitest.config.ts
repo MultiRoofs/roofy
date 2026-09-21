@@ -8,7 +8,10 @@ export default defineConfig({
   ...rootConfig,
   test: {
     ...rootConfig.test,
-    include: ["scripts/performance/cityparquet-profile.test.ts"],
+    include: [
+      "scripts/performance/cityparquet-profile.test.ts",
+      "scripts/performance/lod-switch.test.ts",
+    ],
     environment: "node",
     maxWorkers: 1,
   },
