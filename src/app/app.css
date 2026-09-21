@@ -6711,3 +6711,20 @@ button.file-label:disabled {
   width: 100%;
   font-size: 13px;
 }
+
+.active-layer-control--lod {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.lod-multiselect .layer-types-list {
+  border-top: none;
+  padding: 0;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+}
+
+.lod-multiselect .layer-types-item {
+  min-height: var(--control-compact-height, 30px);
+}

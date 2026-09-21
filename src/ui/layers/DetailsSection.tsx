@@ -156,7 +156,7 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
             <StreamingLodControl label={STREAMING_LOD_LABEL} />
           ) : (
             layer.availableLods.length > 0 && (
-              <div className="active-layer-control">
+              <div className="active-layer-control active-layer-control--lod">
                 <span className="active-layer-control-label">
                   Level of detail
                 </span>
@@ -164,6 +164,7 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
                   layerId={layerId}
                   availableLods={layer.availableLods}
                   selectedLod={layer.selectedLod}
+                  selectedLods={layer.selectedLods}
                   isStreaming={false}
                   lodMode={layer.lodMode}
                 />

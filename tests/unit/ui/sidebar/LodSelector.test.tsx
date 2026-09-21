@@ -95,40 +95,44 @@ function baseStream(overrides: Partial<StreamState> = {}): StreamState {
 }
 
 describe("LodSelector — static layer (isStreaming: false)", () => {
-  it("renders an interactive dropdown even though lodMode defaults to 'auto'", () => {
+  it("shows checked LoDs and explains highest-per-object selection", () => {
     render(
       <LodSelector
         layerId="L"
-        availableLods={["1.2", "2.2"]}
+        availableLods={["2.2", "1.2"]}
         selectedLod="2.2"
+        selectedLods={["2.2", "1.2"]}
         isStreaming={false}
         lodMode="auto"
       />,
     );
-    const select = screen.getByTitle("Level of Detail") as HTMLSelectElement;
-    expect(select.tagName).toBe("SELECT");
-    expect(select.value).toBe("2.2");
-    expect(select).not.toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "LoD 2.2" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "LoD 1.2" })).toBeChecked();
+    expect(
+      screen.getByText(/highest selected LoD available/i),
+    ).toBeInTheDocument();
   });
-
-  it("changing the selection calls setLayerLod, same as before streaming existed", () => {
+  it("toggles a LoD without deselecting the other choices", () => {
     useLayerStore.setState({
-      layers: [baseLayer({ availableLods: ["1.2", "2.2"] })],
+      layers: [
+        baseLayer({
+          availableLods: ["2.2", "1.2"],
+          selectedLods: ["2.2", "1.2"],
+        }),
+      ],
     });
-    useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
       <LodSelector
         layerId="L"
-        availableLods={["1.2", "2.2"]}
-        selectedLod="1.2"
+        availableLods={["2.2", "1.2"]}
+        selectedLod="2.2"
+        selectedLods={["2.2", "1.2"]}
         isStreaming={false}
         lodMode="auto"
       />,
     );
-    fireEvent.change(screen.getByTitle("Level of Detail"), {
-      target: { value: "2.2" },
-    });
-    expect(useLayerStore.getState().layers[0]?.selectedLod).toBe("2.2");
+    fireEvent.click(screen.getByRole("checkbox", { name: "LoD 2.2" }));
+    expect(useLayerStore.getState().layers[0]?.selectedLods).toEqual(["1.2"]);
   });
 
   it("renders nothing when there are no available LoDs", () => {

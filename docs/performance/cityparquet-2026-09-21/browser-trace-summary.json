@@ -1,0 +1,380 @@
+{
+  "marks": {
+    "audit-load-start": 0.0,
+    "audit-load-end": 9174.764,
+    "audit-add-return": 9226.54,
+    "audit-table-ready": 15527.63
+  },
+  "sampledSelfMs": 15527.591,
+  "topSelf": [
+    {
+      "function": "(idle)",
+      "url": "",
+      "ms": 5224.587
+    },
+    {
+      "function": "transformInternal",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 2422.44
+    },
+    {
+      "function": "(garbage collector)",
+      "url": "",
+      "ms": 691.5
+    },
+    {
+      "function": "inverse$30",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 491.668
+    },
+    {
+      "function": "clens_cmplx_default",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 364.613
+    },
+    {
+      "function": "gatg_default",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 344.343
+    },
+    {
+      "function": "buildCityMeshArrays",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geometry/buildCityMeshArrays.ts",
+      "ms": 327.097
+    },
+    {
+      "function": "rzb",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/hyparquet-compressors.js",
+      "ms": 316.038
+    },
+    {
+      "function": "transformer",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 304.086
+    },
+    {
+      "function": "(program)",
+      "url": "",
+      "ms": 299.842
+    },
+    {
+      "function": "triangulateSurface",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geometry/buildCityMeshArrays.ts",
+      "ms": 232.471
+    },
+    {
+      "function": "geodeticToEcef",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geo/enuFrame.ts",
+      "ms": 174.191
+    },
+    {
+      "function": "dhu",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/hyparquet-compressors.js",
+      "ms": 147.349
+    },
+    {
+      "function": "forward$30",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 141.421
+    },
+    {
+      "function": "computeNewellNormal",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geometry/buildCityMeshArrays.ts",
+      "ms": 127.335
+    },
+    {
+      "function": "projectPositionsToEnu",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geo/sourceToEnu.ts",
+      "ms": 113.854
+    },
+    {
+      "function": "buildProjectionBasis",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geometry/buildCityMeshArrays.ts",
+      "ms": 110.288
+    },
+    {
+      "function": "compareDatums",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 109.775
+    },
+    {
+      "function": "encodeRowsAsJson",
+      "url": "http://127.0.0.1:5173/src/insights/layerRows.ts",
+      "ms": 106.668
+    },
+    {
+      "function": "computeFaceNormal",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geometry/buildCityMeshArrays.ts",
+      "ms": 102.552
+    },
+    {
+      "function": "bufferData",
+      "url": "",
+      "ms": 102.228
+    },
+    {
+      "function": "attributeColumns",
+      "url": "http://127.0.0.1:5173/src/insights/layerRows.ts",
+      "ms": 91.15
+    },
+    {
+      "function": "invertStruct",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityparquet/src/vendor/hyparquet/assemble.js",
+      "ms": 89.263
+    },
+    {
+      "function": "sinh_default",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 82.446
+    },
+    {
+      "function": "assembleLists",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityparquet/src/vendor/hyparquet/assemble.js",
+      "ms": 80.615
+    },
+    {
+      "function": "extend",
+      "url": "http://127.0.0.1:5173/src/features/cityparquet/normalizeCityParquetCrs.ts",
+      "ms": 78.257
+    },
+    {
+      "function": "WebGLRenderer.setSize",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/three.module-B8nzIm16.js",
+      "ms": 75.515
+    },
+    {
+      "function": "forward",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 70.224
+    },
+    {
+      "function": "",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geometry/buildCityMeshArrays.ts",
+      "ms": 69.856
+    },
+    {
+      "function": "cityCounts",
+      "url": "http://127.0.0.1:5173/src/ui/viewport/legendCounts.ts",
+      "ms": 63.242
+    }
+  ],
+  "topInclusive": [
+    {
+      "function": "(root)",
+      "url": "",
+      "ms": 15527.591
+    },
+    {
+      "function": "(idle)",
+      "url": "",
+      "ms": 5224.587
+    },
+    {
+      "function": "buildArrays",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityjson/src/cityModelMesh.ts",
+      "ms": 4819.539
+    },
+    {
+      "function": "forward",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 4471.57
+    },
+    {
+      "function": "transformer",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 4408.872
+    },
+    {
+      "function": "transformInternal",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/proj4.js",
+      "ms": 4049.709
+    },
+    {
+      "function": "projectPositionsToEnu",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-core/src/geo/sourceToEnu.ts",
+      "ms": 3493.791
+    },
+    {
+      "function": "performWorkOnRoot",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2704.585
+    },
+    {
+      "function": "run",
+      "url": "",
+      "ms": 2703.783
+    },
+    {
+      "function": "runWithFiberInDEV",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2699.502
+    },
+    {
+      "function": "",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2664.909
+    },
+    {
+      "function": "processRootScheduleInMicrotask",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2663.477
+    },
+    {
+      "function": "flushSyncWorkAcrossRoots_impl",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2663.341
+    },
+    {
+      "function": "performSyncWorkOnRoot",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2663.302
+    },
+    {
+      "function": "setHeightOffset",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityjson/src/cityModelMesh.ts",
+      "ms": 2548.651
+    },
+    {
+      "function": "",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityjson/src/cityModelRegistry.ts",
+      "ms": 2548.651
+    },
+    {
+      "function": "rebuildGeometry",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityjson/src/cityModelMesh.ts",
+      "ms": 2548.51
+    },
+    {
+      "function": "",
+      "url": "http://127.0.0.1:5173/src/scene/NavaraViewport.tsx",
+      "ms": 2515.612
+    },
+    {
+      "function": "commitRootWhenReady",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2451.406
+    },
+    {
+      "function": "commitRoot",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2451.372
+    },
+    {
+      "function": "flushPassiveEffects",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2446.107
+    },
+    {
+      "function": "commitPassiveMountOnFiber",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2445.456
+    },
+    {
+      "function": "recursivelyTraversePassiveMountEffects",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2445.453
+    },
+    {
+      "function": "flushSpawnedWork",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2444.858
+    },
+    {
+      "function": "flushPendingEffects",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2444.821
+    },
+    {
+      "function": "react_stack_bottom_frame",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2442.621
+    },
+    {
+      "function": "commitHookEffectListMount",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2442.543
+    },
+    {
+      "function": "commitHookPassiveMountEffects",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js",
+      "ms": 2442.543
+    },
+    {
+      "function": "syncLayers",
+      "url": "http://127.0.0.1:5173/src/scene/handleSync.ts",
+      "ms": 2435.364
+    },
+    {
+      "function": "add",
+      "url": "http://127.0.0.1:5173/src/scene/NavaraViewport.tsx",
+      "ms": 2435.099
+    },
+    {
+      "function": "addCityModel",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityjson/src/CityJSONPlugin.ts",
+      "ms": 2435.019
+    },
+    {
+      "function": "addCityModel",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityjson/src/cityModelRegistry.ts",
+      "ms": 2434.897
+    },
+    {
+      "function": "addMesh",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/dist-CsKhcL3P.js",
+      "ms": 2434.269
+    },
+    {
+      "function": "onCreate",
+      "url": "http://127.0.0.1:5173/node_modules/.vite/deps/dist-CsKhcL3P.js",
+      "ms": 2434.004
+    },
+    {
+      "function": "CityModelMesh",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityjson/src/cityModelMesh.ts",
+      "ms": 2433.866
+    },
+    {
+      "function": "createMesh",
+      "url": "http://127.0.0.1:5173/packages/cityjson-navara-plugins/packages/navara-cityjson/src/CityModelMeshDesc.ts",
+      "ms": 2433.866
+    },
+    {
+      "function": "loadCityParquetFromUrl",
+      "url": "http://127.0.0.1:5173/src/features/cityparquet/loadCityParquet.ts",
+      "ms": 1584.959
+    },
+    {
+      "function": "normalizeCityParquetCrs",
+      "url": "http://127.0.0.1:5173/src/features/cityparquet/normalizeCityParquetCrs.ts",
+      "ms": 1561.722
+    },
+    {
+      "function": "project",
+      "url": "http://127.0.0.1:5173/src/features/cityparquet/normalizeCityParquetCrs.ts",
+      "ms": 1374.643
+    },
+    {
+      "function": "",
+      "url": "http://127.0.0.1:5173/src/features/cityparquet/normalizeCityParquetCrs.ts",
+      "ms": 1309.476
+    }
+  ],
+  "longTasks": [
+    {
+      "name": "RunTask",
+      "ms": 6523.447,
+      "startMs": 5833.22
+    },
+    {
+      "name": "RunTask",
+      "ms": 198.046,
+      "startMs": 12356.677
+    },
+    {
+      "name": "RunTask",
+      "ms": 2716.918,
+      "startMs": 12677.775
+    }
+  ]
+}

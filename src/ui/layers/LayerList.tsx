@@ -250,6 +250,7 @@ function StoreLayerRow({
       kind,
       counts,
       lod: item.kind === "city" ? item.layer.selectedLod : null,
+      lods: item.kind === "city" ? item.layer.selectedLods : undefined,
       derivedFrom: item.kind === "city" ? item.layer.derivedFrom : null,
     };
   } else if (kind === "vector") {

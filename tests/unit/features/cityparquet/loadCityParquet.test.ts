@@ -8,6 +8,7 @@
  * a parse failure rather than as a green test over a stub.
  */
 
+import * as cityParquet from "@cityjson/navara-cityparquet";
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -651,5 +652,39 @@ describe("cityParquetLayerNameFromUrl", () => {
 
   it("survives a url it cannot classify", () => {
     expect(cityParquetLayerNameFromUrl("not a url")).toBe("not a url");
+  });
+});
+
+describe("geographic CityParquet load integration", () => {
+  it("normalizes EPSG:6697 models from both URLs and local files", async () => {
+    const assemble = vi
+      .spyOn(cityParquet, "assembleCityParquetModel")
+      .mockResolvedValue({
+        sourceEncoding: "cityparquet",
+        metadata: { referenceSystem: "EPSG:6697" },
+        bbox: [139.5272, 35.7095, 0, 139.5273, 35.7096, 65],
+        objects: {},
+        vertexCount: 0,
+      });
+    try {
+      const http = await packageHttp();
+      const remote = await loadCityParquetFromUrl(
+        "https://example.com/building.parquet",
+        http,
+      );
+      const local = await loadCityParquetFromFiles([
+        new File(["fixture"], "building.parquet"),
+      ]);
+      for (const model of [remote, local]) {
+        expect(model.metadata.referenceSystem).toBe(
+          "https://www.opengis.net/def/crs/EPSG/0/32654",
+        );
+        expect(model.bbox![0]).toBeGreaterThan(300_000);
+        expect(model.bbox![2]).toBe(0);
+        expect(model.bbox![5]).toBe(65);
+      }
+    } finally {
+      assemble.mockRestore();
+    }
   });
 });

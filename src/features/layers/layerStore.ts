@@ -1,3 +1,4 @@
+import { normalizeSelectedLods } from "./selectedLods";
 import { useQueryStore } from "../query/queryStore";
 import { type TablePresentation } from "../query/tablePresentation";
 import {
@@ -64,6 +65,8 @@ export interface Layer {
    *  same reason as {@link singleColor}. */
   readonly unmatchedColor: string;
   readonly selectedLod: string | null;
+  /** Static layers: highest available selected LoD per object. Absent is legacy single-LoD. */
+  readonly selectedLods?: readonly string[];
   readonly availableLods: ReadonlyArray<string>;
   /** "auto": the viewport-streaming driver (Task 14) picks the LoD ladder
    *  rung from zoom level. "manual": the user's `selectedLod` choice pins
@@ -252,6 +255,7 @@ export interface LayerStoreActions {
   ) => void;
   removeAllLayers: () => void;
   setLayerLod: (layerId: string, lod: string | null) => void;
+  setLayerLods: (layerId: string, lods: readonly string[]) => void;
   setLodMode: (layerId: string, mode: "auto" | "manual") => void;
   /** Draw `theme` (one of {@link Layer.appearanceThemes}) or `null` for
    *  plain colours. */
@@ -361,7 +365,13 @@ export const useLayerStore = create<LayerStore>((set) => ({
   addLayer: (input) => {
     const id = input.id ?? crypto.randomUUID();
     const availableLods = computeAvailableLods(input.model);
-    const selectedLod = availableLods[0] ?? null;
+    const selectedLods =
+      input.isStreaming || availableLods.length === 0
+        ? undefined
+        : (normalizeSelectedLods(input.selectedLods) ?? availableLods).filter(
+            (lod) => availableLods.includes(lod),
+          );
+    const selectedLod = (selectedLods ?? availableLods)[0] ?? null;
     const appearanceThemes = input.isStreaming
       ? []
       : computeAppearanceThemes(input.model);
@@ -392,6 +402,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
         ...rest,
         id,
         selectedLod,
+        selectedLods,
         availableLods,
         lodMode: "auto",
         // Every layer starts following the camera: that is what streaming
@@ -486,8 +497,21 @@ export const useLayerStore = create<LayerStore>((set) => ({
   setLayerLod: (layerId, lod) =>
     set((state) => ({
       layers: state.layers.map((l) =>
-        l.id === layerId ? { ...l, selectedLod: lod } : l,
+        l.id === layerId
+          ? { ...l, selectedLod: lod, selectedLods: undefined }
+          : l,
       ),
+    })),
+
+  setLayerLods: (layerId, lods) =>
+    set((state) => ({
+      layers: state.layers.map((l) => {
+        if (l.id !== layerId || l.isStreaming) return l;
+        const selectedLods = l.availableLods.filter((lod) =>
+          lods.includes(lod),
+        );
+        return { ...l, selectedLods, selectedLod: selectedLods[0] ?? null };
+      }),
     })),
 
   setLayerAppearance: (layerId, theme) =>

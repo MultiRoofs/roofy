@@ -1,3 +1,4 @@
+import { normalizeSelectedLods } from "../features/layers/selectedLods";
 import {
   normalizeTablePresentation,
   type TablePresentation,
@@ -94,6 +95,7 @@ export interface LayerSnapshot {
   readonly unmatchedColor?: string;
   readonly visible: boolean;
   readonly selectedLod?: string | null;
+  readonly selectedLods?: readonly string[];
   /** Defaults to "auto" on restore (via `normalizeLayers`) when absent from
    *  a saved snapshot. */
   readonly lodMode?: "auto" | "manual";
@@ -139,6 +141,7 @@ export interface RawLayersDocument {
 }
 
 export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
+  readonly selectedLods?: readonly string[];
   readonly lodMode: "auto" | "manual";
   readonly hiddenTypes: readonly string[];
   readonly attributeOrders?: AttributeOrders;
@@ -191,6 +194,7 @@ export function normalizeLayers(
     return l.stream?.kind === "file"
       ? {
           ...l,
+          selectedLods: normalizeSelectedLods(l.selectedLods),
           lodMode,
           hiddenTypes,
           attributeOrders,
@@ -200,6 +204,7 @@ export function normalizeLayers(
         }
       : {
           ...l,
+          selectedLods: normalizeSelectedLods(l.selectedLods),
           lodMode,
           hiddenTypes,
           attributeOrders,

@@ -1,0 +1,180 @@
+{
+  "load": {
+    "stage": "ready",
+    "start": 36140.300000000745,
+    "longTasks": [
+      {
+        "start": 37394.09999999963,
+        "duration": 7198
+      },
+      {
+        "start": 44593,
+        "duration": 301
+      },
+      {
+        "start": 44917.800000000745,
+        "duration": 72
+      },
+      {
+        "start": 45043.800000000745,
+        "duration": 2872
+      }
+    ],
+    "loadMs": 4895.4000000003725,
+    "id": "8d37d265-c10c-408c-a5d6-77ccde8540dc",
+    "readyMs": 12036.199999999255,
+    "heap": 2033917438
+  },
+  "switches": {
+    "runs": [
+      {
+        "lods": ["2"],
+        "elapsedMs": 279.09999999962747,
+        "calls": [
+          {
+            "name": "buildArrays",
+            "ms": 105.5,
+            "triangles": 1913792
+          },
+          {
+            "name": "rebuildGeometry",
+            "ms": 106.79999999888241,
+            "triangles": 36968
+          },
+          {
+            "name": "setLod",
+            "ms": 106.79999999888241,
+            "triangles": 36968
+          }
+        ],
+        "heap": 2215141842
+      },
+      {
+        "lods": ["2", "1", "0"],
+        "elapsedMs": 3049.199999999255,
+        "calls": [
+          {
+            "name": "buildArrays",
+            "ms": 2691.5999999996275,
+            "triangles": 36968
+          },
+          {
+            "name": "rebuildGeometry",
+            "ms": 2757.5999999996275,
+            "triangles": 1913792
+          },
+          {
+            "name": "setLod",
+            "ms": 2757.5999999996275,
+            "triangles": 1913792
+          }
+        ],
+        "heap": 2708524010
+      },
+      {
+        "lods": ["2", "1"],
+        "elapsedMs": 2840.0999999996275,
+        "calls": [
+          {
+            "name": "buildArrays",
+            "ms": 2589.9000000003725,
+            "triangles": 1913792
+          },
+          {
+            "name": "rebuildGeometry",
+            "ms": 2650.699999999255,
+            "triangles": 1913792
+          },
+          {
+            "name": "setLod",
+            "ms": 2650.699999999255,
+            "triangles": 1913792
+          }
+        ],
+        "heap": 3201797030
+      }
+    ],
+    "calls": [
+      {
+        "name": "buildArrays",
+        "ms": 105.5,
+        "triangles": 1913792
+      },
+      {
+        "name": "rebuildGeometry",
+        "ms": 106.79999999888241,
+        "triangles": 36968
+      },
+      {
+        "name": "setLod",
+        "ms": 106.79999999888241,
+        "triangles": 36968
+      },
+      {
+        "name": "buildArrays",
+        "ms": 2691.5999999996275,
+        "triangles": 36968
+      },
+      {
+        "name": "rebuildGeometry",
+        "ms": 2757.5999999996275,
+        "triangles": 1913792
+      },
+      {
+        "name": "setLod",
+        "ms": 2757.5999999996275,
+        "triangles": 1913792
+      },
+      {
+        "name": "buildArrays",
+        "ms": 2589.9000000003725,
+        "triangles": 1913792
+      },
+      {
+        "name": "rebuildGeometry",
+        "ms": 2650.699999999255,
+        "triangles": 1913792
+      },
+      {
+        "name": "setLod",
+        "ms": 2650.699999999255,
+        "triangles": 1913792
+      },
+      {
+        "name": "buildArrays",
+        "ms": 2632.2999999988824,
+        "triangles": 1913792
+      },
+      {
+        "name": "rebuildGeometry",
+        "ms": 2687.9000000003725,
+        "triangles": 1913792
+      },
+      {
+        "name": "setLod",
+        "ms": 2687.9000000003725,
+        "triangles": 1913792
+      }
+    ]
+  },
+  "network": [
+    {
+      "name": "https://cityparquet.open3d.city/data/plateau/nishitokyo/building.parquet",
+      "duration": 1250.9000000003725,
+      "transferSize": 0,
+      "encodedBodySize": 0
+    }
+  ],
+  "environment": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "viewport": [960, 906],
+    "heapLimit": 4395630592
+  },
+  "currentHeap": 1454355459,
+  "notes": [
+    "LoD runs measured with prototype method wrappers restored afterward; inclusive durations overlap.",
+    "buildArrays triangle count reads the prior this.arrays; use rebuildGeometry triangle counts for completed results.",
+    "Cross-origin Resource Timing sizes of zero are unavailable, not a zero-byte transfer.",
+    "Later heap reading fell from 3.20 GB to 1.45 GB without explicit GC; this does not establish absence/presence of a leak."
+  ]
+}

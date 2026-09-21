@@ -2490,7 +2490,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             plugin.addCityModel(layer.model, {
               id: layer.id,
               crs: layer.model.metadata.referenceSystem,
-              lod: layer.selectedLod,
+              lod: layer.selectedLods ?? layer.selectedLod,
               // Built filtered, so a restored layer never renders one frame of
               // the geometry it was saved with hidden.
               hiddenTypes: layer.hiddenTypes,

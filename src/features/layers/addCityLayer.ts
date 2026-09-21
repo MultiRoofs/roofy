@@ -47,6 +47,7 @@ export interface AddCityLayerInput {
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
   readonly selectedAppearance?: AppearanceTheme | null;
+  readonly selectedLods?: readonly string[];
   /** What DuckDB should build this layer's table from. */
   readonly duckdb: LayerTableSource;
 }
@@ -150,6 +151,7 @@ export function addCityLayer(input: AddCityLayerInput): string {
     attributeOrders: input.attributeOrders,
     tablePresentation: input.tablePresentation,
     selectedAppearance: input.selectedAppearance,
+    selectedLods: input.selectedLods,
   });
   const warn = (error: unknown): void => {
     console.warn(

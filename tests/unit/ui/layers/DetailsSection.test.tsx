@@ -204,9 +204,13 @@ describe("DetailsSection — what a static city layer is", () => {
     expect(screen.getByLabelText("Appearance")).toBeTruthy();
   });
 
-  it("offers the per-layer LoD dropdown, not the global streaming one", () => {
+  it("offers per-layer LoD checkboxes, not the global streaming control", () => {
     render(<DetailsSection item={city({ availableLods: ["1.2", "2.2"] })} />);
-    expect(screen.getByTitle("Level of Detail")).toBeTruthy();
+    expect(
+      screen.getByRole("group", { name: "Levels of detail" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "LoD 1.2" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "LoD 2.2" })).toBeChecked();
     expect(
       screen.queryByLabelText(/applies to every streaming layer/),
     ).toBeNull();

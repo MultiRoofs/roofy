@@ -1,3 +1,4 @@
+import { normalizeSelectedLods } from "../features/layers/selectedLods";
 import {
   normalizeTablePresentation,
   type TablePresentation,
@@ -52,6 +53,7 @@ export interface ShareableLayerState {
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
   readonly visible: boolean;
+  readonly selectedLods?: readonly string[];
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
 }
@@ -235,6 +237,7 @@ export function readShareHash(hash: string): ShareHashResult {
           ? {
               ...l,
               ...normalizeColorBy(l),
+              selectedLods: normalizeSelectedLods(l.selectedLods),
               attributeOrders: normalizeAttributeOrders(l.attributeOrders),
               tablePresentation: normalizeTablePresentation(
                 l.tablePresentation,

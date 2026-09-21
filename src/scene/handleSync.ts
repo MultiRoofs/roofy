@@ -44,7 +44,7 @@ import type { Layer } from "../features/layers/layerStore";
  *  tell an actual change from a re-render. */
 export interface LiveLayer {
   readonly handle: CityModelHandle;
-  lod: string | null;
+  lod: string | readonly string[] | null;
   visible: boolean;
   /** The `hiddenTypes` array last pushed, by IDENTITY — `layerStore` replaces
    *  it on every edit. Recorded (not pushed) on the add path: `registry.add`
@@ -153,7 +153,7 @@ export function syncLayers(
         const handle = registry.add(layer);
         entry = {
           handle,
-          lod: layer.selectedLod,
+          lod: layer.selectedLods ?? layer.selectedLod,
           visible: layer.visible,
           hiddenTypes: layer.hiddenTypes,
           // Seeded, not pushed: `registry.add` builds the handle already
@@ -169,9 +169,9 @@ export function syncLayers(
       }
     }
 
-    if (entry.lod !== layer.selectedLod) {
-      entry.lod = layer.selectedLod;
-      entry.handle.setLod(layer.selectedLod);
+    if (entry.lod !== (layer.selectedLods ?? layer.selectedLod)) {
+      entry.lod = layer.selectedLods ?? layer.selectedLod;
+      entry.handle.setLod(layer.selectedLods ?? layer.selectedLod);
     }
     if (entry.visible !== layer.visible) {
       entry.visible = layer.visible;

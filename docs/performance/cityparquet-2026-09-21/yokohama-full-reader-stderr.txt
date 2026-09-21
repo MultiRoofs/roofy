@@ -1,0 +1,87 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vite.config" without a file extension (vitest.config.ts:3:24). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /Users/hbbaba/tudelft/projects/multiroof/multiroof-viewer
+
+
+<--- Last few GCs --->
+
+[91876:0x7e5c00000]    10564 ms: Mark-Compact (reduce) 4094.5 (4106.6) -> 4094.2 (4105.4) MB, pooled: 0 MB, 268.71 / 0.00 ms  (+ 47.0 ms in 17 steps since start of marking, biggest step 5.0 ms, walltime since start of marking 320 ms) (average mu = 0.278, [91876:0x7e5c00000]    10970 ms: Mark-Compact (reduce) 4095.1 (4106.0) -> 4094.8 (4105.9) MB, pooled: 0 MB, 302.29 / 0.00 ms  (+ 6.8 ms in 8 steps since start of marking, biggest step 5.0 ms, walltime since start of marking 314 ms) (average mu = 0.259, cu
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x10476b1d8 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+ 2: 0x1049ddcf0 v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+ 3: 0x104c3d118 v8::internal::Heap::stack() [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+ 4: 0x104c404ec v8::internal::Heap::HasLowYoungGenerationAllocationRate() [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+ 5: 0x104c516e0 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+ 6: 0x104c50fb4 void heap::base::Stack::SetMarkerAndCallbackImpl<v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1>(heap::base::Stack*, void*, void const*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+ 7: 0x105605a24 PushAllRegistersAndIterateStack [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+ 8: 0x104c3ae1c v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+ 9: 0x104c2fb28 v8::internal::HeapAllocator::AllocateRawWithRetryOrFailSlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+10: 0x104bfb190 v8::internal::FactoryBase<v8::internal::Factory>::NewFixedArray(int, v8::internal::AllocationType) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+11: 0x104df4cf0 v8::internal::(anonymous namespace)::ElementsAccessorBase<v8::internal::(anonymous namespace)::FastPackedObjectElementsAccessor, v8::internal::(anonymous namespace)::ElementsKindTraits<(v8::internal::ElementsKind)2>>::ConvertElementsWithCapacity(v8::internal::DirectHandle<v8::internal::JSObject>, v8::internal::DirectHandle<v8::internal::FixedArrayBase>, v8::internal::ElementsKind, unsigned int, unsigned int, unsigned int) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+12: 0x104df3710 v8::internal::(anonymous namespace)::ElementsAccessorBase<v8::internal::(anonymous namespace)::FastPackedObjectElementsAccessor, v8::internal::(anonymous namespace)::ElementsKindTraits<(v8::internal::ElementsKind)2>>::GrowCapacity(v8::internal::DirectHandle<v8::internal::JSObject>, unsigned int) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+13: 0x105092948 v8::internal::Runtime_GrowArrayElements(int, unsigned long*, v8::internal::Isolate*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+14: 0x1056f6234 Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+15: 0x1286de05c 
+16: 0x1286ade90 
+17: 0x1286b4d2c 
+18: 0x1286b7d3c 
+19: 0x10576ce58 Builtins_PromiseFulfillReactionJob [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+20: 0x105686bd0 Builtins_RunMicrotasks [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+21: 0x1056567b0 Builtins_JSRunMicrotasksEntry [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+22: 0x104b812f4 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+23: 0x104b81b68 v8::internal::(anonymous namespace)::InvokeWithTryCatch(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+24: 0x104b81ca4 v8::internal::Execution::TryRunMicrotasks(v8::internal::Isolate*, v8::internal::MicrotaskQueue*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+25: 0x104bb0a48 v8::internal::MicrotaskQueue::RunMicrotasks(v8::internal::Isolate*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+26: 0x104bb13a8 v8::internal::MicrotaskQueue::PerformCheckpoint(v8::Isolate*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+27: 0x10565a818 Builtins_CallApiCallbackGeneric [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+28: 0x1285a8f94 
+29: 0x1056568cc Builtins_JSEntryTrampoline [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+30: 0x105656570 Builtins_JSEntry [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+31: 0x104b8133c v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+32: 0x104b80ca0 v8::internal::Execution::Call(v8::internal::Isolate*, v8::internal::DirectHandle<v8::internal::Object>, v8::internal::DirectHandle<v8::internal::Object>, v8::base::Vector<v8::internal::DirectHandle<v8::internal::Object> const>) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+33: 0x1049f56b0 v8::Function::Call(v8::Isolate*, v8::Local<v8::Context>, v8::Local<v8::Value>, int, v8::Local<v8::Value>*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+34: 0x10464b180 node::InternalCallbackScope::Close() [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+35: 0x10464b3b0 node::InternalMakeCallback(node::Environment*, v8::Local<v8::Object>, v8::Local<v8::Object>, v8::Local<v8::Function>, int, v8::Local<v8::Value>*, node::async_context, v8::Local<v8::Value>) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+36: 0x104663fcc node::AsyncWrap::MakeCallback(v8::Local<v8::Function>, int, v8::Local<v8::Value>*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+37: 0x1048c4ecc node::StreamBase::CallJSOnreadMethod(long, v8::Local<v8::ArrayBuffer>, unsigned long, node::StreamBase::StreamBaseJSChecks) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+38: 0x1048c6660 node::EmitToJSStreamListener::OnStreamRead(long, uv_buf_t const&) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+39: 0x1048cbf30 node::LibuvStreamWrap::OnUvRead(long, uv_buf_t const*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+40: 0x1048cc660 node::LibuvStreamWrap::ReadStart()::$_1::__invoke(uv_stream_s*, long, uv_buf_t const*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+41: 0x105641c4c uv__stream_io [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+42: 0x105649480 uv__io_poll [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+43: 0x1056356b4 uv_run [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+44: 0x10464c6a8 node::SpinEventLoopInternal(node::Environment*) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+45: 0x1047c456c node::NodeMainInstance::Run() [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+46: 0x104717b6c node::Start(int, char**) [/Users/hbbaba/.local/share/mise/installs/node/24.18.1/bin/node]
+47: 0x18cd444e4 start [/usr/lib/dyld]
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-pool]: Worker forks emitted error.
+ ❯ EventEmitter.onTaskError node_modules/vitest/dist/chunks/cli-api.BK8pd4xc.js:3459:21
+ ❯ EventEmitter.emit node:events:509:28
+ ❯ ChildProcess.emitUnexpectedExit node_modules/vitest/dist/chunks/cli-api.BK8pd4xc.js:3025:22
+ ❯ ChildProcess.emit node:events:509:28
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:295:12
+
+Caused by: Error: Worker exited unexpectedly
+ ❯ ChildProcess.emitUnexpectedExit node_modules/vitest/dist/chunks/cli-api.BK8pd4xc.js:3023:33
+ ❯ ChildProcess.emit node:events:509:28
+ ❯ Process.ChildProcess._handle.onexit node:internal/child_process:295:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files   (1)
+      Tests   (1)
+     Errors  1 error
+   Start at  16:10:09
+   Duration  11.22s (transform 181ms, setup 110ms, import 236ms, tests 0ms, environment 0ms)
+

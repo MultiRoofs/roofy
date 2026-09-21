@@ -1,0 +1,13 @@
+{
+  "source": "Chrome DevTools MCP performance_analyze_insight",
+  "insightSetId": "NO_NAVIGATION",
+  "insightName": "ThirdParties",
+  "reportedTransferSizes": {
+    "open3d.city": "30.7 MB",
+    "reearth.land": "14.8 MB",
+    "googleapis.com": "5.3 MB",
+    "Esri ArcGIS": "1.2 MB"
+  },
+  "estimatedSavings": "none",
+  "note": "Values transcribed from the tool's returned insight; includes scene-context traffic."
+}

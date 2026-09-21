@@ -1,0 +1,177 @@
+{
+  "name": "nishitokyo",
+  "bytes": 30707678,
+  "rows": 84862,
+  "rowGroups": 2,
+  "uncompressedBytes": 139781164,
+  "columns": {
+    "id": {
+      "compressed": 1646488,
+      "uncompressed": 3099856
+    },
+    "feature_id": {
+      "compressed": 1646488,
+      "uncompressed": 3099856
+    },
+    "object_type": {
+      "compressed": 228,
+      "uncompressed": 165
+    },
+    "parents": {
+      "compressed": 268,
+      "uncompressed": 205
+    },
+    "children": {
+      "compressed": 268,
+      "uncompressed": 205
+    },
+    "children_roles": {
+      "compressed": 268,
+      "uncompressed": 205
+    },
+    "address": {
+      "compressed": 2412,
+      "uncompressed": 1845
+    },
+    "bbox": {
+      "compressed": 2230089,
+      "uncompressed": 4074284
+    },
+    "geometry_lod0_0": {
+      "compressed": 7056438,
+      "uncompressed": 17659315
+    },
+    "geometry_properties_lod0_0": {
+      "compressed": 1040,
+      "uncompressed": 788
+    },
+    "material_lod0_0": {
+      "compressed": 536,
+      "uncompressed": 410
+    },
+    "texture_lod0_0": {
+      "compressed": 804,
+      "uncompressed": 615
+    },
+    "geometry_lod1_0": {
+      "compressed": 16858395,
+      "uncompressed": 108544613
+    },
+    "geometry_properties_lod1_0": {
+      "compressed": 44707,
+      "uncompressed": 272667
+    },
+    "material_lod1_0": {
+      "compressed": 536,
+      "uncompressed": 410
+    },
+    "texture_lod1_0": {
+      "compressed": 804,
+      "uncompressed": 615
+    },
+    "geometry_lod2_0": {
+      "compressed": 337283,
+      "uncompressed": 1812515
+    },
+    "geometry_properties_lod2_0": {
+      "compressed": 20128,
+      "uncompressed": 221358
+    },
+    "material_lod2_0": {
+      "compressed": 536,
+      "uncompressed": 410
+    },
+    "texture_lod2_0": {
+      "compressed": 491739,
+      "uncompressed": 576121
+    },
+    "template": {
+      "compressed": 726,
+      "uncompressed": 537
+    },
+    "other": {
+      "compressed": 229,
+      "uncompressed": 166
+    },
+    "\u5ef6\u3079\u9762\u7a4d\u63db\u7b97\u4fc2\u6570": {
+      "compressed": 21895,
+      "uncompressed": 35623
+    },
+    "\u8aac\u660e\u6ce8\u8a18": {
+      "compressed": 3491,
+      "uncompressed": 5057
+    },
+    "\u5927\u5b57\u30fb\u753a\u30b3\u30fc\u30c9": {
+      "compressed": 33515,
+      "uncompressed": 44349
+    },
+    "\u753a\u30fb\u4e01\u76ee\u30b3\u30fc\u30c9": {
+      "compressed": 32230,
+      "uncompressed": 35759
+    },
+    "13+\u533a\u5e02\u753a\u6751\u30b3\u30fc\u30c9+\u5927\u5b57\u30fb\u753a\u30b3\u30fc\u30c9+\u753a\u30fb\u4e01\u76ee\u30b3\u30fc\u30c9": {
+      "compressed": 54219,
+      "uncompressed": 68137
+    },
+    "class": {
+      "compressed": 9356,
+      "uncompressed": 15835
+    },
+    "usage": {
+      "compressed": 22008,
+      "uncompressed": 39761
+    },
+    "measuredHeight": {
+      "compressed": 81352,
+      "uncompressed": 98699
+    },
+    "storeysAboveGround": {
+      "compressed": 22879,
+      "uncompressed": 43147
+    },
+    "storeysBelowGround": {
+      "compressed": 9969,
+      "uncompressed": 17658
+    },
+    "\u5730\u533a\u8a08\u753b": {
+      "compressed": 5827,
+      "uncompressed": 7534
+    },
+    "\u518d\u958b\u767a\u7b49\u4fc3\u9032\u533a\u3092\u5b9a\u3081\u308b\u5730\u533a\u8a08\u753b": {
+      "compressed": 940,
+      "uncompressed": 1116
+    },
+    "creationDate": {
+      "compressed": 229,
+      "uncompressed": 166
+    },
+    "function": {
+      "compressed": 229,
+      "uncompressed": 166
+    },
+    "\u753a\u30fb\u4e01\u76ee\u30b3\u30fc\u30c9 ": {
+      "compressed": 229,
+      "uncompressed": 166
+    },
+    "\u533a\u5e02\u753a\u6751\u540d\u79f0": {
+      "compressed": 229,
+      "uncompressed": 166
+    },
+    "\u753a\u4e01\u76ee\u540d\u79f0": {
+      "compressed": 229,
+      "uncompressed": 166
+    },
+    "\u5909\u5316\u30d5\u30e9\u30b0": {
+      "compressed": 229,
+      "uncompressed": 166
+    },
+    "\u904e\u5e74\u5ea6\u4fee\u6b63\u30d5\u30e9\u30b0": {
+      "compressed": 229,
+      "uncompressed": 166
+    },
+    "\u571f\u5730\u4fee\u6b63\u30d5\u30e9\u30b0": {
+      "compressed": 229,
+      "uncompressed": 166
+    }
+  }
+}

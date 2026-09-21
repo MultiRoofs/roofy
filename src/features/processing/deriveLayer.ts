@@ -497,7 +497,9 @@ export async function prepareDerivedCityLayer(input: {
       // choice", and a choice is the LoD AND the mode. `setLayerLod` does not
       // touch the mode, so both setters are needed or a manually chosen LoD
       // comes back as an auto-derived one.
-      if (parent.selectedLod !== null) {
+      if (parent.selectedLods !== undefined) {
+        store.setLayerLods(layerId, parent.selectedLods);
+      } else if (parent.selectedLod !== null) {
         store.setLayerLod(layerId, parent.selectedLod);
       }
       if (parent.lodMode !== "auto") {

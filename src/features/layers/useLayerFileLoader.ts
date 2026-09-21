@@ -60,6 +60,7 @@ export interface LayerOverrides {
   readonly visible?: boolean;
   readonly lodMode?: "auto" | "manual";
   readonly selectedLod?: string | null;
+  readonly selectedLods?: readonly string[];
   /** Applied at creation, not afterwards: the layer is built (or its first
    *  cell fetched) already filtered. */
   readonly hiddenTypes?: ReadonlyArray<string>;
@@ -90,6 +91,10 @@ function applyPostCreateOverrides(
   if (!overrides) return;
   if (overrides.lodMode === "manual") {
     useLayerStore.getState().setLodMode(layerId, "manual");
+  }
+  if (overrides.selectedLods !== undefined) {
+    useLayerStore.getState().setLayerLods(layerId, overrides.selectedLods);
+    return;
   }
   if (overrides.selectedLod !== undefined && overrides.selectedLod !== null) {
     const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);

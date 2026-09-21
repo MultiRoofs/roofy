@@ -1281,3 +1281,18 @@ describe("theme styles", () => {
     expect(handle.setThemeStyle).not.toHaveBeenCalled();
   });
 });
+
+it("updates multi-LoD selection even when its highest label is unchanged", () => {
+  const handle = fakeHandle("L1");
+  const live = new Map<string, LiveLayer>();
+  const registry = { get: () => handle, add: vi.fn(() => handle) };
+  const first = layer({ id: "L1", selectedLod: "2", selectedLods: ["2", "1"] });
+  syncLayers(registry as never, [first], live, () => {});
+  expect(handle.setLod).not.toHaveBeenCalled();
+  const second = { ...first, selectedLods: ["2"] };
+  syncLayers(registry as never, [second], live, () => {});
+  expect(handle.setLod).toHaveBeenCalledWith(["2"]);
+  handle.setLod.mockClear();
+  syncLayers(registry as never, [second], live, () => {});
+  expect(handle.setLod).not.toHaveBeenCalled();
+});

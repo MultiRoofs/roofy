@@ -1,0 +1,41 @@
+{
+  "render": {
+    "runs": [
+      {
+        "name": "default",
+        "frames": 301,
+        "elapsedMs": 5009.299999999639,
+        "draws": 107156,
+        "p50": 16.699999999953434,
+        "p95": 16.70000000001164,
+        "max": 16.800000000046566
+      },
+      {
+        "name": "shadows-off",
+        "frames": 301,
+        "elapsedMs": 5012.799999999639,
+        "draws": 70735,
+        "p50": 16.70000000001164,
+        "p95": 16.70000000001164,
+        "max": 16.800000000046566
+      },
+      {
+        "name": "shadows-and-effects-off",
+        "frames": 301,
+        "elapsedMs": 5011.599999999977,
+        "draws": 62909,
+        "p50": 16.70000000001164,
+        "p95": 16.70000000001164,
+        "max": 16.800000000046566
+      }
+    ],
+    "viewport": [1280, 577],
+    "device": {
+      "vendor": "Google Inc. (Apple)",
+      "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)"
+    }
+  },
+  "resources": [],
+  "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.0.0 Safari/537.36",
+  "heapLimit": 4395630592
+}

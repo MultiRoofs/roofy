@@ -327,3 +327,16 @@ describe("share timezone", () => {
     ).toBe("Europe/Amsterdam");
   });
 });
+
+it("round-trips multiple selected LoDs and an explicitly empty selection", () => {
+  for (const selectedLods of [["2", "1"], []]) {
+    const state = makeState();
+    const encoded = encodeShareState({
+      ...state,
+      layers: state.layers.map((l) => ({ ...l, selectedLods })),
+    });
+    expect(decodeShareState(encoded)?.layers[0]?.selectedLods).toEqual(
+      selectedLods,
+    );
+  }
+});

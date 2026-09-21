@@ -1,0 +1,7 @@
+{
+  "command": "ulimit -c 0; AUDIT_DATASET=yokohama AUDIT_STOP_AFTER_READ=1 AUDIT_LOG=/tmp/roofy-yokohama-full-reader.jsonl NODE_OPTIONS=--max-old-space-size=4096 npx vitest run tests/unit/cityparquet-profile.tmp.test.ts",
+  "exitCode": 1,
+  "note": "Original benchmark location during capture. Retained opt-in equivalent: npx vitest run --config scripts/performance/vitest.config.ts. Fatal stderr preserved in yokohama-full-reader-stderr.txt.",
+  "lastCompletedStage": "file-read",
+  "fatalError": "Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory"
+}

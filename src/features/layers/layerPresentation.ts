@@ -50,6 +50,7 @@ export interface LayerStateInput {
   readonly counts?: { readonly buildings: number; readonly objects: number };
   /** Static city: `selectedLod`. */
   readonly lod?: string | null;
+  readonly lods?: readonly string[];
   /** Streaming: `getResidentModel().featureCount`. */
   readonly residentCount?: number;
   /** Streaming. */
@@ -150,7 +151,16 @@ function kindStateLine(input: LayerStateInput): string {
 }
 
 function cityStateLine(input: LayerStateInput): string {
-  const suffix = input.lod != null ? ` · LoD ${input.lod}` : "";
+  const suffix =
+    input.lods !== undefined
+      ? input.lods.length === 0
+        ? " · No LoDs selected"
+        : input.lods.length === 1
+          ? ` · LoD ${input.lods[0]}`
+          : ` · Best of LoDs ${input.lods.join(", ")}`
+      : input.lod != null
+        ? ` · LoD ${input.lod}`
+        : "";
   if (input.counts) {
     const { buildings, objects } = input.counts;
     const allBuildings = objects > 0 && buildings === objects;

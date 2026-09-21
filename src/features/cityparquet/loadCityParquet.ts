@@ -5,7 +5,8 @@
  * URL MEANS, `objectStorage` knows how to list and address a bucket, and
  * `@cityjson/navara-cityparquet` knows what the bytes ARE. Nothing here parses
  * parquet or interprets a manifest beyond "which files do I fetch"; the model
- * itself is always `assembleCityParquetModel`'s.
+ * itself is assembled by `assembleCityParquetModel`, then geographic PLATEAU
+ * coordinates are normalized into a metric frame for the viewer and analysis.
  *
  * ONE FAILED FILE FAILS THE LAYER (spec D6). A package is one model in one
  * frame — half of a city drawn with no indication that the other half is
@@ -30,6 +31,7 @@ import {
   parseCityParquetManifest,
 } from "@cityjson/navara-cityparquet";
 import type { CityModel } from "@cityjson/navara-core";
+import { normalizeCityParquetCrs } from "./normalizeCityParquetCrs";
 import { detectEncoding } from "../../domain/citymodel/detectEncoding";
 import { browserPlatform } from "../../platform/browser";
 import type { HttpClient } from "../../platform/types";
@@ -487,9 +489,11 @@ export async function loadCityParquetFromUrl(
     // CityParquet at all. (A `.parquet.gz` no longer lands here: the classifier
     // owns it as a table, for the same reason.)
     if (detectEncoding(rawUrl) === "cityparquet") {
-      return assembleCityParquetModel([
-        await fetchTable(rawUrl, baseName(rawUrl), http),
-      ]);
+      return normalizeCityParquetCrs(
+        await assembleCityParquetModel([
+          await fetchTable(rawUrl, baseName(rawUrl), http),
+        ]),
+      );
     }
     throw new Error(
       `"${rawUrl}" is not a CityParquet source — expected a .parquet file, a package directory containing ${MANIFEST_FILENAME}, or a gs:// / s3:// pattern.`,
@@ -500,7 +504,9 @@ export async function loadCityParquetFromUrl(
     fetchAll(targets.tables, http),
     fetchSidecars(targets.sidecars, http),
   ]);
-  return assembleCityParquetModel(tables, { sidecars });
+  return normalizeCityParquetCrs(
+    await assembleCityParquetModel(tables, { sidecars }),
+  );
 }
 
 /**
@@ -631,7 +637,9 @@ export async function loadCityParquetFromFiles(
     const file = name === undefined ? undefined : fileForHref(name, byPath);
     if (file) sidecars[kind] = new Uint8Array(await file.arrayBuffer());
   }
-  return assembleCityParquetModel(tables, { sidecars });
+  return normalizeCityParquetCrs(
+    await assembleCityParquetModel(tables, { sidecars }),
+  );
 }
 
 /**

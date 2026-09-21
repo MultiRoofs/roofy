@@ -250,6 +250,7 @@ interface UnavailableLayer {
   readonly visible: boolean;
   readonly lodMode: "auto" | "manual";
   readonly selectedLod: string | null;
+  readonly selectedLods?: readonly string[];
   readonly hiddenTypes: readonly string[];
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
@@ -1017,6 +1018,7 @@ export function App({
         ...captureColorBy(l),
         visible: l.visible,
         selectedLod: l.selectedLod,
+        selectedLods: l.selectedLods,
         lodMode: l.lodMode,
         hiddenTypes: [...l.hiddenTypes],
         attributeOrders: l.attributeOrders,
@@ -1218,6 +1220,7 @@ export function App({
                 visible,
                 lodMode,
                 selectedLod,
+                selectedLods: sl.selectedLods,
                 hiddenTypes,
                 attributeOrders,
                 tablePresentation,
@@ -1293,6 +1296,11 @@ export function App({
                   refetch: urlSourceProvider(modelRef.url),
                 }),
               });
+            }
+            if (sl.selectedLods !== undefined) {
+              useLayerStore.getState().setLayerLods(layerId, sl.selectedLods);
+            } else if (selectedLod !== null) {
+              useLayerStore.getState().setLayerLod(layerId, selectedLod);
             }
             if (lodMode === "manual") {
               useLayerStore.getState().setLodMode(layerId, "manual");
@@ -1457,6 +1465,7 @@ export function App({
         .map((l) => ({
           name: l.name,
           modelUrl: (l.modelRef as { type: "url"; url: string }).url,
+          selectedLods: l.selectedLods,
           rules: [...l.rules],
           // The USER's rules plus the mode; the synthetic catch-alls are
           // rebuilt on the other side, never sent.
@@ -1554,6 +1563,7 @@ export function App({
               name,
               model: parsed,
               modelRef: { type: "url", url: sl.modelUrl },
+              selectedLods: sl.selectedLods,
               visible,
               attributeOrders: sl.attributeOrders,
               tablePresentation: sl.tablePresentation,
@@ -1570,6 +1580,7 @@ export function App({
               name,
               model: parsed.model,
               modelRef: { type: "url", url: sl.modelUrl },
+              selectedLods: sl.selectedLods,
               visible,
               attributeOrders: sl.attributeOrders,
               tablePresentation: sl.tablePresentation,
@@ -1746,6 +1757,7 @@ export function App({
                     visible: entry.visible,
                     lodMode: entry.lodMode,
                     selectedLod: entry.selectedLod,
+                    selectedLods: entry.selectedLods,
                     hiddenTypes: entry.hiddenTypes,
                     attributeOrders: entry.attributeOrders,
                     tablePresentation: entry.tablePresentation,

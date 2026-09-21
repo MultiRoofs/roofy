@@ -736,3 +736,49 @@ line in an areas-only source).
 Browser acceptance procedure: `scripts/smoke/processing-m1.md` (M13.1),
 `scripts/smoke/processing-m2.md` (M13.2) and `scripts/smoke/processing-m3.md`
 (M13.3).
+
+## Geographic PLATEAU CityParquet (2026-09-21)
+
+The Nishitokyo `building.parquet` dataset uses EPSG:6697 (JGD2011 geographic
+coordinates with JGD2011 gravity-related heights). It downloads and decodes
+successfully, but the viewer's metric CRS gate previously rejected it.
+The WKB and row bounds store **longitude, latitude, height**, despite the EPSG
+CRS authority's latitude-first axis order; the source CityJSON transform in the
+footer is provenance and must not be applied to these already-decoded coordinates.
+
+`normalizeCityParquetCrs` runs after package assembly for both URL and local-file
+loads. It converts EPSG:6697 horizontally into the WGS84 UTM zone selected from
+the package bounds (Nishitokyo: EPSG:32654). All ring vertices and object bounds
+are converted, including geometryless parents; model bounds are recomputed.
+Heights, LoDs, IDs, semantics, attributes and appearance are retained. Other CRSs
+keep the existing admission checks. This deliberately supports this known
+compound CRS rather than assuming every geographic CRS uses orthometric metres.
+
+The horizontal conversion uses the metre-level JGD2011/WGS84 null-datum
+approximation. Vertical values remain unchanged and use the renderer's existing
+EGM2008 geoid approximation, not a Japan-specific vertical datum transformation.
+The normalized model advertises its metric CRS; the layer's original source URL
+or files remain the reload source. This also keeps app-side area/slope/distance
+calculations in metres instead of merely allowing degree coordinates past the gate.
+
+## Multiple display LoDs (2026-09-21)
+
+Static city layers now select a set of LoDs and render only each city object's
+highest available selected representation. New loads select every available
+LoD; an empty selection intentionally draws no labelled geometry. In the
+Nishitokyo fixture this keeps 468 objects at LoD 2 and 84,394 at LoD 1 instead
+of silently hiding the objects without LoD 2. Selection is per CityObject,
+including independently modelled BuildingParts; it does not merge geometry
+or infer equivalent representations across parent/child objects.
+
+The core mesh builder and static plugin's `lod`/`setLod` accept a readonly
+array in addition to their existing string/null contract. Arrays choose the
+best selected LoD per object. Strings still mean exact LoD, and null retains
+the plugin's legacy unfiltered behavior. Object and surface picking indices
+remain tied to the original model, including objects excluded by selection.
+
+The app stores `selectedLods` separately from streaming's single `selectedLod`.
+It is persisted in workspaces and URL shares, restored on file relinking,
+and copied to derived layers. Older workspace single-LoD choices remain exact.
+Export and analysis retain their explicit single-LoD controls. Streaming
+FlatCityBuf's zoom-driven/manual policy is unchanged.
