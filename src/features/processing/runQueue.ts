@@ -55,7 +55,9 @@ import {
 } from "../../insights/computedColumns";
 import {
   getLayerTable,
+  parseTableKey,
   refreshLayerTableColumns,
+  resolveActiveTable,
   runOnTableQueue,
   useLayerTableStore,
   type LayerTable,
@@ -144,6 +146,16 @@ interface FrozenRequest extends RunRequest {
   /** The COMPUTE layer's table name at Run; a different one at the head is a
    *  rebuild. */
   readonly tableName: string | null;
+  /**
+   * WHICH of the compute layer's tables this run owns — the CityParquet object
+   * family, or `null` for a single-table layer (R-C′).
+   *
+   * Frozen with the name above, and for a reason the name alone cannot cover: a
+   * user who switches family mid-run would otherwise have the head, the
+   * post-write re-DESCRIBE and the stale watcher all re-resolve "the active
+   * table" and silently retarget the run onto a different family's view.
+   */
+  readonly familyKey: string | null;
 }
 
 /**
@@ -612,11 +624,15 @@ export function submitRun(request: RunRequest): string {
     toolById(request.toolId).target === "vector"
       ? (request.sourceLayerId ?? request.targetLayerId)
       : request.targetLayerId;
+  // ONE resolution, frozen: the table AND the family it belongs to, so every
+  // later step addresses exactly what the user pressed Run over.
+  const active = resolveActiveTable(computeLayerId);
   return queueRun({
     ...request,
     computeLayerId,
     snapshot: snapshotScopeInputs(computeLayerId),
-    tableName: getLayerTable(computeLayerId)?.table ?? null,
+    tableName: active?.info.table ?? null,
+    familyKey: active?.familyKey ?? null,
   });
 }
 
@@ -638,7 +654,10 @@ export function retryRun(runId: string): string | null {
   if (!frozen) return null;
   return queueRun({
     ...frozen,
-    tableName: getLayerTable(frozen.computeLayerId)?.table ?? null,
+    // The layer as it is NOW, but the SAME family: a retry repeats the run the
+    // user made, and re-resolving the active family would aim it somewhere else.
+    tableName:
+      getLayerTable(frozen.computeLayerId, frozen.familyKey)?.table ?? null,
   });
 }
 
@@ -1155,7 +1174,9 @@ async function execute(
       });
       return;
     }
-    const table = getLayerTable(request.computeLayerId);
+    // The FROZEN family, never "whatever is active": a family switch while this
+    // run sat in the queue must not retarget it.
+    const table = getLayerTable(request.computeLayerId, request.familyKey);
     if (!table) {
       patch(id, {
         status: "failed",
@@ -2076,7 +2097,7 @@ async function execute(
     // the NEXT run both read it, and the next run's "did this column exist?"
     // decides whether Undo restores a value or drops the column.
     try {
-      await raced(refreshLayerTableColumns(layer.id), null);
+      await raced(refreshLayerTableColumns(layer.id, request.familyKey), null);
     } catch (error) {
       // Past the COMMIT nothing may fail the run, and this is the one await
       // left that a dead engine can strand. A DESCRIBE that will never answer
@@ -2308,7 +2329,13 @@ export async function undoRun(id: string): Promise<void> {
     }
     if (undone.ok) {
       try {
-        await raced(refreshLayerTableColumns(run.targetLayerId), null);
+        await raced(
+          refreshLayerTableColumns(
+            run.targetLayerId,
+            frozenById.get(run.id)?.familyKey ?? null,
+          ),
+          null,
+        );
       } catch (error) {
         if (!(error instanceof EngineDeadError)) throw error;
         // NOT a fall-through. `execute`'s equivalent catch is right to abandon
@@ -2503,24 +2530,32 @@ export function installEngineWatcher(): () => void {
  */
 export function installStaleWatcher(): () => void {
   return useLayerTableStore.subscribe((state, previous) => {
-    for (const [layerId, entry] of Object.entries(state.tables)) {
-      const before = previous.tables[layerId];
+    for (const [key, entry] of Object.entries(state.tables)) {
+      const before = previous.tables[key];
       const rebuilt =
         entry.state === "ready" &&
         ((before?.state === "ready" &&
           before.info.table !== entry.info.table) ||
           before?.state === "building");
       if (!rebuilt) continue;
+      // A KEY is not a layer id (R-C′). Comparing the raw key against a run's
+      // layer id would miss every rebuild of a family's view, and clearing the
+      // computed columns under it would file them against `"<uuid>::building"`,
+      // where nothing would ever find them again.
+      const { layerId, family } = parseTableKey(key);
       for (const run of useProcessingStore.getState().runs) {
         // The layer whose TABLE the run read, which for a vector-target run is
         // its SOURCE city layer. The record carries only the target's id, so
         // the compute id comes from what `submitRun` froze; a run whose frozen
         // request the history has dropped falls back to the target, which is
         // the compute layer for every one-layer tool.
-        const computeLayerId =
-          frozenById.get(run.id)?.computeLayerId ?? run.targetLayerId;
+        const frozen = frozenById.get(run.id);
+        const computeLayerId = frozen?.computeLayerId ?? run.targetLayerId;
         if (
           computeLayerId === layerId &&
+          // …and the run read THIS family's table. Another family of the same
+          // layer being rebuilt says nothing about the one this run measured.
+          (frozen?.familyKey ?? null) === family &&
           // §6: a rebuild of the PARENT says nothing about the copy — "a
           // derived layer is independent of its parent from publication on".
           // The copy's own table is adopted, never rebuilt, so no rebuild of

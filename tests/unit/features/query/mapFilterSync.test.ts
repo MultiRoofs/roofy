@@ -299,6 +299,47 @@ describe("automatic map-filter lifecycle", () => {
     await vi.waitFor(() => expect([...visibleIds(id)!]).toEqual(["B1"]));
   });
 
+  it("reconciles by the LAYER id a composite table key names", async () => {
+    // R-C′: the table store is keyed by `${layerId}::${family}`. Enumerating it
+    // as if every key were a layer id would sync a layer that does not exist —
+    // and, worse, would never notice that THIS layer's active table changed,
+    // because the bare key it compares is untouched by a family view arriving.
+    runQuery.mockResolvedValue({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: "B1" }],
+    });
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    stopLifecycle = installMapFilterSync(vi.fn());
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(1));
+    expect(runQuery.mock.calls[0]?.[0]).toContain('"layer_1"');
+
+    // A family's view lands for the SAME layer. It is file-backed, so it is
+    // the layer's active table from now on and the drawn set has to be
+    // recomputed against it.
+    useLayerTableStore.setState({
+      tables: {
+        [id]: { state: "ready", info: TABLE },
+        [`${id}::building`]: {
+          state: "ready",
+          info: {
+            ...TABLE,
+            table: "layer_9",
+            fileBacked: true,
+            familyKey: "building",
+          },
+        },
+      },
+    });
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(2));
+    expect(runQuery.mock.calls[1]?.[0]).toContain('"layer_9"');
+  });
+
   it("does not resync for page, sort, columns, or selected-grid changes", async () => {
     runQuery.mockResolvedValue({
       ok: true,

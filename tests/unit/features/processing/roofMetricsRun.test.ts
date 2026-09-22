@@ -253,6 +253,23 @@ vi.mock("../../../../src/insights/layerTables", async () => {
       adopted.set(layerId, info);
     }),
     getLayerTable: vi.fn(() => tableInfo),
+    // The composite-key helpers `runQueue` reads (R-C′), spelled here rather
+    // than imported: the real module reaches DuckDB at module scope. Its own
+    // round trip is pinned in `tests/unit/insights/layerTableKeys`.
+    layerTableKey: (layerId: string, family: string | null) =>
+      family === null ? layerId : `${layerId}::${family}`,
+    parseTableKey: (key: string) => {
+      const at = key.indexOf("::");
+      return at === -1
+        ? { layerId: key, family: null }
+        : { layerId: key.slice(0, at), family: key.slice(at + 2) };
+    },
+    resolveActiveTable: vi.fn((layerId: string) => {
+      const info = tableInfo;
+      return info === null
+        ? null
+        : { key: layerId, layerId, familyKey: null, info };
+    }),
     runOnTableQueue: vi.fn(<T>(task: () => Promise<T>): Promise<T> => {
       const next = chain.then(task, task);
       chain = next.then(

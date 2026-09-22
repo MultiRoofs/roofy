@@ -513,18 +513,76 @@ export interface ResolvedLayerTable {
  * is why the owners freeze the triple this returns rather than calling again.
  */
 export function resolveActiveTable(layerId: string): ResolvedLayerTable | null {
-  let bare: ResolvedLayerTable | null = null;
-  for (const [key, info] of registry) {
+  const picked = pickActive(
+    registry,
+    layerId,
+    (info) => info.fileBacked === true,
+  );
+  if (picked === null) return null;
+  return {
+    key: picked.key,
+    layerId,
+    familyKey: picked.familyKey,
+    info: picked.value,
+  };
+}
+
+/** One resolved STORE entry — the same choice, made over what React renders. */
+export interface ResolvedLayerTableEntry {
+  readonly key: string;
+  readonly layerId: string;
+  readonly familyKey: string | null;
+  readonly entry: LayerTableState;
+}
+
+/**
+ * {@link resolveActiveTable} over the STORE rather than the module registry.
+ *
+ * For the readers whose question is "what is the panel showing for this layer":
+ * the two carry the same table in production — a build does `registry.set` and
+ * `setState` back to back, with no await between them — but the store is the one
+ * React subscribes to, and it is also the one that says `queued` / `building` /
+ * `failed`, which the registry cannot express at all.
+ */
+export function resolveActiveTableEntry(
+  layerId: string,
+): ResolvedLayerTableEntry | null {
+  const tables = useLayerTableStore.getState().tables;
+  const picked = pickActive(
+    Object.entries(tables),
+    layerId,
+    (entry) => entry.state === "ready" && entry.info.fileBacked === true,
+  );
+  if (picked === null) return null;
+  return {
+    key: picked.key,
+    layerId,
+    familyKey: picked.familyKey,
+    entry: picked.value,
+  };
+}
+
+/**
+ * The one choice both resolvers make: a FILE-BACKED family first, else the bare
+ * entry.
+ *
+ * Generic in the value so the registry (`LayerTable`) and the store
+ * (`LayerTableState`) cannot drift apart on the rule — a difference between them
+ * would show up as the grid and a processing run reading two different tables
+ * for one layer.
+ */
+function pickActive<T>(
+  entries: Iterable<readonly [string, T]>,
+  layerId: string,
+  isFileBacked: (value: T) => boolean,
+): { key: string; familyKey: string | null; value: T } | null {
+  let bare: { key: string; familyKey: string | null; value: T } | null = null;
+  for (const [key, value] of entries) {
     const parsed = parseTableKey(key);
     if (parsed.layerId !== layerId) continue;
-    const resolved: ResolvedLayerTable = {
-      key,
-      layerId,
-      familyKey: parsed.family,
-      info,
-    };
-    if (info.fileBacked === true) return resolved;
-    if (parsed.family === null) bare = resolved;
+    const candidate = { key, familyKey: parsed.family, value };
+    if (isFileBacked(value)) return candidate;
+    if (parsed.family === null) bare = candidate;
   }
   return bare;
 }

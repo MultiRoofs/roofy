@@ -11,6 +11,8 @@
 
 import { runQuery } from "../../insights/duckdb";
 import {
+  parseTableKey,
+  resolveActiveTableEntry,
   useLayerTableStore,
   type LayerTable,
 } from "../../insights/layerTables";
@@ -87,14 +89,20 @@ export function installMapFilterSync(
   const reconcile = () => {
     const queryState = useQueryStore.getState();
     const tables = useLayerTableStore.getState().tables;
-    const ids = new Set([
-      ...Object.keys(queryState.queries),
-      ...Object.keys(tables),
-    ]);
+    // PARSED, both sides (R-C′): a table key is `${layerId}::${family}` for a
+    // CityParquet family, and treating one as a layer id would sync a layer
+    // that does not exist while never noticing that a real layer's ACTIVE
+    // table had changed — the bare key it compares is untouched by a family
+    // view arriving. Query keys go through the same parse so the two stay
+    // interchangeable as the query store gains families.
+    const ids = new Set(
+      [...Object.keys(queryState.queries), ...Object.keys(tables)].map(
+        (key) => parseTableKey(key).layerId,
+      ),
+    );
     for (const layerId of ids) {
       const applied = layerQuery(queryState, layerId).applied;
-      const entry = tables[layerId];
-      const table = entry?.state === "ready" ? entry.info : null;
+      const table = readyTable(layerId);
       const prior = seen.get(layerId);
       if (prior?.applied === applied && prior.table === table) continue;
       seen.set(layerId, { applied, table });
@@ -128,8 +136,11 @@ export function installMapFilterSync(
  * showing.
  */
 function readyTable(layerId: string): LayerTable | null {
-  const entry = useLayerTableStore.getState().tables[layerId];
-  return entry?.state === "ready" ? entry.info : null;
+  // WHICH of the layer's tables is the resolver's question (a file-backed family
+  // wins over a resident one); it is answered over the STORE, for the reason
+  // above.
+  const resolved = resolveActiveTableEntry(layerId);
+  return resolved?.entry.state === "ready" ? resolved.entry.info : null;
 }
 
 /**
