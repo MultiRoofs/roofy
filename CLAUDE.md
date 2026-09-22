@@ -109,7 +109,7 @@ Each of these has a story in `docs/architecture-notes.md`; the rule here is the 
 - Test files import from `"vitest"`, never `"vite-plus/test"`.
 - The submodule's root `vitest.config.ts` is load-bearing; never delete it. Every plugin package depending on `navara-core` carries `"three": "0.183.2"` in devDependencies.
 - Singleton-registry libraries (`proj4`, `three`, `@navaramap/*`) go in the app's `resolve.dedupe`; core declares them as peerDependencies.
-- A CityParquet source over 128 MiB of object tables never loads whole: every entry point goes through `addCityParquetLayer` (`streamDecision.ts`), and a range-less server fails with the no-range message rather than falling back to static.
+- A CityParquet source whose object tables are KNOWN to exceed 128 MiB never loads whole (an unlearnable size stays static): every entry point goes through `addCityParquetLayer` (`streamDecision.ts`), and a range-less server fails with the no-range message rather than falling back to static.
 - Measure and box-select are disabled, not implemented (toolbar entries remain).
 - No source directory may be named `analytics/`, `ads/` or `tracking/`: content blockers match those path segments and refuse the dev server's module request with `ERR_BLOCKED_BY_CLIENT`, which blanks the app for anyone running a blocker. The DuckDB directory is `src/insights/` for this reason.
 - `src/insights/duckdb.ts` is the ONLY module under `src/` that may import `@duckdb/duckdb-wasm`. Everything else — `layerTables`, `export`, `sql`, every UI module — takes the engine through its exported functions, which is what makes them mockable.

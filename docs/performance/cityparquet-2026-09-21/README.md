@@ -23,11 +23,13 @@ Large CityParquet sources (object tables over 128 MiB) now stream by viewport th
 
 | Pan (local file)                |                                                                             Measurement |
 | ------------------------------- | --------------------------------------------------------------------------------------: |
-| Per view (probe + fetch + bake) |                                 2.0–6.2 s; 6–10 missing cells fetched; 6.6–20.3 MB read |
+| Per view (probe + fetch + bake) |                                 2.0–6.2 s; 3–10 missing cells fetched; 6.6–20.3 MB read |
 | Cumulative                      |                                  36.3 s; 133.8 MB read (40 % of the file) over 10 views |
 | Resident after 10 views         | 67 cells, 724,810 triangles, 91.2 MB of cell geometry; no eviction (under both budgets) |
 | Peak                            |                 heap 990 MB, RSS 1.39 GB (whole process, both streams of this run open) |
 | Retained after the pan + GC     |                                                       heap 353 MB + ArrayBuffers 118 MB |
+
+The worker retains a whole `CityModel` per cached cell on top of the geometry the cache meters: 67 cells were 91.2 MB of budget-counted geometry but ~353 MB of retained heap after a GC (~5 MB a cell, 4–5× the metered bytes). Extrapolated (so a projection, not a measurement) to `RESIDENT_TRIANGLE_BUDGET`'s 4 M triangles, eviction would first fire at roughly 2 GB of worker heap. Pre-existing FlatCityBuf design, not introduced here.
 
 Bytes re-read across views are expected: nothing is cached below the cell cache, and a view's fetch reads whole families of the union of its missing cells.
 
