@@ -23,6 +23,17 @@ vi.mock("../../../../src/insights/layerTables", async (importOriginal) => {
   };
 });
 
+/** Layers `dropFamilyViews` was asked to forget. The lifecycle's removal door:
+ *  it drops every family's view AND the file registrations behind them, which
+ *  `dropLayerTable` alone cannot do. */
+const droppedFamilies: string[] = [];
+vi.mock("../../../../src/insights/familyViews", () => ({
+  dropFamilyViews: vi.fn(async (layerId: string) => {
+    droppedFamilies.push(layerId);
+    dropped.push(layerId);
+  }),
+}));
+
 const clearMapFilter = vi.fn();
 const forgetMapFilter = vi.fn();
 // The map-filter door is SPIED, not exercised: this file is about which
@@ -44,7 +55,7 @@ const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 const { useStreamStore } =
   await import("../../../../src/features/streaming/streamStore");
-const { useLayerTableStore } =
+const { adoptLayerTable, resetLayerTablesForTest, useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
@@ -95,6 +106,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   enqueued.length = 0;
   dropped.length = 0;
+  droppedFamilies.length = 0;
   buildOutcome = { ok: true };
   clearMapFilter.mockReset();
   forgetMapFilter.mockReset();
@@ -102,7 +114,9 @@ beforeEach(() => {
   useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
   useQueryStore.setState({ queries: {} });
-  useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
+  // The REGISTRY as well as the store: `hasFileBackedTable` reads the registry,
+  // and a family view adopted by one case would otherwise silence the next.
+  resetLayerTablesForTest();
   // The toolbox is a table CONSUMER too, so its `open` and its in-flight runs
   // are inputs to every gate below — a leaked `open: true` would make the
   // panel-closed cases pass for the wrong reason.
@@ -140,6 +154,16 @@ describe("removals", () => {
     useLayerStore.setState({ layers: [layer({ id: "A" })] });
     useLayerStore.setState({ layers: [] });
     expect(forgetMapFilter).toHaveBeenCalledWith("A");
+  });
+
+  it("goes through `dropFamilyViews`, so the file registrations go too", () => {
+    // A family's view holds a registered source open. Dropping the table alone
+    // would leave that registration in the VFS for the life of the page — and
+    // a re-add under the same layer id would then reuse a name that has been
+    // dropped, which still resolves, to nothing.
+    useLayerStore.setState({ layers: [layer({ id: "A" })] });
+    useLayerStore.setState({ layers: [] });
+    expect(droppedFamilies).toEqual(["A"]);
   });
 
   it("does not drop a table for a layer that is merely renamed", () => {
@@ -312,6 +336,81 @@ describe("streaming layers", () => {
     uninstall();
     vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
     expect(enqueued).toEqual([]);
+  });
+});
+
+describe("a FILE-BACKED table is never rebuilt from residents", () => {
+  /** A ready family view for `layerId`, adopted exactly as `familyViews` does. */
+  function adoptFamilyView(layerId: string): void {
+    adoptLayerTable(layerId, {
+      table: "layer_9",
+      sourceName: "family_1.parquet",
+      source: null,
+      reader: null,
+      extension: null,
+      sourceBytes: null,
+      columns: [],
+      lods: [],
+      sourceFeatureIds: null,
+      rowCount: 884106,
+      fileBacked: true,
+      familyKey: "building",
+      sourceCrs: "EPSG:6697",
+    });
+  }
+
+  it("ignores a commit, however many land", () => {
+    // The view reads the FILE: it already answers for every object in the
+    // family, resident or not. A rebuild from the resident set would replace
+    // whole-file answers with "whatever the camera has delivered", several
+    // times a pan.
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    adoptFamilyView("S");
+    enqueued.length = 0;
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("disarms a timer that was already pending when the view landed", () => {
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    enqueued.length = 0;
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    // The commit armed a rebuild; the family's view lands inside the debounce
+    // window, and the timer must not fire over it.
+    adoptFamilyView("S");
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("is left alone by the consumer sweep", () => {
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    adoptFamilyView("S");
+    enqueued.length = 0;
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).toEqual([]);
+    // And the sweep did not clear its drawn set on the way past either.
+    expect(clearMapFilter).not.toHaveBeenCalled();
+  });
+
+  it("makes `refreshStreamingTable` a no-op that reports success", async () => {
+    // The Export dialog's forced rebuild. It cannot be a failure — the view is
+    // as fresh as the file it reads — and it must not enqueue, or Export would
+    // write the resident set over a whole-file table.
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    adoptFamilyView("S");
+    enqueued.length = 0;
+    await expect(refreshStreamingTable("S")).resolves.toEqual({ ok: true });
+    expect(enqueued).toEqual([]);
+  });
+
+  it("still rebuilds a streaming layer whose table is NOT file-backed", async () => {
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    enqueued.length = 0;
+    await refreshStreamingTable("S");
+    expect(enqueued).toEqual(["S"]);
   });
 });
 
