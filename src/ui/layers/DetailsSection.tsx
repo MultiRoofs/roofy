@@ -104,36 +104,35 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
         />
       </dl>
 
-      {resident && (
-        // "Objects", never "buildings": a Building's parts are objects too,
-        // so a building count would not add up against anything. The
-        // dataset's size is given only where the stream's header states it
-        // (CityParquet); a FlatCityBuf header counts features, not objects.
-        // The tooltip keeps the cache's own numbers and says the loaded set
-        // includes a margin around the view.
-        <p
-          className="active-layer-note"
-          title={`Resident cache: ${resident.featureCount} ${plural(
-            resident.featureCount,
-            "object",
-          )} loaded across ${resident.cellCount} resident ${plural(
-            resident.cellCount,
-            "cell",
-          )}. Includes a margin around the viewport and cells not yet evicted.`}
-        >
-          {`Showing the objects in view — ${formatCount(resident.featureCount)}${
-            streamObjectsCount !== undefined
-              ? ` of ${formatCount(streamObjectsCount)}`
-              : ""
-          } loaded. The table and statistics cover loaded objects only.`}
-        </p>
-      )}
-
       {/* What is IN the layer. A streaming layer's objects arrive cell by
           cell, so it lists the types discovered so far rather than
           per-type counts of the resident cache read as the dataset's. */}
       <div className="active-layer-group">
         <h4 className="active-layer-group-title">Objects</h4>
+        {resident && (
+          // "Objects", never "buildings": a Building's parts are objects too,
+          // so a building count would not add up against anything. The
+          // dataset's size is given only where the stream's header states it
+          // (CityParquet); a FlatCityBuf header counts features, not objects.
+          // The tooltip keeps the cache's own numbers and says the loaded set
+          // includes a margin around the view.
+          <p
+            className="active-layer-note"
+            title={`Resident cache: ${resident.featureCount} ${plural(
+              resident.featureCount,
+              "object",
+            )} loaded across ${resident.cellCount} resident ${plural(
+              resident.cellCount,
+              "cell",
+            )}. Includes a margin around the viewport and cells not yet evicted.`}
+          >
+            {`Showing the objects in view — ${formatCount(resident.featureCount)}${
+              streamObjectsCount !== undefined
+                ? ` of ${formatCount(streamObjectsCount)}`
+                : ""
+            } loaded. The table and statistics cover loaded objects only.`}
+          </p>
+        )}
         {streaming ? (
           <p
             className="active-layer-note"
