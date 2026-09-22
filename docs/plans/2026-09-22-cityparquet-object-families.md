@@ -2,129 +2,109 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A CityParquet package is a set of object families (building, bridge, water_body, transportation, vegetation, city_furniture). A streamed layer renders the families the user asked for — Building by default — and every family has its own DuckDB table read from the FILE, all rows and all non-geometry columns, so the table, filters, statistics and export no longer depend on what geometry happens to be resident.
+**Goal:** A CityParquet package is a set of object families (building, bridge, water_body, transportation, vegetation, city_furniture). A streamed layer renders the families the user asked for — Building by default — and every family has its own queryable table that reads straight from the FILE, so the table panel, filters, statistics and export stop depending on what geometry happens to be resident.
 
-**Architecture:** The manifest keeps a family per object table (its href basename). A streamed layer opens only the enabled families' tables; enabling or disabling one reopens the stream under the SAME layer id, keeping camera, selection, rules, hidden types and tables. A family's DuckDB table is built by streaming the file's identity + attribute columns through the existing CityParquet row-range reader in bounded chunks and inserting them chunk by chunk — never a whole-file download, never `registerFileURL` (which this duckdb-wasm build does not have). Table state becomes keyed by `${layerId}::${family}` with one active family per layer, so today's single-table consumers keep working through one resolver.
+**Architecture:** DuckDB itself reads the Parquet. The source is registered once per family (`registerFileURL` for a URL, `registerFileHandle` + `BROWSER_FILEREADER` for a local File) and the family's "table" is a **view** — `CREATE OR REPLACE VIEW <name> AS SELECT <kept columns> FROM read_parquet('<registered>')`. Measured on the real 884 106-row Yokohama building table over HTTP in this build: view creation 26 ms, a filtered count 34 ms, a 100-row page 793 ms, a page at offset 500 000 1.5 s, no materialisation and no measurable JS heap growth; materialising the same 15 columns instead costs 961 ms and 247 MB of DuckDB memory. Families are listed from the manifest; enabling or disabling one reopens the stream under the same layer id.
 
-**Tech Stack:** TypeScript, DuckDB-wasm (`read_json_auto` + `INSERT`), vendored hyparquet row-range reads, the streaming worker protocol, Vitest (Node for plugins, jsdom for the app).
+**Tech Stack:** TypeScript, DuckDB-wasm 1.5.5 (`registerFileURL`/`registerFileHandle` + `read_parquet`), the streaming worker protocol, Vitest (jsdom for the app, Node for plugins), the opt-in real-DuckDB integration suite.
 
-**Spec:** the performance handoff, task 5 ("Default to Building, including associated parts/installations. If buildings are absent, select available families. Other families load when enabled. Opening a family's table can load attributes without rendering its geometry. Add a table button beside each Object Visibility entry. Prefer one DuckDB instance with per-layer/per-family tables or views and a table selector. Keep loading, available, loaded, and visible states explicit.") plus the shipped `docs/plans/2026-09-22-cityparquet-bounded-loading.md`.
+**Spec:** the performance handoff, task 5 ("Default to Building, including associated parts/installations. If buildings are absent, select available families. Other families load when enabled. Opening a family's table can load attributes without rendering its geometry. Add a table button beside each Object Visibility entry. Prefer one DuckDB instance with per-layer/per-family tables or views and a table selector. Keep loading, available, loaded, and visible states explicit.") plus the shipped `docs/plans/2026-09-22-cityparquet-bounded-loading.md`. Reviews that shaped it: `.superpowers/sdd/notes/codex-plan5-review.txt` (first revision) and the spike results above.
 
 ## Global Constraints
 
-- `CLAUDE.md` applies in full: TDD; submodule commits first, then the pointer bump; `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`; commit prefixes; never bare `vite`/`vp dev`; tests import from `"vitest"`; `@navaramap/*` only in engine-binding modules; `src/insights/duckdb.ts` stays the ONLY module importing `@duckdb/duckdb-wasm`; worker graphs import only navara-core, navara-cityparquet, their own package, proj4, vendored hyparquet, hyparquet-compressors.
-- Every task 3 bound stays: `VIEWPORT_FEATURE_BUDGET` 20 000, `MAX_FETCH_READ_ROWS` 60 000, `MAX_FETCH_READ_BYTES` 96 MiB, `WORKER_RETAINED_BYTE_BUDGET` 512 MiB with `retainedBytes` metered main-side, families read/baked/evicted together, unlabelled geometry as the lowest rung.
-- **A family table is built without ever holding the file.** Rows come from the row-range reader in chunks of `FAMILY_TABLE_CHUNK_ROWS = 25_000`; each chunk is registered, inserted and dropped before the next is read; geometry columns are never projected. Peak extra heap during a build must stay comparable to one chunk, and the build must be abortable.
-- **Loading / available / loaded / visible stay explicit** (handoff): a family is _available_ (in the manifest), its geometry is _opened_ (streaming) or not, its table is _queued/building/ready/failed_, and its objects are _visible_ (hidden types, filters). No UI may conflate them.
-- **Ruling R-A (family identity): the object table's href basename** (`building.parquet` → `building`), because the manifest keeps nothing else — asset keys are dropped today and `city3d:co_types` never reaches the reader. `parseCityParquetManifest` starts returning `families: {key, href, size}[]`; the display name is the key with `_` → space and title case. Cost if wrong: a package whose file names are not family names shows odd labels; nothing breaks.
-- **Ruling R-B (transport for tables): chunked INSERT from the CityParquet reader**, not DuckDB httpfs and not a whole-file `registerFileBuffer`. duckdb-wasm here has no `registerFileURL`, and a 335 MB family would reintroduce exactly the memory failure task 3 removed. Cost if wrong: a columnar engine reading the file directly might be faster; revisit if a table build becomes the bottleneck.
-- **Ruling R-C (table keying): `${layerId}::${family}`, with one active family per layer.** Existing single-table consumers (`mapFilterSync`, `runQueue`, `useEligibilityContext`, export, stats) go through one resolver that maps a layer id to its active family key, so their call sites keep their shape. Cost if wrong: the resolver hides which family a consumer meant; the alternative (touching every consumer) is a far larger blast radius for this milestone.
-- **Ruling R-D (default families): Building only, when the package has a building table**; otherwise every available family, so a package without buildings still shows something. A single-table source (`…/building.parquet`) is a one-family package. Static (below-threshold) packages keep today's behaviour — all tables merged into one layer and one table — and are explicitly out of scope.
-- **Ruling R-E (changing families): reopen the stream under the same layer id.** `openStreamingLayer` gains an optional `id`; a new `reopenStreamingLayer` closes the handle, opens a new one with the new source list and re-registers it, without touching `layerStore`, `queryStore`, selection or the DuckDB tables. The viewport's stream memos must be cleared so rules/LoD/hidden types are re-seeded on the new handle. Cost if wrong: a reopen costs one index rebuild per opened family (~7 s for Yokohama's building table) where an `addSource` protocol message would not; the protocol and the handle's immutable grid/header stay simple.
-- **Ruling R-F (`feature_id` under chunking): take it from the reader's `familyRoot`**, not from a whole-set computation. `layerRows`'s `rootFeatureId` needs every row at once, which chunking forbids; the reader already knows each row's family root (task 3's `StreamRow.familyRoot`). Cost if wrong: a file whose parts are not contiguous with their root would mis-root; the reader's family grouping already assumes contiguity and counts what it rejects.
-- **Known limit to record, not fix:** object ids are assumed unique across families (today's static path already merges first-wins with a warning). Per-family tables make a cross-family duplicate ambiguous in the scene; the build logs a count and the architecture notes state it.
+- `CLAUDE.md` in full: TDD; submodule commits first, then the pointer bump; `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`; commit prefixes; never bare `vite`/`vp dev`; tests import from `"vitest"`; `@navaramap/*` only in engine-binding modules; **`src/insights/duckdb.ts` stays the ONLY module importing `@duckdb/duckdb-wasm`** — the new registration calls live there and everything else goes through its exported functions.
+- Every task 3 bound stays (`VIEWPORT_FEATURE_BUDGET` 20 000, `MAX_FETCH_READ_ROWS` 60 000, `MAX_FETCH_READ_BYTES` 96 MiB, `WORKER_RETAINED_BYTE_BUDGET` 512 MiB + `retainedBytes` metered, families read/baked/evicted together, unlabelled geometry as the lowest rung).
+- **Loading / available / opened / visible stay distinct** (handoff): a family is _available_ (in the manifest), its geometry is _opened_ (streaming) or not, its table is _absent / creating / ready / failed_, and its objects are _visible_ (hidden types, filters). No UI conflates them, and the copy never implies a table covers only resident rows once it is file-backed.
+- **Ruling R-B′ (supersedes R-B): the family table is a DuckDB VIEW over `read_parquet` of the registered source.** The earlier plan's chunked `INSERT` machinery is dropped: it existed only because I believed this build had no `registerFileURL`, which the Codex review corrected and the spike disproved. A view has no materialisation cost, cannot drift from the file, needs no JSON encoding, no explicit type map, no whole-set `feature_id` pass (the file has a `feature_id` column) and does not occupy the table FIFO for minutes. Cost if wrong: a 100-row page costs ~0.8 s and a deep page ~1.5 s against ~0.1 s from a materialised table; if paging proves too slow the same code can `CREATE TABLE … AS SELECT` instead — record that as the escape hatch, with the measured numbers.
+- **Ruling R-A′ (family identity vs source identity): a family has BOTH.** Its _source identity_ is the resolved URL (or the File handle) — unique, used for registration and caching. Its _family key_ is the manifest asset key when present, else the href basename (`building.parquet` → `building`), used for labels and for the Building default. Two tables that produce the same key (`east/building.parquet`, `west/building.parquet`) keep distinct source identities and get disambiguated labels. Cost if wrong: odd labels for unconventional packages; nothing breaks.
+- **Ruling R-C′ (table keying): keyed by `${layerId}::${family}`, and every consumer that OWNS a table records `{layerId, familyKey, tableName}`.** The Codex review showed a resolver alone is not enough: `mapFilterSync` and `runQueue` enumerate table/query keys as layer ids, and a processing run that resolves "the active family" would retarget when the user switches family. So: (a) the registry is keyed by the composite; (b) enumeration sites take the layer id from a parsed key, never the raw key; (c) processing runs, exports and computed columns freeze the triple at start and keep using it.
+- **Ruling R-D (default families): Building only when the package has a building table, else every available family.** A single-table source is a one-family package. Static (below-threshold) packages are OUT OF SCOPE and keep today's behaviour — all tables merged into one layer with one table; the architecture notes must say this milestone is streamed-only.
+- **Ruling R-E′ (changing families): a serialised, transactional reopen.** `openStreamingLayer` gains an optional `id`; `reopenStreamingLayer` runs under a per-layer generation guard: mark the layer reopening → `plugin.remove(layerId)` (never `handle.delete()` alone, which leaves the registry entry and makes the next open fail on the duplicate id) → open with the new source list → register. A failure leaves the layer row with an explicit `stream: failed` state and a Retry, and the enabled set rolls back. Concurrent toggles are queued per layer; a completion for a superseded generation is disposed (`handle.delete()`), never registered.
+- **Ruling R-G (bbox CRS): the family view exposes the file's own `bbox` (EPSG:6697 degrees for PLATEAU), not the layer's projected metres.** The table info records the source CRS, and the tools that need metric bounds (join-by-location, distance-to-nearest, aggregate-per-area) refuse a streamed CityParquet layer with a clear message until task 6 makes the coordinate story coherent. This is not a regression: streamed CityParquet layers are new in task 3. Cost if wrong: those three tools stay unavailable for one more milestone.
+- **Resident rebuilds must not fight the file-backed view** (Codex Critical): `layerTableLifecycle`'s resident rebuild, its commit/panel/toolbox triggers and `ExportDialog`'s forced rebuild are disabled for layers whose table is file-backed, including pending debounce timers.
+- **Known limits to record:** ids are assumed unique across families (the scene cannot disambiguate a duplicate; the static path already merges first-wins with a warning); map filtering stays disabled for all streaming layers; `hiddenTypes` remains a CityJSON-type list, so a family's types can still be individually hidden (a family is opened, a type is visible — reported separately).
 
 ## File Structure
 
-| File                                                                                                       | Responsibility                                                                                                                                                                                                                                                                                       |
-| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `navara-cityparquet/src/packageAssembly.ts`                                                                | `CityParquetManifest.families: {key, href, size}[]` (R-A), derived from the object tables it already returns.                                                                                                                                                                                        |
-| `navara-cityparquet/src/streamReader.ts`                                                                   | `header.tables: {name, rowCount}[]` (per-family totals for counts); `readAllRows({columns:"attributes", chunkRows, signal})` — an async iterable of `{rows, firstRow, lastRow}` chunks of identity + attribute columns (never geometry), each row carrying its `familyRoot`.                         |
-| `src/insights/familyTables.ts` (new)                                                                       | Builds one family's DuckDB table from `readAllRows` chunks: explicit `columns={…}` from the footer + `FLAT_COLUMN_TYPES`, `CREATE OR REPLACE TABLE … AS SELECT` for the first chunk, `INSERT INTO … BY NAME` for the rest, re-checking supersede/engine-death between chunks; reports progress rows. |
-| `src/insights/layerTables.ts`                                                                              | Keying by `${layerId}::${family}` (R-C) plus `resolveActiveTable(layerId)`; `adoptLayerTable` reused for family tables; drop-all-for-layer on removal.                                                                                                                                               |
-| `src/features/layers/familyStore.ts` (new)                                                                 | Per layer: available families (key, label, href, size, rowCount when known), enabled set, active family for the table panel.                                                                                                                                                                         |
-| `src/features/streaming/openStreamingLayer.ts`                                                             | Optional `id`; `reopenStreamingLayer(plugin, layerId, source)` (R-E).                                                                                                                                                                                                                                |
-| `src/features/cityparquet/addCityParquetLayer.ts` / `streamDecision.ts`                                    | Carry the family list into the decision; open only enabled families (R-D).                                                                                                                                                                                                                           |
-| `src/ui/layers/LayerTypeToggles.tsx` / `DetailsSection.tsx`                                                | A families block above object types: per family a visibility toggle and a table button (`ActionIcon`, `--control-height-compact`), with loading/available/loaded/visible states distinct.                                                                                                            |
-| `src/ui/table/TablePanel.tsx`, `src/features/query/queryStore.ts`, `useLayerQuery.ts`, `useLayerCounts.ts` | A family selector; query state keyed per `${layerId}::${family}`; the "buildings" view stays Building-only and is disabled for other families.                                                                                                                                                       |
-| `src/features/streaming/useTotalObjectCount.ts`, `src/ui/StatusBar.tsx`                                    | "N of M" counts the OPENED families; the layer details line names the package total and what is open.                                                                                                                                                                                                |
+| File                                                                                                                                                   | Responsibility                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `navara-cityparquet/src/packageAssembly.ts`                                                                                                            | `CityParquetManifest.families: {key, href, size}[]` (R-A′), asset key preferred over basename.                                                                                                                                                                                                                                                   |
+| `navara-cityparquet/src/streamReader.ts`                                                                                                               | `header.tables: {name, rowCount}[]` so counts can be per family.                                                                                                                                                                                                                                                                                 |
+| `src/insights/duckdb.ts`                                                                                                                               | `registerParquetUrl(name, url)` / `registerParquetFile(name, file)` / `dropRegisteredFile(name)` — the only place touching duckdb-wasm's registration API.                                                                                                                                                                                       |
+| `src/insights/familyViews.ts` (new)                                                                                                                    | `ensureFamilyView({layerId, family, source})`: register (once per source identity) → `DESCRIBE SELECT * FROM read_parquet(…)` → drop geometry/material/texture/template/address columns (`columnKind.isDroppedColumn`, extended for a bare `geometry`) → `CREATE OR REPLACE VIEW`; returns a `LayerTableInfo` adopted through `adoptLayerTable`. |
+| `src/insights/layerTables.ts`                                                                                                                          | Composite keying + `parseTableKey`, `resolveActiveTable(layerId)`, `dropLayerTables(layerId)`; `LayerTableInfo` gains `fileBacked: boolean`, `familyKey`, `sourceCrs`.                                                                                                                                                                           |
+| `src/features/layers/layerTableLifecycle.ts`                                                                                                           | Skip resident rebuilds for file-backed tables (Codex Critical); drop every family's view with the layer.                                                                                                                                                                                                                                         |
+| `src/features/layers/familyStore.ts` (new)                                                                                                             | Per layer: available families, enabled set, active family, per-family stream/table state, the reopen queue and generation.                                                                                                                                                                                                                       |
+| `src/features/streaming/openStreamingLayer.ts`                                                                                                         | Optional `id`; `reopenStreamingLayer` (R-E′) with rollback and a failed/retry state.                                                                                                                                                                                                                                                             |
+| `src/features/cityparquet/{streamDecision,addCityParquetLayer}.ts`                                                                                     | Carry families (key, href, url/File, size) into the layer; open only the enabled ones.                                                                                                                                                                                                                                                           |
+| `src/ui/layers/{LayerTypeToggles,DetailsSection}.tsx`                                                                                                  | A Families block: per family a geometry toggle, a state chip (available / opening / N loaded / failed+retry) and a table button.                                                                                                                                                                                                                 |
+| `src/ui/table/{TablePanel,useLayerQuery,useLayerCounts}.tsx?`, `src/features/query/queryStore.ts`                                                      | Family selector; query state per composite key; the "buildings" view offered only for Building-bearing families.                                                                                                                                                                                                                                 |
+| `src/features/processing/runQueue.ts`, `src/ui/table/ExportDialog.tsx`, `src/features/query/mapFilterSync.ts`, `src/insights/useEligibilityContext.ts` | Enumerate by parsed layer id; freeze `{layerId, familyKey, tableName}` where they own a table (R-C′).                                                                                                                                                                                                                                            |
+| `src/features/streaming/useTotalObjectCount.ts`, `src/ui/StatusBar.tsx`                                                                                | "N of M" counts the OPENED families; the details panel states opened vs available.                                                                                                                                                                                                                                                               |
 
 ---
 
-### Task 1: Manifest families, per-table counts, and a chunked attribute reader
+### Task 1: Manifest families and per-table counts
 
-**Files:** modify `navara-cityparquet/src/{packageAssembly,streamReader}.ts`; tests alongside.
+**Files:** `navara-cityparquet/src/{packageAssembly,streamReader}.ts` + tests.
+**Interfaces:** `CityParquetFamily {key, href, size}`; `CityParquetManifest.families`; `CityParquetStreamHeader.tables: {name, rowCount}[]`; the adapter must copy the new header fields through (`cityParquetSourceAdapter` rebuilds the header — the Codex review flagged it drops unknown fields).
 
-**Interfaces:**
+- [ ] **Step 1: failing tests** — asset key preferred over basename; duplicate keys keep distinct hrefs; sidecars excluded; sizes carried; `header.tables` row counts sum to `objectsCount`; the adapter's posted header carries `tables`.
+- [ ] **Steps 2–5:** red → implement → green → commit (submodule).
 
-```ts
-export interface CityParquetFamily { readonly key: string; readonly href: string; readonly size: number | null }
-// CityParquetManifest gains: readonly families: ReadonlyArray<CityParquetFamily>
-// CityParquetStreamHeader gains: readonly tables: ReadonlyArray<{ name: string; rowCount: number }>
-export interface AttributeChunk { readonly rows: ReadonlyArray<Record<string, unknown>>; readonly firstRow: number; readonly lastRow: number; readonly table: number }
-readAllRows(opts: { chunkRows?: number; signal: AbortSignal }): AsyncIterable<AttributeChunk>;
-```
+### Task 2: Register a Parquet source and create a family view
 
-`readAllRows` projects `id, feature_id, object_type, parents, children, bbox`, the footer's attribute columns and `other_attributes` — never a geometry column — row group by row group, `chunkRows` default 25 000, applying the existing byte estimate per read and the per-buffer signal; each row carries `familyRoot` (R-F) so the app can set `feature_id` without a whole-set pass.
-
-- [ ] **Step 1: failing tests.** On the multigroup fixture: `families` from a manifest with several object tables (keys are basenames, sizes carried, sidecars excluded); `header.tables` row counts sum to `objectsCount`; `readAllRows` yields every row exactly once in row order across chunk boundaries, reads no geometry bytes (counting buffer, compare against a geometry read), respects `chunkRows`, and aborts mid-iteration with `AbortError`.
-- [ ] **Step 2:** run — FAIL. **Step 3:** implement. **Step 4:** run — PASS; `pnpm typecheck`. **Step 5:** commit (submodule).
-
-### Task 2: Build a family's DuckDB table from the file, in chunks
-
-**Files:** create `src/insights/familyTables.ts`; modify `src/insights/layerTables.ts` (keying + resolver), `src/insights/layerRows.ts` (a chunk-shaped row builder that takes `familyRoot`); tests under `tests/unit/insights/` and `tests/integration/duckdb/`.
+**Files:** `src/insights/duckdb.ts`, `src/insights/familyViews.ts` (new), `src/insights/columnKind.ts` (drop a bare `geometry`), `src/insights/layerTables.ts` (composite keys, `fileBacked`); tests under `tests/unit/insights/` plus a real-DuckDB case in `tests/integration/duckdb/`.
 
 **Interfaces:**
 
 ```ts
-export const FAMILY_TABLE_CHUNK_ROWS = 25_000;
-export function layerTableKey(layerId: string, family: string | null): string; // `${layerId}` when family is null
-export function resolveActiveTable(layerId: string): LayerTableInfo | null; // active family's table
-export async function buildFamilyTable(input: {
+// duckdb.ts (the only duckdb-wasm importer)
+export async function registerParquetUrl(
+  name: string,
+  url: string,
+): Promise<Outcome>;
+export async function registerParquetFile(
+  name: string,
+  file: File,
+): Promise<Outcome>;
+export function dropRegisteredFile(name: string): Promise<void>;
+// familyViews.ts
+export async function ensureFamilyView(input: {
   layerId: string;
   family: string;
-  chunks: AsyncIterable<AttributeChunk>;
-  columns: Readonly<Record<string, string>>; // explicit DuckDB types, from the footer + FLAT_COLUMN_TYPES
-  onProgress?: (rows: number) => void;
-  signal: AbortSignal;
+  source: { url: string } | { file: File };
+  sourceCrs: string | null;
 }): Promise<LayerTableOutcome>;
+export function layerTableKey(layerId: string, family: string | null): string;
+export function parseTableKey(key: string): {
+  layerId: string;
+  family: string | null;
+};
 ```
 
-First chunk: `CREATE OR REPLACE TABLE <t> AS SELECT * FROM read_json_auto('<t>.0.json', columns={…}, …)`. Later chunks: `INSERT INTO <t> BY NAME SELECT * FROM read_json_auto('<t>.N.json', columns={…}, …)`. Explicit full `columns` (a partial map drops the rest — see `layerTables.ts`'s note) so no chunk can drift the schema. Each chunk: `registerBuffer` → statement → `dropBuffer`, then re-check supersede/engine-death; abort leaves no half-built table (reuse `discardHalfBuilt`).
+The view keeps identity + attribute columns and drops geometry/properties/material/texture/template/address. Registration is idempotent per source identity; dropping a layer drops its views and registrations.
 
-- [ ] **Step 1: failing tests.** Integration (real duckdb-wasm, as `tests/integration/duckdb/layerTables.test.ts` does): three chunks whose rows have a column missing in chunk 2 still produce one table with every row and the declared types; `bbox` is the 6-field DOUBLE struct; `feature_id` comes from `familyRoot`; an aborted build leaves no table; two families of one layer produce two tables and `resolveActiveTable` returns the active one; dropping the layer drops both. Unit: `layerTableKey`/`resolveActiveTable` and every existing consumer path (`mapFilterSync`, `runQueue`'s `getLayerTable`, `useEligibilityContext`, export) resolves as before for a layer with no families.
-- [ ] **Step 2–5:** as above; commit (app).
+- [ ] **Step 1: failing tests.** Integration (opt-in, real duckdb-wasm): a view over the two-buildings fixture parquet has the expected columns and row count, `SELECT … WHERE` works, geometry columns are absent, `CREATE OR REPLACE` is idempotent, and dropping removes view + registration. Unit: key round-trip; `resolveActiveTable`; existing single-table consumers unchanged for a layer with no families.
+- [ ] **Steps 2–5:** red → implement → green → commit (app).
 
-### Task 3: Family state, default Building, and reopening a stream
+### Task 3: Families in the layer, defaults, and a transactional reopen
 
-**Files:** create `src/features/layers/familyStore.ts`; modify `src/features/streaming/openStreamingLayer.ts`, `src/features/cityparquet/{streamDecision,addCityParquetLayer}.ts`, `src/scene/NavaraViewport.tsx` (memo clearing on reopen); tests under `tests/unit/`.
+**Files:** `src/features/layers/familyStore.ts` (new), `src/features/streaming/openStreamingLayer.ts`, `src/features/cityparquet/{streamDecision,addCityParquetLayer}.ts`, `src/scene/NavaraViewport.tsx` (handle-generation aware reconciliation), `src/features/layers/layerTableLifecycle.ts` (skip resident rebuilds for file-backed tables); tests under `tests/unit/`.
 
-**Interfaces:**
+- [ ] **Step 1: failing tests.** Building-only default; no-building package opens all; enabling a family reopens with both sources and keeps layer id, camera, rules, hidden types, selection and tables; a failed reopen rolls the enabled set back and shows `failed` + Retry; two rapid toggles serialise and leak no worker (the superseded completion is disposed); a file-backed table is never rebuilt from residents (including after a commit, panel open or Export).
+- [ ] **Steps 2–5:** red → implement → green → commit (app).
 
-```ts
-export interface LayerFamily {
-  readonly key: string;
-  readonly label: string;
-  readonly href: string;
-  readonly url: string | null;
-  readonly size: number | null;
-  readonly rowCount: number | null;
-}
-// familyStore: families(layerId), enabled(layerId): Set<string>, active(layerId): string | null,
-//              setEnabled(layerId, key, on), setActive(layerId, key)
-export async function reopenStreamingLayer(
-  plugin: StreamPlugin,
-  layerId: string,
-  source: StreamSource,
-): Promise<void>;
-// openStreamingLayer(input & { id?: string })
-```
+### Task 4: The UI — families, per-family tables, honest counts
 
-Default enabled set (R-D): `["building"]` when a building table exists, else every family. `decideCityParquetMode` carries the families so the decision and the layer agree. Toggling a family: update the store, rebuild the source list, `reopenStreamingLayer`; the layer row, camera, selection, rules, hidden types, query state and tables survive.
+**Files:** `src/ui/layers/{LayerTypeToggles,DetailsSection}.tsx` (+ CSS), `src/ui/table/{TablePanel,useLayerQuery,useLayerCounts}`, `src/features/query/queryStore.ts`, `src/features/streaming/useTotalObjectCount.ts`, `src/ui/StatusBar.tsx`, plus the ownership fixes in `runQueue`/`ExportDialog`/`mapFilterSync`/`useEligibilityContext` (R-C′); tests under `tests/unit/ui/` and `tests/unit/features/`.
 
-- [ ] **Step 1: failing tests.** The Yokohama-shaped manifest opens only `building.parquet` by default; a package without buildings opens all; enabling `bridge` reopens with two urls and keeps layer id, rules, hidden types and the stream store's registration (new handle, same id); disabling the last family is refused (or empties the layer explicitly — pick and test one); a reopen clears the viewport's stream memo so the new handle is re-seeded.
-- [ ] **Step 2–5:** as above; commit (app).
-
-### Task 4: The UI — families in Object Visibility, a table per family
-
-**Files:** `src/ui/layers/{LayerTypeToggles,DetailsSection}.tsx` (+ its CSS), `src/ui/table/TablePanel.tsx`, `src/features/query/queryStore.ts`, `src/ui/table/{useLayerQuery,useLayerCounts}.ts`, `src/features/streaming/useTotalObjectCount.ts`, `src/ui/StatusBar.tsx`; tests under `tests/unit/ui/`.
-
-- [ ] **Step 1: failing tests.** The details panel lists every available family with its state (not opened / opening / N loaded) and a table button; the button opens the table panel on that family and builds its table if needed; toggling a family's geometry calls the reopen; the table panel's selector switches tables and keeps per-family query state; the "buildings" view is offered only for a Building-bearing family; the status bar's "N of M" counts opened families; the details copy no longer says the table covers loaded objects only (it is file-backed now) and instead states what is opened vs available.
-- [ ] **Step 2–5:** as above, following `docs/ui-consistency.md` (reuse `.layer-types-item`, `ActionIcon`, `--control-height-compact`, 8 px spacing); commit (app).
+- [ ] **Step 1: failing tests.** The families block lists every available family with its state and a table button; the button creates the view if needed and focuses the table panel on it; a family's table shows rows for objects that are NOT resident; switching family keeps per-family query state; a running processing job keeps its frozen table after a family switch; "N of M" counts opened families; the copy states opened vs available and no longer says the table covers loaded objects only.
+- [ ] **Steps 2–5:** red → implement → green → commit (app).
 
 ### Task 5: Validation, docs, review
 
-- [ ] **Step 1:** Node benchmark: build the Yokohama building family's table end to end (884 106 rows) through `readAllRows` + `buildFamilyTable` against real duckdb-wasm — record bytes read, wall time, peak heap and the row count; then `SELECT count(*)`, a filter on `measuredHeight`, and a bbox range query. Log to `/tmp`, copy the summary into `docs/performance/cityparquet-2026-09-21/`.
-- [ ] **Step 2:** Browser smoke: open the Yokohama package URL (not the single table), confirm only Building streams, enable `bridge` and confirm the reopen keeps the camera and adds geometry, open a family table from Object Visibility, and confirm the table shows rows for objects that are not resident. Screenshot + console.
-- [ ] **Step 3:** Docs: architecture notes (families, the chunked table build and why not httpfs/whole-file, the reopen, the keying, the id-collision limit) and the perf README (Task 1's numbers).
-- [ ] **Step 4:** Codex `gpt-6-astra` milestone review; address Critical/Important; push.
+- [ ] **Step 1: browser validation on the real package** (`https://cityparquet.open3d.city/data/plateau/yokohama-shi/`): only Building streams; open the Building family's table and page/filter it while objects outside the viewport are absent from the scene; enable `bridge` and confirm the reopen keeps the camera; open the bridge table without its geometry ever being visible; record timings, JS heap, DuckDB memory (`duckdb_memory()`), console and a screenshot.
+- [ ] **Step 2: local-file package** (a folder of the Nishitokyo package, forced over the threshold or with the threshold lowered in a test): `registerFileHandle` path works, views build, disabling a family and re-enabling it works without re-picking files.
+- [ ] **Step 3: docs** — architecture notes (families, view-over-`read_parquet` with the spike numbers and the materialisation escape hatch, the reopen protocol, composite keys and frozen ownership, the bbox-CRS ruling and which tools are refused, streamed-only scope) and the perf README.
+- [ ] **Step 4: Codex `gpt-6-astra` milestone review**; address Critical/Important; push.
