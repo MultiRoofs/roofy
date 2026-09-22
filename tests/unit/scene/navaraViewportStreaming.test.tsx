@@ -345,6 +345,10 @@ function makeFakeStreamHandle(
     setRules: vi.fn(),
     setLod: vi.fn(),
     setVisible: vi.fn(),
+    setCameraSync: vi.fn(),
+    // Pushed by `syncStreamState` whenever the row's list differs from what the
+    // memo last saw — including on a REPLACEMENT handle, whose memo is empty.
+    setHiddenTypes: vi.fn(),
     // The real `FcbStreamLayerHandle` gained this with the scene themes: the
     // viewport pushes the active theme's mesh style on the same beat as rules.
     setThemeStyle: vi.fn(),
@@ -759,6 +763,77 @@ describe("NavaraViewport streaming wiring", () => {
     await waitFor(() => expect(onTriangleCount).toHaveBeenLastCalledWith(87));
     // Exactly one listener, not one per effect run.
     expect(streamHandle.commitListenerCount()).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // A REPLACEMENT handle (ruling R-E′): a family toggle reopens the stream under
+  // the same layer id, so the reconciler sees a new handle where an old one was.
+  // -------------------------------------------------------------------------
+
+  /** Re-register `layerId` with a fresh handle, exactly as
+   *  `reopenStreamingLayer` does: same row, new handle, higher generation. */
+  function replaceStreamHandle(
+    layerId: string,
+    handle: FakeStreamHandle,
+    generation: number,
+  ): void {
+    useStreamStore.getState().unregister(layerId);
+    useStreamStore.getState().register(layerId, {
+      handle,
+      disposers: [],
+      grid: { originX: 0, originY: 0, rootCell: 1000, maxLevel: 4 },
+      header: { version: "1.0", featuresCount: 1, extent: [0, 0, 0, 1, 1, 1] },
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      types: [],
+      typesVersion: 0,
+      status: "idle",
+      message: null,
+      version: 0,
+      generation,
+    } as unknown as StreamState);
+  }
+
+  it("re-seeds rules, LoD, visibility and hidden types on a REPLACEMENT handle", async () => {
+    const first = makeFakeStreamHandle({ triangles: 10 });
+    registerStreamingLayer("S1", first, { hiddenTypes: ["Bridge"] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(first.setRules).toHaveBeenCalled());
+
+    const second = makeFakeStreamHandle({ triangles: 20 });
+    act(() => replaceStreamHandle("S1", second, 1));
+
+    // The memo is keyed on the HANDLE, so a replacement is seeded from scratch:
+    // a reopened stream that inherited nothing would bake its first cells
+    // unstyled and render the types the user had hidden.
+    await waitFor(() => expect(second.setRules).toHaveBeenCalled());
+    expect(second.setLod).toHaveBeenCalled();
+    expect(second.setVisible).toHaveBeenCalled();
+    expect(second.setHiddenTypes).toHaveBeenCalledWith(["Bridge"]);
+    // And the new handle drives the readout, with exactly one subscription.
+    expect(second.commitListenerCount()).toBe(1);
+    second.triangles = 55;
+    second.emitCommit(1);
+  });
+
+  it("does NOT fit the camera when the sole layer's handle is replaced", async () => {
+    const first = makeFakeStreamHandle({ triangles: 10 });
+    registerStreamingLayer("S1", first);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    // The first open of an empty workspace earns its one fit.
+    await waitFor(() => expect(first.onCommit).toHaveBeenCalled());
+    const fitsAfterOpen = flyTo.mock.calls.length + setCamera.mock.calls.length;
+    expect(fitsAfterOpen).toBeGreaterThan(0);
+
+    const second = makeFakeStreamHandle({ triangles: 20 });
+    act(() => replaceStreamHandle("S1", second, 1));
+    await waitFor(() => expect(second.onCommit).toHaveBeenCalled());
+
+    // A reopen must leave the camera exactly where the user put it.
+    expect(flyTo.mock.calls.length + setCamera.mock.calls.length).toBe(
+      fitsAfterOpen,
+    );
   });
 
   it("routes a pick to the streaming handle, not only to static layers", async () => {

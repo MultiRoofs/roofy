@@ -1388,18 +1388,28 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const previousLayerCountRef = useRef(0);
     const layers = useLayerStore((s) => s.layers);
     /**
-     * Which layer ids currently have a stream registered, as one string.
+     * Which layer ids currently have a stream registered — each with the
+     * GENERATION of the handle registered under it — as one string.
      *
      * The reconciliation effect below reads the handles out of
      * `useStreamStore.getState()`, so it needs a reason to re-run when a stream
      * is opened or closed — but subscribing to `streams` itself would re-render
      * this component on every cell commit (a commit replaces that object; see
-     * streamStore.ts's doc comment on exactly this hazard). The id set changes
-     * only when a layer is opened or closed, which is precisely the beat this
-     * effect cares about.
+     * streamStore.ts's doc comment on exactly this hazard).
+     *
+     * THE GENERATION IS PART OF IT because an id set alone cannot see a
+     * REPLACEMENT: a family toggle reopens a layer's stream under the same id
+     * (ruling R-E′), and the effect would then never learn that the handle it
+     * holds is dead — no rules, no LoD and no hidden types would reach the new
+     * one, and every commit subscription would still be on the old. A commit
+     * does not touch it, so this still changes only on an open, a close or a
+     * reopen.
      */
     const streamIds = useStreamStore((s) =>
-      Object.keys(s.streams).sort().join(" "),
+      Object.entries(s.streams)
+        .map(([id, entry]) => `${id}:${String(entry.generation ?? 0)}`)
+        .sort()
+        .join(" "),
     );
 
     // CitySceneHandle.ready — created eagerly so a consumer can await it before
@@ -2653,14 +2663,25 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // `FcbStreamLayerHandle` really does satisfy the app's structural
         // `StreamInteractionHandle` — the same discipline `gatherHandles` uses
         // for the static side.
-        const handle: StreamInteractionHandle | undefined = store.get(
-          layer.id,
-        )?.handle;
+        const entry = store.get(layer.id);
+        const handle: StreamInteractionHandle | undefined = entry?.handle;
         if (!handle) continue;
         present.add(layer.id);
-        if (!streams.has(layer.id) && isOnlyRow(layer.id)) {
+        // A REPLACEMENT never fits (R-E′): a family toggle reopens the stream
+        // under the same id, and the camera the user arranged around what they
+        // were looking at outranks the new source list — exactly as it outranks
+        // a second file. The GENERATION is the test rather than "is this handle
+        // already in `streams`", because a reopen briefly leaves no store entry
+        // at all: a pass that fell in that window would have dropped the id from
+        // `streams` and read the replacement as a first open.
+        const isFirstOpen = (entry?.generation ?? 0) === 0;
+        if (!streams.has(layer.id) && isFirstOpen && isOnlyRow(layer.id)) {
           fitFirstStream = true;
         }
+        // A replacement OVERWRITES: `syncStreamState` keys its memo on the
+        // handle, so the new one is seeded from scratch (rules, LoD, visibility,
+        // hidden types, appearance, theme style) rather than inheriting a memo
+        // that describes a handle the plugin has deleted.
         streams.set(layer.id, handle);
         // Rules, LoD and visibility — the streaming replacement for
         // `syncLayers` + `syncStyles`, memoised per layer (`handleSync.ts`).
