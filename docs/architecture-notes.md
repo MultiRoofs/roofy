@@ -844,3 +844,93 @@ existing position buffer: 0.27 s on the same host and file, no rebuild.
 - Streaming layers place per cell in the worker and are untouched.
 - Logs: `docs/performance/cityparquet-2026-09-21/geoid-nishitokyo-*.jsonl`
   (same `lod-switch` benchmark; its `setHeightOffset(0 -> 37)` step).
+
+## CityParquet streams through the FlatCityBuf worker protocol (2026-09-22)
+
+Yokohama's 335 MB `building.parquet` read whole exhausted a 4 GiB V8 heap
+inside the reader (`docs/performance/cityparquet-2026-09-21/README.md`), and
+the browser tab was lost. A large CityParquet source now streams by viewport
+through the SAME machinery as FlatCityBuf rather than a second streaming
+stack: a second worker, `navara-flatcitybuf/src/cityparquet.worker.ts`, speaks
+the existing worker protocol through the format-agnostic `streamWorkerCore.ts`
+(grid, cell cache, bucketing, per-cell ENU baking), and each format supplies a
+`StreamSourceAdapter` (`fcbSourceAdapter.ts`, `cityParquetSourceAdapter.ts`).
+The planner, settle gate, resident budgets, picking and inspector are shared.
+
+- **Transport.** `navara-cityparquet/src/rangeSource.ts` is our own range
+  buffer, not hyparquet's `asyncBufferFromUrl` (which answers a `200` by
+  downloading and keeping the whole file): HEAD (else `bytes=0-0`) for the
+  length, one ranged GET per slice, nothing cached, a per-request signal. A
+  `200` for a resource over 4 MiB throws `RangeNotSupportedError`, which the
+  adapter reports as the `no-range` admission refusal. Local files are lazy
+  `Blob` slices; a `File` is never read into memory.
+- **Open reads an index, not the table.** `streamReader.ts` reads each table's
+  footer and then only `bbox` + `parents`, one row group at a time, into
+  typed arrays (49 bytes a row). `familyIndex.ts` groups rows into FAMILIES (a
+  root row plus the contiguous part rows after it) with a union bbox each, and
+  merges hit families across gaps of ≤ `MERGE_GAP_ROWS` (1 024) rows into row
+  ranges. `readRows` then reads identity, attribute and geometry columns ≤ the
+  requested LoD for those ranges with `useOffsetIndex`, so a range inside a
+  row group decodes only its pages (1 000 rows: 2.47 MB vs 21.1 MB without).
+  Yokohama: 24.5 MB read (7 % of the file) and ~40 MB retained to open
+  884 106 rows.
+- **Two row bounds.** The probe answers `readCost` (rows the query would read,
+  gap rows included) against the planner's `VIEWPORT_FEATURE_BUDGET` (20 000).
+  A fetch queries the UNION of its requested cells' extents — larger than the
+  probed footprint — so `select` refuses above `MAX_FETCH_READ_ROWS` (60 000)
+  with `code: "budget"`, which the plugin reports as "too far", not an error.
+  Querying whole cells also fixed FlatCityBuf boundary cells that used to bake
+  with only the part of their objects inside the view.
+- **Families stay whole.** The adapter declares `ownership: "feature"`, so a
+  Building and its BuildingParts land in one cell (the root's) and are baked
+  and evicted together.
+- **LoD rule.** `bakeLod(rung)` bakes, per object, the highest LoD ≤ the rung
+  it has (every known LoD, highest first; `null` = every LoD, never "draw all
+  surfaces"). `header.lods` seeds the ladder before any cell arrives, so the
+  zoom-driven policy is complete from the first commit.
+- **Geographic sources: one seam.** `geographicToProjected.ts` maps EPSG:6697
+  to ONE fixed UTM zone per open (the source extent's centre; Yokohama
+  EPSG:32654) for the index and every batch. It is the only place that knows;
+  performance task 6 (direct geographic → ENU) replaces it.
+- **Static or stream is decided once, by size, for every door.**
+  `src/features/cityparquet/streamDecision.ts`: object tables over
+  `CITYPARQUET_STREAM_THRESHOLD_BYTES` (128 MiB) stream. The size comes from
+  the manifest's `file:size`, else a HEAD, else the footer's row-group sizes;
+  sidecars never count. No size learnable → static, as before (a server that
+  answers neither cannot serve ranges either). Over the threshold with no
+  range support FAILS with the no-range message — no static fallback, since a
+  whole-file load of such a table is exactly the OOM this removed.
+  `addCityParquetLayer.ts` is the one implementation behind URL, file, folder,
+  STAC, workspace restore and share links, re-deciding on every restore
+  (`modelRef` records only what the user gave). A streamed open from the
+  landing page runs under `holdEngine`, since a stream cannot exist without
+  the viewport.
+- **Counts.** A streamed layer reads "N of M loaded objects" when the source
+  knows M (`header.objectsCount`, CityParquet); FlatCityBuf's header does not,
+  so it keeps the bare resident count.
+
+Known limits, deliberately left:
+
+- No appearance under CityParquet streaming: `readRows` never reads the
+  appearance columns and the adapter's `appearance()` is `undefined`.
+- A streamed CityParquet layer's DuckDB table covers RESIDENT rows only, as a
+  FlatCityBuf stream's does. Performance task 5 (per-family tables filled
+  independently of residency) removes the coupling.
+- Relinking a saved local multi-file layer accepts one file.
+- Share-link `selectedLods` are dropped on the stream path (as for `.fcb`); a
+  stream's LoDs come from the zoom policy.
+- An extensionless URL forced to CityParquet by the encoding override always
+  loads static (the decision cannot classify it).
+- Nishitokyo (31 MB, under the threshold) keeps the ~9 s static main-thread
+  load; the static path's costs are tasks 4–6.
+- No byte cache across fetches: a pan re-reads rows its neighbours already
+  read (10 × 1 km views, 600 m apart: 134 MB, 40 % of the file). A page cache
+  is a candidate if HTTP latency matters; the resident cell cache already
+  avoids refetching cells.
+
+Evidence (`docs/performance/cityparquet-2026-09-21/`, "Bounded loading" in its
+README): Node benchmark `scripts/performance/cityparquet-stream.test.ts`
+(`stream-node-yokohama.jsonl`, `stream-http-yokohama.jsonl`) and the browser
+smoke `stream-browser-smoke-yokohama.{json,png}` — first resident objects 43 s
+after navigation (engine boot and geoid included, SwiftShader), 4.5 K of
+884.1 K loaded in 21 cells, JS heap 175 MB, no errors.

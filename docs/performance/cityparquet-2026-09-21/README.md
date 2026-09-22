@@ -2,6 +2,47 @@
 
 See [the Chrome DevTools MCP follow-up](devtools-followup.md) for a second browser load and measured LoD-switch costs, including a full rebuild when no object's effective LoD changes.
 
+## Bounded loading (task 3) — 2026-09-22
+
+Large CityParquet sources (object tables over 128 MiB) now stream by viewport through the FlatCityBuf worker protocol; design and limits in `docs/architecture-notes.md` ("CityParquet streams through the FlatCityBuf worker protocol"). The baseline below is unchanged and still describes the static path, which Nishitokyo (under the threshold) keeps.
+
+**Fixture.** `/data2/hideba/roofy-perf-data/yokohama-building.parquet`, 334,860,819 bytes, SHA-256 `dd432a1e41ea854a474dd5030d92cdf1a40fb20abd11ec30bb3d4b42d549dfdd`, from the moved URL `…/plateau/yokohama-shi/building.parquet` (same `Content-Length` as served on 2026-09-22). Its size and SHA differ from the 2026-09-21 capture listed under Reproduction (334.83 MB, `af97ac…`); the numbers in this section are for this file. Linux host, Node 24.21, `--max-old-space-size=4096 --expose-gc`. Heap/RSS peaks come from a 50 ms sampler (lower bounds); retained sizes are after a forced GC and include `ArrayBuffer` memory, where the packed index lives.
+
+| Node, local file (lazy `Blob` slices)        |                                                               Measurement |
+| -------------------------------------------- | ------------------------------------------------------------------------: |
+| `openCityParquetStream`                      |        8.4 s (7.2 s in the task 4 run); 24.49 MB read = 7.3 % of the file |
+| Index                                        |          884,106 rows, 0 invalid bboxes, EPSG:6697 → EPSG:32654, LoDs 0–4 |
+| Retained after open (heap + ArrayBuffers)    |                                                                  +41.8 MB |
+| Peak during open                             |                      heap 613 MB, RSS 812 MB (transient row-group decode) |
+| 1 km box at Yokohama station, every LoD      | `readCost` 6,199 rows in 3 ranges; 12.83 MB read; 2.5 s; peak heap 499 MB |
+| Same box, LoD ≤ 2 (the ladder's middle rung) |                                                      12.35 MB read; 2.2 s |
+| Row range with `useOffsetIndex` (task 3)     |    1,000 rows of id + bbox + LoD 0/1 geometry: 2.47 MB vs 21.1 MB without |
+| Previous whole-file path                     |                      reader OOM at a 4 GiB heap (below); browser tab lost |
+
+**Pan through the real worker core.** Ten 1 km views, 600 m apart, from Yokohama station towards Kannai, driven through `installStreamWorker` + the CityParquet adapter in-process, with the planner's rules (probe vs 20,000, `chooseLevel`, `lodForCellSize`) and the plugin's resident `CellCache` budgets (4 M triangles / 512 MiB), evictions sent to the worker as the plugin sends them. Every view probed 4,120–16,988 rows (all under budget) and committed at level 7 (400 m cells), LoD 2.
+
+| Pan (local file)                |                                                                             Measurement |
+| ------------------------------- | --------------------------------------------------------------------------------------: |
+| Per view (probe + fetch + bake) |                                 2.0–6.2 s; 6–10 missing cells fetched; 6.6–20.3 MB read |
+| Cumulative                      |                                  36.3 s; 133.8 MB read (40 % of the file) over 10 views |
+| Resident after 10 views         | 67 cells, 724,810 triangles, 91.2 MB of cell geometry; no eviction (under both budgets) |
+| Peak                            |                 heap 990 MB, RSS 1.39 GB (whole process, both streams of this run open) |
+| Retained after the pan + GC     |                                                       heap 353 MB + ArrayBuffers 118 MB |
+
+Bytes re-read across views are expected: nothing is cached below the cell cache, and a view's fetch reads whole families of the union of its missing cells.
+
+**Over HTTP** (`AUDIT_HTTP=1`, `https://cityparquet.open3d.city/data/plateau/yokohama-shi/building.parquet`, Cloudflare, from the Linux host): identical bytes; open 16.3 s in 100 range requests; the 1 km read 6.1 s in 327 requests (every LoD) and 4.8 s in 247 (LoD ≤ 2); the pan 53.6 s, 3.0–9.2 s a view, peak heap 1.16 GB, no transport anomalies. One earlier HTTP run failed at view 6 with the reader's "could not be read as Parquet while reading its rows" and was not reproduced; its cause was not captured (the benchmark logs transport anomalies since). `wrapHyparquet` passes only aborts and range refusals through, so any other transport failure (a thrown fetch, a 5xx, a short body) reaches the user as that corrupt-file sentence — a follow-up.
+
+**Browser smoke** (`stream-browser-smoke-yokohama.{json,png}`; Chrome 147 headless, SwiftShader, Vite dev server, develop 145d19a; share link, camera over Yokohama station at 900 m, pitch −65°): first resident objects 43 s after navigation (engine boot, geoid and the index open included); settled at "4.5K of 884.1K loaded objects", 21 resident cells; JS heap 175 MB; longest task 1.9 s; no console errors beyond the known Three.js duplicate and missing Google tiles key warnings.
+
+Logs: `stream-node-yokohama.jsonl`, `stream-http-yokohama.jsonl` (one record per phase and per pan view). Rerun:
+
+```sh
+NODE_OPTIONS="--max-old-space-size=4096 --expose-gc" \
+  npx vitest run -c scripts/performance/vitest.config.ts cityparquet-stream
+# AUDIT_FILE=<parquet> for another local file; AUDIT_HTTP=1 (AUDIT_URL=…) for the network path
+```
+
 ## Findings
 
 The full Yokohama building table exhausts a 4 GiB V8 heap **inside `readCityParquetTable`**, before WKB decoding, CRS normalization, mesh building, or DuckDB ingestion. The isolated process reports `Allocation failed - JavaScript heap out of memory` (preserved in `yokohama-full-reader-stderr.txt`); its last completed stage is the file read. This establishes a reader memory failure independently of Navara and the GPU. It strongly supports, but does not directly prove, the cause of the earlier browser tab loss.
@@ -129,11 +170,11 @@ A follow-up should report bytes fetched, peak memory, time to first useful city 
 Source files captured for this audit:
 
 - https://cityparquet.open3d.city/data/plateau/nishitokyo-shi/building.parquet (moved from `…/plateau/nishitokyo/` by 2026-09-22; same SHA) — SHA-256 `f3c3a7a5e62f77dfd1484a3b5f6054c109d272ccb5360c87c2a3fa11036dd869`
-- https://cityparquet.open3d.city/data/plateau/yokohama-shi/building.parquet (moved from `…/plateau/yokohama/`; SHA not re-checked) — SHA-256 `af97ac05425146027f0b21463cf3e800541aaa98b906d0116e7bef0c08b40369`
+- https://cityparquet.open3d.city/data/plateau/yokohama-shi/building.parquet (moved from `…/plateau/yokohama/`) — SHA-256 at capture `af97ac05425146027f0b21463cf3e800541aaa98b906d0116e7bef0c08b40369`; the copy downloaded from the moved URL on 2026-09-22 is 334,860,819 bytes, SHA-256 `dd432a1e41ea854a474dd5030d92cdf1a40fb20abd11ec30bb3d4b42d549dfdd`
 
 The automated retained harness reproduces **Node CPU stages only**. Browser timings, frame counters, database timings and CPU trace were a one-off manual audit with agent-browser `profiler start` / `profiler stop`, performance marks around the loader/add/table-ready milestones, a Long Task observer, 100 ms heap sampling, and the WebGL/rAF counters described above. Browser instrumentation and the temporary trace-reduction script are not retained as a runnable regression harness; the raw local trace and compact evidence are retained. A repeatable browser harness is a follow-up before comparing an optimization's browser timing to this baseline.
 
-Keep downloaded public building fixtures at `/tmp/nishitokyo-building.parquet` and `/tmp/yokohama-building.parquet`. The benchmark does not download data or modify source files.
+Keep downloaded public building fixtures at `/tmp/nishitokyo-building.parquet` and `/tmp/yokohama-building.parquet` for this profile benchmark (`cityparquet-stream` defaults to `/data2/hideba/roofy-perf-data/yokohama-building.parquet`; `lod-switch` takes `AUDIT_FILE`). The benchmark does not download data or modify source files.
 
 ```sh
 AUDIT_DATASET=nishitokyo AUDIT_LOG=/tmp/nishitokyo-profile.jsonl \
