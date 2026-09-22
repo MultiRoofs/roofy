@@ -235,6 +235,25 @@ describe("dropLayerTables", () => {
     expect(sql).toContain('DROP TABLE IF EXISTS "layer_1"');
   });
 
+  it("clears a FAMILY entry the engine's death left failed", async () => {
+    // A death condemns every family's table and empties the registry, so the
+    // only trace of `L::building` is the store's own `failed` card. Without the
+    // store in the key scan that card would sit in the panel — "Analytics engine
+    // stopped" — for a layer that has been removed.
+    useLayerTableStore.setState({
+      tables: {
+        "L::building": {
+          state: "failed",
+          message: "Analytics engine stopped",
+        },
+      },
+    });
+
+    await dropLayerTables("L");
+
+    expect(useLayerTableStore.getState().tables).toEqual({});
+  });
+
   it("is quiet for a layer that never had a table", async () => {
     await dropLayerTables("nobody");
     expect(sql).toEqual([]);

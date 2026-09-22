@@ -24,7 +24,6 @@
  */
 
 import {
-  classifyColumnType,
   isDroppedColumn,
   lodsFromColumnNames,
   type ColumnInfo,
@@ -43,15 +42,18 @@ import {
 import { EngineDeadError, racedWithDeath } from "./engineAwait";
 import {
   adoptLayerTable,
+  columnsFromDescribe,
+  countTableRows,
   dropLayerTable,
   dropLayerTables,
   getLayerTable,
+  layerTableKey,
   nextTableName,
   runOnTableQueue,
   type LayerTable,
   type LayerTableOutcome,
 } from "./layerTables";
-import { buildCountSql, quoteIdent, quoteLiteral } from "./sql";
+import { quoteIdent, quoteLiteral } from "./sql";
 
 /**
  * Every engine await here, raced against the engine's DEATH — the same wrapper
@@ -122,6 +124,33 @@ let fileCounter = 0;
  *  user text — the name is interpolated into `read_parquet('…')`. */
 let nameCounter = 0;
 
+/**
+ * How many times each family — and each LAYER — has been DROPPED.
+ *
+ * The cancellation the queue alone cannot give. An `ensureFamilyView` that is
+ * queued, or awaiting its DESCRIBE, has touched nothing a drop can see: the
+ * registry, the parked sources and the enqueues are all still empty for it, so
+ * `dropFamilyView` finds no `sourceName` to forget and `dropLayerTables`'
+ * key scan cannot find the family at all. Left unguarded the ensure then
+ * publishes a live view and a live registration for a family (or a layer) that
+ * is gone, and its cached name makes the NEXT ensure build a view over a dropped
+ * VFS name — which resolves to nothing and fails at query time.
+ *
+ * TWO counters because a removal has to cover families nobody has named yet: a
+ * drop of one family bumps its slot, a drop of the layer bumps the layer, and an
+ * ensure is superseded when EITHER has moved since it started.
+ */
+const familyDrops = new Map<string, number>();
+const layerDrops = new Map<string, number>();
+
+function dropsOf(map: Map<string, number>, key: string): number {
+  return map.get(key) ?? 0;
+}
+
+function bumpDrops(map: Map<string, number>, key: string): void {
+  map.set(key, dropsOf(map, key) + 1);
+}
+
 function identityOf(source: FamilySource): string {
   if ("url" in source) return `url:${source.url}`;
   const existing = fileIdentities.get(source.file);
@@ -175,6 +204,8 @@ import.meta.hot?.dispose(() => {
 export function resetFamilyViewsForTest(): void {
   installFamilyViewEngineDeathWatch();
   registrations.clear();
+  familyDrops.clear();
+  layerDrops.clear();
   fileCounter = 0;
   nameCounter = 0;
 }
@@ -201,15 +232,10 @@ export function describeParquetSql(sourceName: string): string {
 export function keptFamilyColumns(
   rows: ReadonlyArray<Record<string, unknown>>,
 ): ColumnInfo[] {
-  const kept: ColumnInfo[] = [];
-  for (const row of rows) {
-    const name = row.column_name;
-    const type = row.column_type;
-    if (typeof name !== "string" || typeof type !== "string") continue;
-    if (isDroppedColumn(name)) continue;
-    kept.push({ name, type, kind: classifyColumnType(type) });
-  }
-  return kept;
+  // The SAME reader a materialised build uses (`layerTables.columnsFromDescribe`),
+  // so a view and a table cannot disagree about what a DESCRIBE row means — the
+  // classification decides how every cell travels from Arrow to the grid.
+  return columnsFromDescribe(rows).filter((c) => !isDroppedColumn(c.name));
 }
 
 /**
@@ -234,15 +260,14 @@ export function buildFamilyViewSql(
 // The engine half
 // ---------------------------------------------------------------------------
 
-async function countRows(view: string): Promise<number | null> {
-  const result = await runQuery(buildCountSql(view, null));
-  // NOT 0: a count that could not run says nothing about the file's size, and a
-  // view that exists with an unknown row count is a real, browsable state.
-  if (!result.ok) return null;
-  const n = result.rows[0]?.n;
-  if (typeof n === "number") return n;
-  const coerced = Number(n);
-  return Number.isFinite(coerced) ? coerced : null;
+/** Forget the cache entry that points at `name`, whatever identity made it. */
+function forget(layerId: string, name: string): void {
+  const byIdentity = registrations.get(layerId);
+  if (!byIdentity) return;
+  for (const [identity, registered] of byIdentity) {
+    if (registered === name) byIdentity.delete(identity);
+  }
+  if (byIdentity.size === 0) registrations.delete(layerId);
 }
 
 function remember(layerId: string, identity: string, name: string): void {
@@ -274,12 +299,29 @@ export function ensureFamilyView(input: {
   readonly sourceCrs: string | null;
 }): Promise<LayerTableOutcome> {
   const { layerId, family, source, sourceCrs } = input;
+  // Captured SYNCHRONOUSLY, before the queue: a drop that lands while this call
+  // is still waiting for its slot has to count.
+  const slot = layerTableKey(layerId, family);
+  const dropsAtStart = dropsOf(familyDrops, slot);
+  const layerDropsAtStart = dropsOf(layerDrops, layerId);
+  /** Has this family — or its whole layer — been dropped since we began? */
+  const superseded = () =>
+    dropsOf(familyDrops, slot) !== dropsAtStart ||
+    dropsOf(layerDrops, layerId) !== layerDropsAtStart;
+  const SUPERSEDED: LayerTableOutcome = {
+    ok: false,
+    message: "This family's table was dropped before its view was created.",
+  };
   return runOnTableQueue(async () => {
     try {
       // The engine takes ~5 s to come up and the first CityParquet layer of a
       // session lands inside that window. `initDuckDB` is memoised and never
       // rejects, so this is one await for the first family and free after.
       await initDuckDB();
+      // Cheapest possible answer for a family that was dropped while this call
+      // sat in the queue: nothing has been registered, so there is nothing to
+      // release and no reason to touch the engine at all.
+      if (superseded()) return SUPERSEDED;
       if (getDuckDBStatus().state !== "ready") {
         return { ok: false, message: ENGINE_NOT_RUNNING };
       }
@@ -334,11 +376,24 @@ export function ensureFamilyView(input: {
         // columns the ladder is read from are exactly the dropped ones.
         lods: lodsFromColumnNames(all),
         sourceFeatureIds: null,
-        rowCount: await countRows(view),
+        rowCount: await countTableRows(view),
         fileBacked: true,
         familyKey: family,
         sourceCrs,
       };
+      // THE last word, immediately before publication. A drop that landed while
+      // this was working is queued BEHIND us, so publishing here would hand it a
+      // view to retire and a file to release — and would leave the cached name
+      // behind for the next ensure to build a dead view over.
+      if (superseded()) {
+        // Undo our own work rather than leave it for a drop that cannot see it:
+        // the view goes, the registration goes, and the cache forgets the name
+        // so the next ensure registers a fresh one.
+        await ddl(`DROP VIEW IF EXISTS ${quoteIdent(view)}`);
+        forget(layerId, name);
+        await dropRegisteredFile(name);
+        return SUPERSEDED;
+      }
       adoptLayerTable(layerId, info);
       return { ok: true };
     } catch (error) {
@@ -368,14 +423,12 @@ export async function dropFamilyView(
   layerId: string,
   family: string,
 ): Promise<void> {
+  // FIRST, and synchronously: an `ensureFamilyView` still in flight has nothing
+  // in the registry for this to find, and the counter is the only way to tell it
+  // that what it is about to publish is not wanted.
+  bumpDrops(familyDrops, layerTableKey(layerId, family));
   const name = getLayerTable(layerId, family)?.sourceName ?? null;
-  const byIdentity = registrations.get(layerId);
-  if (byIdentity && name !== null) {
-    for (const [identity, registered] of byIdentity) {
-      if (registered === name) byIdentity.delete(identity);
-    }
-    if (byIdentity.size === 0) registrations.delete(layerId);
-  }
+  if (name !== null) forget(layerId, name);
   await dropLayerTable(layerId, family);
 }
 
@@ -392,6 +445,9 @@ export async function dropFamilyView(
  * zero bytes, forever.
  */
 export async function dropFamilyViews(layerId: string): Promise<void> {
+  // Per LAYER, so it also cancels an ensure for a family that has not reached
+  // the registry — which is every family whose view is still being built.
+  bumpDrops(layerDrops, layerId);
   const names = [...(registrations.get(layerId)?.values() ?? [])];
   registrations.delete(layerId);
   await dropLayerTables(layerId);

@@ -270,13 +270,18 @@ export function ExportDialog({
    * Waiting does not fix it; choosing the family's own table does.
    */
   const supersededByFamily = useLayerTableStore((s) =>
-    Object.entries(s.tables).some(
-      ([key, entry]) =>
-        parseTableKey(key).layerId === layerId &&
-        entry.state === "ready" &&
-        entry.info.fileBacked === true &&
-        entry.info.table !== table.table,
-    ),
+    // Only over a table that is NOT itself file-backed. A sibling family's view
+    // is not a supersession of this one — refusing there would tell the user to
+    // "export the family's own table", which is what they are doing.
+    table.fileBacked === true
+      ? false
+      : Object.entries(s.tables).some(
+          ([key, entry]) =>
+            parseTableKey(key).layerId === layerId &&
+            entry.state === "ready" &&
+            entry.info.fileBacked === true &&
+            entry.info.table !== table.table,
+        ),
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

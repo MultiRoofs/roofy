@@ -27,6 +27,8 @@ let describeFailure: string | null = null;
 /** When set, every CREATE fails with this message. */
 let createFailure: string | null = null;
 let engineReady = true;
+/** Holds every DESCRIBE until it is released — the window a drop lands in. */
+let describeGate: { promise: Promise<void>; open: () => void } | null = null;
 /** The death listeners `onEngineDeath` handed out, so a case can fire one. */
 let deathListeners: Array<() => void> = [];
 
@@ -40,6 +42,7 @@ vi.mock("../../../src/insights/duckdb", () => {
       };
     }
     if (statement.startsWith("DESCRIBE")) {
+      if (describeGate) await describeGate.promise;
       return describeFailure === null
         ? { ok: true as const, columns: [], rows: describeRows }
         : { ok: false as const, message: describeFailure };
@@ -153,6 +156,7 @@ beforeEach(() => {
   describeFailure = null;
   createFailure = null;
   engineReady = true;
+  describeGate = null;
   resetLayerTablesForTest();
   resetFamilyViewsForTest();
 });
@@ -436,6 +440,113 @@ describe("dropFamilyView", () => {
     });
     expect(registered).toHaveLength(1);
     expect(registered[0]?.name).not.toBe("family_1.parquet");
+  });
+});
+
+describe("a drop that lands while an ensure is IN FLIGHT", () => {
+  function gate(): { promise: Promise<void>; open: () => void } {
+    let open!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { promise, open };
+  }
+
+  /**
+   * Let the ensure get as far as its held DESCRIBE.
+   *
+   * The window matters: a drop that lands while the call is still QUEUED is the
+   * cheap case (nothing registered, nothing to release), and these cases are
+   * about the expensive one — the file is already in the VFS and remembered.
+   */
+  async function reachDescribe(): Promise<void> {
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(registered).toHaveLength(1);
+  }
+
+  it("publishes nothing and re-registers next time (dropFamilyView)", async () => {
+    // The window: while the ensure is queued or awaiting its DESCRIBE nothing is
+    // in the registry yet, so `dropFamilyView` finds no `sourceName` to forget.
+    // Without a generation check the ensure would then publish its view, the
+    // drop's queued task would retire it and release the file — and the cached
+    // name would make the NEXT ensure build a view over a dropped VFS name,
+    // which resolves to nothing and fails at query time.
+    describeGate = gate();
+    const ensuring = ensureFamilyView({
+      layerId: "L",
+      family: "building",
+      source: { url: "https://example.test/building.parquet" },
+      sourceCrs: null,
+    });
+    await reachDescribe();
+    const dropping = dropFamilyView("L", "building");
+    describeGate.open();
+    describeGate = null;
+
+    const outcome = await ensuring;
+    await dropping;
+
+    expect(outcome.ok).toBe(false);
+    expect(getLayerTable("L", "building")).toBeNull();
+    // It undoes its OWN work rather than leaving it for a drop that cannot see
+    // it: the view it had just created goes, and so does the registration.
+    expect(sql).toContain('DROP VIEW IF EXISTS "layer_1"');
+    expect(dropped).toContain("family_1.parquet");
+
+    registered.length = 0;
+    await ensureFamilyView({
+      layerId: "L",
+      family: "building",
+      source: { url: "https://example.test/building.parquet" },
+      sourceCrs: null,
+    });
+    expect(registered).toHaveLength(1);
+    expect(registered[0]?.name).not.toBe("family_1.parquet");
+    expect(getLayerTable("L", "building")?.table).not.toBeUndefined();
+  });
+
+  it("publishes nothing when the LAYER was removed under it (dropFamilyViews)", async () => {
+    // `keysForLayer` can only enumerate what the registry, the parked sources
+    // and the enqueues know about, and a pending ensure has touched none of
+    // them — so the removal cannot see this family at all. Left unguarded, the
+    // ensure would publish a live view and a live registration for a layer that
+    // no longer exists.
+    describeGate = gate();
+    const ensuring = ensureFamilyView({
+      layerId: "L",
+      family: "building",
+      source: { url: "https://example.test/building.parquet" },
+      sourceCrs: null,
+    });
+    await reachDescribe();
+    const dropping = dropFamilyViews("L");
+    describeGate.open();
+    describeGate = null;
+
+    expect((await ensuring).ok).toBe(false);
+    await dropping;
+
+    expect(getLayerTable("L", "building")).toBeNull();
+    expect(useLayerTableStore.getState().tables["L::building"]).toBeUndefined();
+    expect(dropped).toContain("family_1.parquet");
+  });
+
+  it("leaves an ensure for ANOTHER family of the same layer alone", async () => {
+    describeGate = gate();
+    const ensuring = ensureFamilyView({
+      layerId: "L",
+      family: "bridge",
+      source: { url: "https://example.test/bridge.parquet" },
+      sourceCrs: null,
+    });
+    await reachDescribe();
+    const dropping = dropFamilyView("L", "building");
+    describeGate.open();
+    describeGate = null;
+
+    expect(await ensuring).toEqual({ ok: true });
+    await dropping;
+    expect(getLayerTable("L", "bridge")).not.toBeNull();
   });
 });
 

@@ -611,6 +611,11 @@ function keysForLayer(layerId: string): string[] {
     registry.keys(),
     pendingSources.keys(),
     lastEnqueueSeq.keys(),
+    // The STORE as well, which is the only one of the four that holds a FAILED
+    // entry: an engine death condemns every family's table and clears the
+    // registry, so without this a `<layerId>::<family>` card would sit in the
+    // panel as "Analytics engine stopped" for a layer that has been removed.
+    Object.keys(useLayerTableStore.getState().tables),
   ]) {
     for (const key of source) {
       if (parseTableKey(key).layerId === layerId) keys.add(key);
@@ -838,7 +843,15 @@ export function resetLayerTablesForTest(): void {
 // Building
 // ---------------------------------------------------------------------------
 
-function columnsFromDescribe(
+/**
+ * A DESCRIBE's rows as this app's column list.
+ *
+ * Exported because `familyViews` builds its view from the same answer, and a
+ * second reader of DuckDB's `column_name`/`column_type` pair would be a second
+ * place for the CLASSIFICATION to drift — and the classification decides how
+ * every cell travels from Arrow to the grid.
+ */
+export function columnsFromDescribe(
   rows: ReadonlyArray<Record<string, unknown>>,
 ): ColumnInfo[] {
   const out: ColumnInfo[] = [];
@@ -851,7 +864,13 @@ function columnsFromDescribe(
   return out;
 }
 
-async function countRows(table: string): Promise<number | null> {
+/**
+ * One table's (or view's) row count, or `null` when the COUNT itself failed.
+ *
+ * Exported for `familyViews`: a view's count is the same question asked of the
+ * same builder, and its death-race and its "not 0" rule must be the same too.
+ */
+export async function countTableRows(table: string): Promise<number | null> {
   const result = await runQuery(buildCountSql(table, null));
   // NOT 0. A count that could not run says nothing about the table's size, and
   // a table that exists with an unknown row count is a real, browsable state.
@@ -924,7 +943,7 @@ async function buildFromReader(
       // An ordinary build holds the WHOLE source; only a derived layer's
       // adopted table carries a cut (`adoptLayerTable`).
       sourceFeatureIds: null,
-      rowCount: await countRows(table),
+      rowCount: await countTableRows(table),
       // MATERIALISED, and the bare key of its layer: only `familyViews` builds
       // a view, and only over a family. Stated rather than left `undefined` so
       // the two production builders are the documentation of the default.
@@ -1037,7 +1056,7 @@ async function buildFromRows(
       columns: columnsFromDescribe(described.rows),
       lods: [],
       sourceFeatureIds: null,
-      rowCount: await countRows(table),
+      rowCount: await countTableRows(table),
       fileBacked: false,
       familyKey: null,
       sourceCrs: null,
@@ -1595,10 +1614,16 @@ export function dropLayerTable(
   // subscriber of `useLayerTableStore` twice for nothing. Layer removal calls
   // this for EVERY layer, geospatial ones included; most of them were never in
   // here at all.
+  //
+  // The STORE is asked as well, and it is not redundant: an engine death clears
+  // the registry and leaves a `failed` card behind, so for a family's key that
+  // card is the only trace the layer's table ever existed — and a removal that
+  // returned here would leave it in the panel for a layer that is gone.
   if (
     !registry.has(key) &&
     !pendingSources.has(key) &&
-    !lastEnqueueSeq.has(key)
+    !lastEnqueueSeq.has(key) &&
+    useLayerTableStore.getState().tables[key] === undefined
   ) {
     return Promise.resolve();
   }

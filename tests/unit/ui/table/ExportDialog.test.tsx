@@ -522,6 +522,40 @@ describe("ExportDialog", () => {
     expect(runExport).not.toHaveBeenCalled();
   });
 
+  it("exports one family's view while ANOTHER family's view exists", async () => {
+    // The refusal is about a RESIDENT table the file has superseded, never about
+    // a sibling family: refusing here would tell the user to "export the
+    // family's own table" — which is exactly what they are doing.
+    const buildingTable = {
+      ...FALLBACK_TABLE,
+      table: "layer_9",
+      fileBacked: true,
+      familyKey: "building",
+    };
+    useLayerTableStore.setState({
+      tables: {
+        "L::building": { state: "ready", info: buildingTable },
+        "L::bridge": {
+          state: "ready",
+          info: {
+            ...FALLBACK_TABLE,
+            table: "layer_10",
+            fileBacked: true,
+            familyKey: "bridge",
+          },
+        },
+      },
+    } as never);
+    open({ table: buildingTable, isStreaming: true });
+
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Export" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
   it("exports a FAMILY's own file-backed table without complaint", async () => {
     const familyTable = {
       ...FALLBACK_TABLE,
