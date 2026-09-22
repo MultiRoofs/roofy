@@ -523,7 +523,7 @@ export function App({
    * is still coming up — a restored workspace, a share hash — queues instead of
    * failing, and an engine that never came up rejects rather than hangs.
    *
-   * With no viewport yet, a `.fcb` open that went through
+   * With no viewport yet, a streaming open that went through
    * {@link withEngineBooting} is mounting one right now, so this waits for the
    * handle instead of failing. A caller that did NOT take a boot hold gets the
    * old `requireStreamPlugin()` error immediately, whose message names the real
@@ -541,7 +541,7 @@ export function App({
         // with the camera restore now, so it cannot know what the wait was
         // for. Name the cost here, where it is known.
         throw new Error(
-          `${error instanceof Error ? error.message : String(error)} The .fcb layer could not be opened.`,
+          `${error instanceof Error ? error.message : String(error)} The streaming layer could not be opened.`,
           { cause: error },
         );
       }

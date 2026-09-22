@@ -1527,7 +1527,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             flatPluginErrorRef.current = error;
             console.error(
               "NavaraViewport: the FlatCityBuf plugin could not be constructed, " +
-                "so .fcb streaming is unavailable in this session. Static layers are unaffected.",
+                "so streaming is unavailable in this session. Static layers are unaffected.",
               error,
             );
           }
@@ -3686,7 +3686,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         if (plugin) return plugin;
         const cause = flatPluginErrorRef.current;
         throw new Error(
-          "FlatCityBuf streaming is unavailable in this session, so a .fcb layer cannot be opened" +
+          "Streaming is unavailable in this session, so a streaming layer cannot be opened" +
             (cause instanceof Error ? `: ${cause.message}` : "."),
           cause === null ? undefined : { cause },
         );

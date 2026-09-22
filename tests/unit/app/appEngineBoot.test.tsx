@@ -317,7 +317,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "Error · The 3D viewport did not start. The .fcb layer could not be opened.",
+          "Error · The 3D viewport did not start. The streaming layer could not be opened.",
         ),
       ).toBeInTheDocument(),
     );

@@ -263,7 +263,9 @@ describe("useLayerFileLoader — .fcb routing", () => {
       await result.current.addLayerFromUrl("https://x/delft.fcb");
     });
     expect(useLayerStore.getState().layers).toHaveLength(0);
-    expect(result.current.error).toMatch(/3D engine is not running yet/);
+    expect(result.current.error).toBe(
+      "The 3D engine is not running yet, so a streaming layer cannot be opened. Wait for the viewer to finish loading and try again.",
+    );
   });
 });
 

@@ -59,7 +59,8 @@ export function getStreamPlugin(): StreamPlugin | null {
  *
  * Streaming is the ONE load path that cannot work without the 3D engine — the
  * plugin owns the worker, the cell meshes and the camera-driven commit loop —
- * so a `.fcb` opened before the engine is up has to fail loudly. Both call
+ * so a streaming source (FlatCityBuf, or a large CityParquet) opened before
+ * the engine is up has to fail loudly. Both call
  * sites already catch and surface the message (`useLayerFileLoader`'s error
  * state, `App.tsx`'s restore toast), so this reads as a normal load failure
  * rather than a crash.
@@ -67,7 +68,7 @@ export function getStreamPlugin(): StreamPlugin | null {
 export function requireStreamPlugin(): StreamPlugin {
   if (!current) {
     throw new Error(
-      "The 3D engine is not running yet, so a streaming (.fcb) layer cannot be opened. Wait for the viewer to finish loading and try again.",
+      "The 3D engine is not running yet, so a streaming layer cannot be opened. Wait for the viewer to finish loading and try again.",
     );
   }
   return current;
