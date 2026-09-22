@@ -2,11 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 import { act, renderHook, cleanup, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { useObjectSurfaces } from "../../../../src/features/streaming/useResidentSurfaces";
+import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
 import type { Surface } from "../../../../src/domain/citymodel/types";
 
 afterEach(() => {
   cleanup();
+  useStreamStore.setState({ streams: {} });
 });
 
 /** Only `fetchSurfaces` is reached; the rest of the handle owns a worker and
@@ -147,5 +149,58 @@ describe("useObjectSurfaces", () => {
     // Still loading — waiting on "b"'s request, the stale "a" response for
     // the unmounted-from-view object was discarded rather than applied.
     expect(result.current).toEqual({ status: "loading" });
+  });
+
+  it("re-fetches when the handle's stream commits (a LoD refetch changes the resident surfaces)", async () => {
+    const fetchSurfaces = vi.fn().mockResolvedValue([]);
+    const handle = fakeHandle(fetchSurfaces);
+    useStreamStore.setState({
+      streams: { L: { handle, version: 1 } as never },
+    });
+
+    const { result } = renderHook(() => useObjectSurfaces(handle, "obj-1"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSurfaces).toHaveBeenCalledTimes(1);
+
+    let resolveSecond!: (s: readonly Surface[]) => void;
+    fetchSurfaces.mockImplementationOnce(
+      () => new Promise<readonly Surface[]>((r) => (resolveSecond = r)),
+    );
+    await act(async () => {
+      useStreamStore.getState().bumpVersion("L");
+      await Promise.resolve();
+    });
+    expect(fetchSurfaces).toHaveBeenCalledTimes(2);
+    expect(fetchSurfaces).toHaveBeenNthCalledWith(2, "obj-1");
+    // Same object: the old surfaces stay up while the new ones load, rather
+    // than flashing "Loading" on every commit.
+    expect(result.current).toEqual({ status: "ready", surfaces: [] });
+
+    await act(async () => {
+      resolveSecond(SURFACES);
+      await Promise.resolve();
+    });
+    expect(result.current).toEqual({ status: "ready", surfaces: SURFACES });
+  });
+
+  it("does not re-fetch when ANOTHER layer's stream commits", async () => {
+    const fetchSurfaces = vi.fn().mockResolvedValue([]);
+    const handle = fakeHandle(fetchSurfaces);
+    const other = fakeHandle(vi.fn());
+    useStreamStore.setState({
+      streams: {
+        L: { handle, version: 1 } as never,
+        M: { handle: other, version: 1 } as never,
+      },
+    });
+
+    renderHook(() => useObjectSurfaces(handle, "obj-1"));
+    await act(async () => {
+      useStreamStore.getState().bumpVersion("M");
+      await Promise.resolve();
+    });
+    expect(fetchSurfaces).toHaveBeenCalledTimes(1);
   });
 });

@@ -14,9 +14,10 @@
  * already resident and synchronous, so callers keep using it directly and
  * only reach for this hook (with a non-null handle) for streaming layers.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
 import type { Surface } from "../../domain/citymodel/types";
+import { useStreamStore } from "./streamStore";
 
 export type SurfacesFetchState =
   | { readonly status: "empty" }
@@ -36,15 +37,38 @@ export function useObjectSurfaces(
   objectId: string | null,
 ): SurfacesFetchState {
   const [state, setState] = useState<SurfacesFetchState>({ status: "empty" });
+  // The handle's commit counter: a commit (a LoD switch refetches every cell)
+  // can change the object's resident surfaces, so it re-runs the fetch. Found
+  // by handle identity because the hook is given no layer id; a primitive, so
+  // another layer's commit does not re-render this one.
+  const streamVersion = useStreamStore((s) => {
+    if (!handle) return undefined;
+    for (const entry of Object.values(s.streams)) {
+      if (entry.handle === handle) return entry.version;
+    }
+    return undefined;
+  });
+  // What the last fetch was FOR. A commit-driven refetch of the same object
+  // keeps the surfaces on screen until the new ones land instead of flashing
+  // "Loading" on every camera settle.
+  const fetchedFor = useRef<{
+    handle: FcbStreamLayerHandle;
+    objectId: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!handle || !objectId) {
+      fetchedFor.current = null;
       setState({ status: "empty" });
       return;
     }
 
     let cancelled = false;
-    setState({ status: "loading" });
+    const sameObject =
+      fetchedFor.current?.handle === handle &&
+      fetchedFor.current.objectId === objectId;
+    fetchedFor.current = { handle, objectId };
+    if (!sameObject) setState({ status: "loading" });
 
     // No response-shape branch any more: `fetchSurfaces` types its result and
     // REJECTS both for a worker error and for an object that is not resident
@@ -71,7 +95,7 @@ export function useObjectSurfaces(
     return () => {
       cancelled = true;
     };
-  }, [handle, objectId]);
+  }, [handle, objectId, streamVersion]);
 
   return state;
 }
