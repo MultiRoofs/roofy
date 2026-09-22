@@ -20,8 +20,12 @@
  * A SOURCE THAT CANNOT BE RESOLVED STAYS STATIC. An unlistable wildcard, a
  * manifest that 404s, a selection with no tables, an expansion over the file
  * cap: the decision swallows the error and the static load, which resolves
- * the same targets, throws the same sentence the user has always seen. The
- * cost is a second manifest/listing request on that failure path only.
+ * the same targets, throws the same sentence the user has always seen.
+ *
+ * THE COST: every STATIC package or bucket source (package directory, bucket
+ * prefix, bucket glob) resolves its targets twice — once here, once in the
+ * static load — so it pays one extra manifest or listing request. A lone
+ * table resolves without I/O and pays nothing.
  *
  * Every size is read through an injected seam (`http`, `headLength`,
  * `footerSize`); the browser implementations are in `sourceSizes.ts`.

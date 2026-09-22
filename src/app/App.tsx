@@ -641,10 +641,13 @@ export function App({
   /**
    * Run a layer open with the 3D engine mounted, when the source needs it.
    *
-   * `.fcb` only: streaming is the one format whose layer cannot exist before
-   * the engine does. Every other encoding parses to a `CityModel` first and
-   * mounts the viewport as a consequence, so booting for those would put a
-   * globe behind the landing page for no reason.
+   * `.fcb` only: a stream's layer cannot exist before the engine does, and
+   * `.fcb` is the one format that ALWAYS streams. A CityParquet source streams
+   * only when large, which is known only after sizing, so it takes
+   * {@link holdEngine} itself at that point (`addCityParquetLayer.ts`). Every
+   * other encoding parses to a `CityModel` first and mounts the viewport as a
+   * consequence, so booting for those would put a globe behind the landing
+   * page for no reason.
    *
    * The hold is released in `finally`, which is what returns the user to the
    * landing page when the open FAILS (a 404, a refused CRS) rather than
@@ -935,9 +938,10 @@ export function App({
   /**
    * Several picked files as ONE layer — a CityParquet package folder.
    *
-   * No `withEngineBooting` hold: `.fcb` is the only source that needs the
-   * engine before its layer can exist, and it is never a group. Errors land in
-   * `loadError`, exactly as for {@link handleFile}.
+   * No `withEngineBooting` hold here: a group is never `.fcb`, and a folder
+   * large enough to STREAM takes {@link holdEngine} inside the loader, once
+   * it has been sized (`addCityParquetLayer.ts`). Errors land in `loadError`,
+   * exactly as for {@link handleFile}.
    */
   const handleFiles = useCallback(
     async (files: File[], override?: DetectedSource) => {
