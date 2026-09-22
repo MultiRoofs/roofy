@@ -874,20 +874,57 @@ The planner, settle gate, resident budgets, picking and inspector are shared.
   row group decodes only its pages (1 000 rows: 2.47 MB vs 21.1 MB without).
   Yokohama: 24.5 MB read (7 % of the file) and ~40 MB retained to open
   884 106 rows.
-- **Two row bounds.** The probe answers `readCost` (rows the query would read,
-  gap rows included) against the planner's `VIEWPORT_FEATURE_BUDGET` (20 000).
-  A fetch queries the UNION of its requested cells' extents — larger than the
-  probed footprint — so `select` refuses above `MAX_FETCH_READ_ROWS` (60 000)
-  with `code: "budget"`, which the plugin reports as "too far", not an error.
-  Querying whole cells also fixed FlatCityBuf boundary cells that used to bake
-  with only the part of their objects inside the view.
+- **Two row bounds, and a byte bound.** The probe answers `readCost` (rows the
+  query would read, gap rows included) against the planner's
+  `VIEWPORT_FEATURE_BUDGET` (20 000). A fetch queries the UNION of its
+  requested cells' extents — larger than the probed footprint — so `select`
+  refuses above `MAX_FETCH_READ_ROWS` (60 000) with `code: "budget"`, which the
+  plugin reports as "too far", not an error. Querying whole cells also fixed
+  FlatCityBuf boundary cells that used to bake with only the part of their
+  objects inside the view.
+  Rows are not bytes: `useOffsetIndex` is a request, not a requirement, and
+  hyparquet reads a column chunk WHOLE when that chunk carries no offset index,
+  so one enormous row group (or a file written without a page index) could
+  serve hundreds of MB to a fetch of a few families. `estimateReadBytes` plans
+  the physical read from the footer alone — the selected row fraction of an
+  indexed chunk's `total_compressed_size`, the whole of an unindexed one, and
+  the whole file when a size is missing — and `select` refuses above
+  `MAX_FETCH_READ_BYTES` (96 MiB) through the same `"budget"` path, before a
+  slice is read. The estimate is asymmetric on purpose: an UNINDEXED chunk is
+  charged whole, which is what is really read, so the gate is tight on the
+  unbounded case; an indexed read fetches whole pages and so costs more than
+  its row fraction (Yokohama's 1 km viewport plans 2.45 MB and reads 12.83 MB,
+  5.2× low), which the row gates already bound. Tightening it would mean
+  reading each chunk's offset index — a read on the path this protects.
 - **Families stay whole.** The adapter declares `ownership: "feature"`, so a
   Building and its BuildingParts land in one cell (the root's) and are baked
   and evicted together.
+- **Residency counts what the WORKER holds, not what it sent.** The worker
+  keeps a whole decoded `CityModel` per resident cell (~5 MB a Yokohama cell,
+  4–5× the geometry the cache used to meter), and a cell baked with every
+  object type hidden transfers nothing at all. Every `cell` message therefore
+  carries `retainedBytes`, a cheap structural estimate (typed arrays kept,
+  plus per-object / per-surface / per-ring / per-vertex charges; ±50 %, and it
+  does not count attribute values), which `cellStatsFromGeometry` ADDS to the
+  transferred bytes. The worker also enforces its own LRU cap,
+  `WORKER_RETAINED_BYTE_BUDGET` (512 MiB), as a backstop, never dropping a key
+  of the commit in flight; a dropped cell degrades gracefully (`recolor` skips
+  it, `surfaces` answers not-found). And a commit the main thread ABANDONS
+  (stale epoch, refused fetch, liveness timeout) now evicts exactly the keys it
+  received and did not adopt — the worker bakes and posts before it can read a
+  `cancel`, so those were otherwise unreachable forever.
 - **LoD rule.** `bakeLod(rung)` bakes, per object, the highest LoD ≤ the rung
   it has (every known LoD, highest first; `null` = every LoD, never "draw all
   surfaces"). `header.lods` seeds the ladder before any cell arrives, so the
   zoom-driven policy is complete from the first commit.
+  A source with an UNLABELLED geometry column (a bare `geometry`, no LoD in
+  its name) decodes surfaces with `lod: null`, which no labelled selection can
+  name. `null` is therefore a rung of core's `LodSelection` array, ranked below
+  every label: `bakeLodSelection` appends it whenever
+  `header.unlabelledGeometry`, so an object draws its unlabelled surfaces only
+  when it has no labelled surface at or below the rung. The invariant is that
+  an object with only unlabelled geometry is never silently invisible while
+  the layer counts it as loaded.
 - **Geographic sources: one seam.** `geographicToProjected.ts` maps EPSG:6697
   to ONE fixed UTM zone per open (the source extent's centre; Yokohama
   EPSG:32654) for the index and every batch. It is the only place that knows;
@@ -895,8 +932,10 @@ The planner, settle gate, resident budgets, picking and inspector are shared.
 - **Static or stream is decided once, by size, for every door.**
   `src/features/cityparquet/streamDecision.ts`: object tables over
   `CITYPARQUET_STREAM_THRESHOLD_BYTES` (128 MiB) stream. The size comes from
-  the manifest's `file:size`, else a HEAD, else the footer's row-group sizes;
-  sidecars never count. No size learnable → static, as before (a server that
+  the manifest's `file:size`, else a HEAD, else a ranged open of the table,
+  which reports the byte length its range probe learned — NOT the sum of the
+  row groups' compressed sizes, which omits the footer and page indexes and
+  could flip a table over the threshold to static; sidecars never count. No size learnable → static, as before (a server that
   answers neither cannot serve ranges either). Over the threshold with no
   range support FAILS with the no-range message — no static fallback, since a
   whole-file load of such a table is exactly the OOM this removed.

@@ -8,6 +8,10 @@ Large CityParquet sources (object tables over 128 MiB) now stream by viewport th
 
 **Fixture.** `/data2/hideba/roofy-perf-data/yokohama-building.parquet`, 334,860,819 bytes, SHA-256 `dd432a1e41ea854a474dd5030d92cdf1a40fb20abd11ec30bb3d4b42d549dfdd`, from the moved URL `…/plateau/yokohama-shi/building.parquet` (same `Content-Length` as served on 2026-09-22). Its size and SHA differ from the 2026-09-21 capture listed under Reproduction (334.83 MB, `af97ac…`); the numbers in this section are for this file. Linux host, Node 24.21, `--max-old-space-size=4096 --expose-gc`. Heap/RSS peaks come from a 50 ms sampler (lower bounds); retained sizes are after a forced GC and include `ArrayBuffer` memory, where the packed index lives.
 
+**Hardware, and what may not be compared.** Everything in this section ran on the Linux host described above — a headless machine with a software GL stack. The ORIGINAL baseline further down this file (Findings, Environment and scope, Source sizes, Reproduction) was captured on an **Apple M4 Max with a hardware GPU**, on a different Node. Absolute timings must NOT be compared across the two sets: only the relations inside one set mean anything. The task 4 run whose 7.2 s open is quoted below was on this same Linux host, the same Node and the same local `Blob`, so that one figure is comparable with the 8.4 s beside it.
+
+**Units.** Heap and RSS are binary MiB/GiB; bytes read over the wire are decimal MB/GB. That matches how each is reported by its source (`process.memoryUsage()` vs a byte counter) and is the convention of both the prose and the JSONL.
+
 | Node, local file (lazy `Blob` slices)        |                                                               Measurement |
 | -------------------------------------------- | ------------------------------------------------------------------------: |
 | `openCityParquetStream`                      |        8.4 s (7.2 s in the task 4 run); 24.49 MB read = 7.3 % of the file |
@@ -29,20 +33,47 @@ Large CityParquet sources (object tables over 128 MiB) now stream by viewport th
 | Peak                            |                 heap 990 MB, RSS 1.39 GB (whole process, both streams of this run open) |
 | Retained after the pan + GC     |                                                       heap 353 MB + ArrayBuffers 118 MB |
 
-The worker retains a whole `CityModel` per cached cell on top of the geometry the cache meters: 67 cells were 91.2 MB of budget-counted geometry but ~353 MB of retained heap after a GC (~5 MB a cell, 4–5× the metered bytes). Extrapolated (so a projection, not a measurement) to `RESIDENT_TRIANGLE_BUDGET`'s 4 M triangles, eviction would first fire at roughly 2 GB of worker heap. Pre-existing FlatCityBuf design, not introduced here.
+The worker retains a whole `CityModel` per cached cell on top of the geometry the cache meters: 67 cells were 91.2 MB of budget-counted geometry but ~353 MB of retained heap after a GC (~5 MB a cell, 4–5× the metered bytes). **Fixed after the milestone review** (Critical): every `cell` message now carries a structural `retainedBytes` estimate that the main thread ADDS to the geometry bytes it meters, and the worker enforces its own `WORKER_RETAINED_BYTE_BUDGET` (512 MiB) LRU cap as a backstop — so a pan with every object type hidden, which used to cost zero metered bytes a cell, is bounded like any other. The refreshed numbers are in "After the milestone-review fixes" below.
 
 Bytes re-read across views are expected: nothing is cached below the cell cache, and a view's fetch reads whole families of the union of its missing cells.
+
+### After the milestone-review fixes (2026-09-22, same Linux host)
+
+One refreshed local run of the same benchmark (`/tmp/stream-refresh2.jsonl`, not committed — the committed JSONL is the pre-fix evidence), with `retainedBytes` metering, the worker LRU backstop and the planned-byte gate in place.
+
+| Refreshed local run          |                                                                                                          Measurement |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------: |
+| Open                         |                                                7.2 s; 24.49 MB read (unchanged); +68.7 MB retained; peak heap 581 MB |
+| 1 km box, every LoD          |                           planned 2.45 MB vs the 96 MiB gate; 12.83 MB actually read; 2.2 s — nowhere near a refusal |
+| 1 km box, LoD ≤ 2            |                                                                                planned 2.36 MB; 12.35 MB read; 1.9 s |
+| Pan, resident after 10 views | 67 cells, 724,810 triangles; **359.3 MB metered** (was 91.2 MB), of which 268.1 MB is the worker's retained estimate |
+| Pan, retained after GC       |                                                                    heap 352.9 MB + ArrayBuffers 117.7 MB (unchanged) |
+| Pan, evictions               |                                     still 0 in 10 views — but now at 70 % of `RESIDENT_BYTE_BUDGET` rather than 18 % |
+| Pan total                    |                                                     35.2 s; 133.8 MB read (unchanged: the gate refuses nothing here) |
+
+Two things this says:
+
+- **The retained-bytes estimate is the right size.** 268.1 MB estimated for 67 cells (~4.0 MB a cell) against 352.9 MB of heap actually retained after a forced GC — about 76 % of it, inside the ±50 % the formula claims. The gap is attribute VALUES, which the structural estimate does not walk. Metered residency is now 4× what it was, so the 512 MiB budget is reached after roughly 14 views of this pan instead of never; with every object type hidden (zero triangles, zero transferred bytes) it is reached at the same point, which is the case the review named.
+- **The byte gate refuses nothing normal.** A 1 km Yokohama viewport plans 2.45 MB against a 96 MiB limit — a factor of 40 of headroom. The gate is there for the shape of file the row gates cannot see (see `estimateReadBytes`'s note on why it is deliberately asymmetric).
 
 **Over HTTP** (`AUDIT_HTTP=1`, `https://cityparquet.open3d.city/data/plateau/yokohama-shi/building.parquet`, Cloudflare, from the Linux host): identical bytes; open 16.3 s in 100 range requests; the 1 km read 6.1 s in 327 requests (every LoD) and 4.8 s in 247 (LoD ≤ 2); the pan 53.6 s, 3.0–9.2 s a view, peak heap 1.16 GB, no transport anomalies. One earlier HTTP run failed at view 6 with the reader's "could not be read as Parquet while reading its rows" and was not reproduced; its cause was not captured (the benchmark logs transport anomalies since). `wrapHyparquet` passes only aborts and range refusals through, so any other transport failure (a thrown fetch, a 5xx, a short body) reaches the user as that corrupt-file sentence — a follow-up.
 
 **Browser smoke** (`stream-browser-smoke-yokohama.{json,png}`; Chrome 147 headless, SwiftShader, Vite dev server, develop 145d19a; share link, camera over Yokohama station at 900 m, pitch −65°): first resident objects 43 s after navigation (engine boot, geoid and the index open included); settled at "4.5K of 884.1K loaded objects", 21 resident cells; JS heap 175 MB; longest task 1.9 s; no console errors beyond the known Three.js duplicate and missing Google tiles key warnings.
 
-Logs: `stream-node-yokohama.jsonl`, `stream-http-yokohama.jsonl` (one record per phase and per pan view). Rerun:
+The `useOffsetIndex` row-range figure (2.47 MB vs 21.1 MB) is from the plan's own measurement — `docs/plans/2026-09-22-cityparquet-bounded-loading.md`, Global Constraints — not from the JSONL committed here, which records whole phases rather than that single 1,000-row probe.
+
+Logs: `stream-node-yokohama.jsonl`, `stream-http-yokohama.jsonl` (one record per phase and per pan view). `AUDIT_LOG` defaults to `/tmp`, so a plain rerun leaves those files alone; pass the path explicitly to refresh them.
 
 ```sh
+# A run that does not touch the committed evidence:
 NODE_OPTIONS="--max-old-space-size=4096 --expose-gc" \
   npx vitest run -c scripts/performance/vitest.config.ts cityparquet-stream
-# AUDIT_FILE=<parquet> for another local file; AUDIT_HTTP=1 (AUDIT_URL=…) for the network path
+# Refreshing the committed evidence (name the log):
+NODE_OPTIONS="--max-old-space-size=4096 --expose-gc" \
+  AUDIT_LOG=docs/performance/cityparquet-2026-09-21/stream-node-yokohama.jsonl \
+  npx vitest run -c scripts/performance/vitest.config.ts cityparquet-stream
+# AUDIT_FILE=<parquet> for another local file; AUDIT_HTTP=1 (AUDIT_URL=…) for the
+# network path — its log defaults to stream-http-yokohama.jsonl when named.
 ```
 
 ## Findings
