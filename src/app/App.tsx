@@ -2319,7 +2319,8 @@ export function App({
           attributionLines={viewportAttribution}
           status={
             <StatusBar
-              objectCount={totalObjects}
+              objectCount={totalObjects.loaded}
+              totalObjectCount={totalObjects.total}
               fps={fps}
               cursorPosition={cursorPosition}
               streamStatus={

@@ -2,6 +2,10 @@ import type { StreamStatus } from "../features/streaming/streamStore";
 
 interface StatusBarProps {
   readonly objectCount: number;
+  /** The objects the layers' datasets hold in total, or `null` when unknown
+   *  (any FlatCityBuf stream). Differs from `objectCount` only while a
+   *  stream holds part of its dataset. */
+  readonly totalObjectCount?: number | null;
   readonly fps?: number;
   readonly cursorPosition?: readonly [number, number, number] | null;
   readonly streamStatus?: StreamStatus | null;
@@ -10,6 +14,7 @@ interface StatusBarProps {
 }
 export function StatusBar({
   objectCount,
+  totalObjectCount = null,
   fps,
   cursorPosition,
   streamStatus,
@@ -21,7 +26,13 @@ export function StatusBar({
       <div className="statusbar__left">
         <span>Navara</span>
         {fps !== undefined && <span>· {fps} FPS</span>}
-        <span>· {formatCount(objectCount)} loaded objects</span>
+        <span>
+          ·{" "}
+          {totalObjectCount !== null && totalObjectCount !== objectCount
+            ? `${formatCount(objectCount)} of ${formatCount(totalObjectCount)}`
+            : formatCount(objectCount)}{" "}
+          loaded objects
+        </span>
       </div>
       <div className="statusbar__centre" title="WGS84 ellipsoidal height">
         {cursorPosition && formatCoordinate(cursorPosition)}

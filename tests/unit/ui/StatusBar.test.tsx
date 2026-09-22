@@ -18,6 +18,20 @@ describe("StatusBar", () => {
     expect(screen.queryByText(/°/)).toBeNull();
     expect(screen.getByTitle("WGS84 ellipsoidal height")).toBeInTheDocument();
   });
+  it("reads N loaded objects when the total is unknown", () => {
+    render(<StatusBar objectCount={40} totalObjectCount={null} />);
+    expect(screen.getByText("· 40 loaded objects")).toBeInTheDocument();
+  });
+  it("reads N loaded objects when everything is loaded", () => {
+    render(<StatusBar objectCount={1500} totalObjectCount={1500} />);
+    expect(screen.getByText("· 1.5K loaded objects")).toBeInTheDocument();
+  });
+  it("reads N of M loaded objects when a stream holds only part of its dataset", () => {
+    render(<StatusBar objectCount={12301} totalObjectCount={884106} />);
+    expect(
+      screen.getByText("· 12.3K of 884.1K loaded objects"),
+    ).toBeInTheDocument();
+  });
   it("shows resident settled state", () => {
     render(
       <StatusBar {...baseProps} streamStatus="idle" residentCellCount={3} />,

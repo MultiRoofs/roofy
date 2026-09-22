@@ -378,6 +378,14 @@ describe("App object count across static and streaming layers", () => {
             }),
           },
           disposers: [],
+          // A FlatCityBuf header: no `objectsCount`, so no "of M".
+          header: {
+            version: "1",
+            featuresCount: 5000,
+            extent: undefined,
+            referenceSystem: undefined,
+            epsg: 28992,
+          },
           version: 1,
           status: "idle",
           message: null,

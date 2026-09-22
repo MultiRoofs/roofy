@@ -54,6 +54,9 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   // Always subscribed, branched on only below — see the module comment.
   const streamVersion = useStreamStore((s) => s.streams[layerId]?.version);
   const streamTypes = useStreamStore((s) => s.streams[layerId]?.types);
+  const streamObjectsCount = useStreamStore(
+    (s) => s.streams[layerId]?.header.objectsCount,
+  );
   const streamThemes = useStreamStore(
     (s) => s.streams[layerId]?.appearanceThemes,
   );
@@ -99,35 +102,36 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
           label="Extent"
           value={extentLine(model.bbox, crs) ?? "Not stated"}
         />
-        {resident && (
-          // Never "buildings": one FlatCityBuf feature can carry a Building
-          // plus several BuildingParts, so a building count would not add up
-          // against anything. The tooltip is the layer row's, verbatim — it
-          // is what stops this number being read as "what's on screen".
-          <DefinitionRow
-            label="Resident cache"
-            value={`${formatCount(resident.featureCount)} ${plural(
-              resident.featureCount,
-              "feature",
-            )} · ${formatCount(resident.cellCount)} ${plural(
-              resident.cellCount,
-              "cell",
-            )}`}
-            title={`Resident cache: ${resident.featureCount} ${plural(
-              resident.featureCount,
-              "feature",
-            )} loaded across ${resident.cellCount} resident ${plural(
-              resident.cellCount,
-              "cell",
-            )}. Reflects what's currently held in memory — including a margin around the viewport and cells not yet evicted — not exactly what's on screen right now.`}
-          />
-        )}
       </dl>
 
-      {/* What is IN the layer. A streaming layer has no total to give — its
-          objects arrive cell by cell — so it lists the types discovered so
-          far and says where a count would come from, rather than printing
-          the resident cache's numbers as if they were the dataset's. */}
+      {resident && (
+        // "Objects", never "buildings": a Building's parts are objects too,
+        // so a building count would not add up against anything. The
+        // dataset's size is given only where the stream's header states it
+        // (CityParquet); a FlatCityBuf header counts features, not objects.
+        // The tooltip keeps the cache's own numbers and says the loaded set
+        // includes a margin around the view.
+        <p
+          className="active-layer-note"
+          title={`Resident cache: ${resident.featureCount} ${plural(
+            resident.featureCount,
+            "object",
+          )} loaded across ${resident.cellCount} resident ${plural(
+            resident.cellCount,
+            "cell",
+          )}. Includes a margin around the viewport and cells not yet evicted.`}
+        >
+          {`Showing the objects in view — ${formatCount(resident.featureCount)}${
+            streamObjectsCount !== undefined
+              ? ` of ${formatCount(streamObjectsCount)}`
+              : ""
+          } loaded. The table and statistics cover loaded objects only.`}
+        </p>
+      )}
+
+      {/* What is IN the layer. A streaming layer's objects arrive cell by
+          cell, so it lists the types discovered so far rather than
+          per-type counts of the resident cache read as the dataset's. */}
       <div className="active-layer-group">
         <h4 className="active-layer-group-title">Objects</h4>
         {streaming ? (

@@ -101,6 +101,7 @@ function seedStream(
     types?: readonly string[];
     featureCount?: number;
     cellCount?: number;
+    objectsCount?: number;
   },
 ): void {
   useStreamStore.setState((s) => ({
@@ -114,6 +115,16 @@ function seedStream(
             featureCount: over.featureCount ?? 1204,
             surfaceAttrKeys: [],
           }),
+        },
+        header: {
+          version: "1",
+          featuresCount: undefined,
+          ...(over.objectsCount !== undefined
+            ? { objectsCount: over.objectsCount }
+            : {}),
+          extent: undefined,
+          referenceSystem: undefined,
+          epsg: 28992,
         },
         status: "idle",
         message: null,
@@ -238,13 +249,28 @@ describe("DetailsSection — a streaming layer", () => {
     expect(screen.queryByTitle("Level of Detail")).toBeNull();
   });
 
-  it("reads the resident cache, qualified as the cache and not the view", () => {
-    seedStream("L", { featureCount: 1204, cellCount: 7 });
+  it("says how many of the dataset's objects are loaded, and that the table covers only those", () => {
+    seedStream("L", {
+      featureCount: 12301,
+      cellCount: 7,
+      objectsCount: 884106,
+    });
     render(<DetailsSection item={city({ isStreaming: true })} />);
-    const line = screen.getByText(/1,?204 features/);
-    expect(line.getAttribute("title")).toContain(
-      "not exactly what's on screen right now",
+    const line = screen.getByText(
+      "Showing the objects in view — 12,301 of 884,106 loaded. The table and statistics cover loaded objects only.",
     );
+    // The cell count and the cache qualification survive in the tooltip.
+    expect(line.getAttribute("title")).toContain("7 resident cells");
+  });
+
+  it("says how many objects are loaded when the stream does not know its dataset's size", () => {
+    seedStream("L", { featureCount: 1204, cellCount: 3 });
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    expect(
+      screen.getByText(
+        "Showing the objects in view — 1,204 loaded. The table and statistics cover loaded objects only.",
+      ),
+    ).toBeTruthy();
   });
 
   it("freezes and unfreezes the extract through the camera-sync toggle", () => {
