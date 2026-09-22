@@ -21,9 +21,15 @@
  *
  * Environment: `AUDIT_FILE` (default the local Yokohama building table),
  * `AUDIT_HTTP=1` (read the published URL instead; `AUDIT_URL` overrides it),
- * `AUDIT_LOG` (JSONL path). Run with
- * `NODE_OPTIONS="--max-old-space-size=4096 --expose-gc"`. Heap peaks come
- * from a 50 ms sampler and are lower bounds.
+ * `AUDIT_LOG` (JSONL path; defaults to a /tmp file, like
+ * `cityparquet-profile.test.ts`, so a rerun cannot truncate the committed
+ * evidence — pass the `docs/performance/…` path explicitly to refresh it).
+ * Run with `NODE_OPTIONS="--max-old-space-size=4096 --expose-gc"`. Heap peaks
+ * come from a 50 ms sampler and are lower bounds.
+ *
+ * UNITS in this file and in the README's prose: heap and RSS in binary MiB/GiB
+ * (`/ 2 ** 20`), bytes read over the wire in decimal MB/GB (`/ 1e6`), matching
+ * how each is reported by its source.
  */
 import { it } from "vitest";
 import fs from "node:fs";
@@ -36,7 +42,10 @@ import {
   type RangeBuffer,
 } from "../../packages/cityjson-navara-plugins/packages/navara-cityparquet/src/rangeSource";
 import { openCityParquetStream } from "../../packages/cityjson-navara-plugins/packages/navara-cityparquet/src/streamReader";
-import { createCityParquetSourceAdapter } from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/cityParquetSourceAdapter";
+import {
+  createCityParquetSourceAdapter,
+  MAX_FETCH_READ_BYTES,
+} from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/cityParquetSourceAdapter";
 import { installStreamWorker } from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/streamWorkerCore";
 import { CellCache } from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/cellCache";
 import {
@@ -81,7 +90,7 @@ const url = process.env.AUDIT_URL ?? DEFAULT_URL;
 const present = http || fs.existsSync(file);
 const log =
   process.env.AUDIT_LOG ??
-  `docs/performance/cityparquet-2026-09-21/stream-${http ? "http" : "node"}-yokohama.jsonl`;
+  `/tmp/cityparquet-stream-${http ? "http" : "node"}.jsonl`;
 
 type Box = [number, number, number, number];
 /** A worker request before `send` numbers it. */
@@ -273,6 +282,9 @@ it.skipIf(!present)(
           rowsInRanges,
           batches,
           objectsDecoded: objects,
+          // The gate the adapter applies before reading anything.
+          plannedBytes: stream.estimateReadBytes(ranges, lod),
+          maxFetchReadBytes: MAX_FETCH_READ_BYTES,
           bytesRead: buffer.bytesRead() - bytes0,
           httpRequests: http ? openCounter.requests - req0 : undefined,
         });
@@ -339,7 +351,13 @@ it.skipIf(!present)(
           maxTriangles: RESIDENT_TRIANGLE_BUDGET,
           maxBytes: RESIDENT_BYTE_BUDGET,
         });
-        const workerCells = new Set<CellKey>();
+        // The keys THIS HARNESS believes the worker holds — its own
+        // bookkeeping of what it posted minus what it evicted, never read
+        // back from the worker (there is no protocol message for that).
+        const postedCellKeys = new Set<CellKey>();
+        /** Sum of `retainedBytes` over the cells still in `postedCellKeys`. */
+        let retainedPosted = 0;
+        const retainedOf = new Map<CellKey, number>();
         const len = Math.hypot(kx - sx, ky - sy);
         const [ux, uy] = [(kx - sx) / len, (ky - sy) / len];
         const panStart = performance.now();
@@ -385,14 +403,18 @@ it.skipIf(!present)(
             });
             for (const m of responses) {
               if (m.type !== "cell") continue;
-              const stats = cellStatsFromGeometry(m.geometry);
+              // Exactly as the plugin meters it: the transferred geometry
+              // PLUS what the worker says it retains for the cell.
+              const stats = cellStatsFromGeometry(m.geometry, m.retainedBytes);
+              retainedPosted += m.retainedBytes;
               triangles += stats.triangles;
               objects += m.objects.length;
               fetched.set(m.key, {
                 entry: null,
                 stats,
               } as unknown as FetchedCell);
-              workerCells.add(m.key);
+              postedCellKeys.add(m.key);
+              retainedOf.set(m.key, m.retainedBytes);
             }
             // A requested cell the fetch found empty is resident too (the
             // plugin marks it with an empty geometry), so it is not refetched.
@@ -412,7 +434,8 @@ it.skipIf(!present)(
           );
           if (evicted.length > 0) {
             send({ type: "evict", cells: evicted });
-            for (const k of evicted) workerCells.delete(k);
+            for (const k of evicted) postedCellKeys.delete(k);
+            for (const k of evicted) retainedPosted -= retainedOf.get(k) ?? 0;
           }
           const totals = cache.totals();
           record("pan-step", {
@@ -431,9 +454,10 @@ it.skipIf(!present)(
             trianglesBaked: triangles,
             evictedCells: evicted.length,
             residentCells: cache.keys().length,
-            workerRetainedCells: workerCells.size,
+            cellsPostedNotEvicted: postedCellKeys.size,
             residentTriangles: totals.triangles,
-            residentGeometryMB: +(totals.bytes / 2 ** 20).toFixed(1),
+            residentMeteredMB: +(totals.bytes / 2 ** 20).toFixed(1),
+            workerRetainedEstimateMB: +(retainedPosted / 2 ** 20).toFixed(1),
             stepBytesRead: panCounter.bytes - stepBytes0,
             stepRequests: panCounter.requests - stepReq0,
             cumulativeBytesRead: panCounter.bytes - panBytes0,
@@ -445,7 +469,7 @@ it.skipIf(!present)(
           stepM: PAN_STEP_M,
           ms: Math.round(performance.now() - panStart),
           cumulativeBytesRead: panCounter.bytes - panBytes0,
-          workerRetainedCells: workerCells.size,
+          cellsPostedNotEvicted: postedCellKeys.size,
           transportAnomalies: panCounter.anomalies,
           note: "peak* covers the pan only; main-thread meshes are not built in Node",
         });
