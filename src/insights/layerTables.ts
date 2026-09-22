@@ -209,6 +209,40 @@ export interface LayerTable {
    *  but its size is UNKNOWN. Not 0: a zero would be shown as "0 rows" over a
    *  grid that then pages real data, which is worse than saying nothing. */
   readonly rowCount: number | null;
+  /**
+   * This "table" is a VIEW over the FILE (ruling R-B′), not a materialised
+   * copy of anything.
+   *
+   * Three things follow, and each is a bug if it is missed. It cannot be STALE,
+   * so nothing may rebuild it from the resident set — the whole point is that
+   * it answers for objects the camera never delivered. It is retired with
+   * `DROP VIEW`, not `DROP TABLE` (see {@link retire}). And its source
+   * registration must outlive it, because every query re-reads the file.
+   *
+   * OPTIONAL, with `undefined` reading as "an ordinary materialised table":
+   * the two builders below and `familyViews` all state it, and the fixtures of
+   * three dozen tests do not have to.
+   */
+  readonly fileBacked?: boolean;
+  /**
+   * The CityParquet object family this table is of (R-A′'s family key), or
+   * `null`/absent for a layer with one table.
+   *
+   * It is the second half of the registry key, and it is recorded ON the table
+   * as well because a consumer that OWNS a table for the length of an operation
+   * freezes `{layerId, familyKey, tableName}` and must be able to re-resolve
+   * exactly the table it started with (R-C′).
+   */
+  readonly familyKey?: string | null;
+  /**
+   * The CRS the file's own `bbox` column is in (ruling R-G) — `"EPSG:6697"` for
+   * a PLATEAU package, whose bbox is DEGREES.
+   *
+   * Carried, never converted: reprojecting in SQL was rejected, so the tools
+   * that need metric bounds read this and refuse the layer instead of
+   * silently measuring degrees as metres.
+   */
+  readonly sourceCrs?: string | null;
 }
 
 export type LayerTableState =
@@ -253,13 +287,59 @@ export const useLayerTableStore = create<
   setTablePanelOpen: (open) => set({ tablePanelOpen: open }),
 }));
 
-function setState(layerId: string, state: LayerTableState | null): void {
+function setState(key: string, state: LayerTableState | null): void {
   useLayerTableStore.setState((s) => {
     const tables = { ...s.tables };
-    if (state === null) delete tables[layerId];
-    else tables[layerId] = state;
+    if (state === null) delete tables[key];
+    else tables[key] = state;
     return { tables };
   });
+}
+
+// ---------------------------------------------------------------------------
+// The composite key (ruling R-C′)
+// ---------------------------------------------------------------------------
+
+/**
+ * The separator between a layer id and a family key.
+ *
+ * A layer id is a UUID, so it never contains this; a family key comes from a
+ * manifest asset key or an href basename, which this app does not get to
+ * constrain — hence {@link parseTableKey} splits at the FIRST occurrence and
+ * takes everything after it as the family.
+ */
+const KEY_SEPARATOR = "::";
+
+/**
+ * The registry/store key for one table.
+ *
+ * `family === null` is the BARE layer id, deliberately: every single-table
+ * layer in the app — static, streaming, derived — keeps the key it has always
+ * had, so every consumer that looks a table up by layer id keeps working and
+ * no snapshot, no query state and no frozen run changes meaning.
+ */
+export function layerTableKey(layerId: string, family: string | null): string {
+  return family === null ? layerId : `${layerId}${KEY_SEPARATOR}${family}`;
+}
+
+/**
+ * The layer id and family a key stands for.
+ *
+ * Every site that ENUMERATES the registry or the store has to go through this:
+ * a key is not a layer id, and the ones that used to be interchangeable
+ * (`mapFilterSync`'s reconcile, the run queue's stale watcher) would otherwise
+ * ask the layer store about `"<uuid>::building"` and quietly find nothing.
+ */
+export function parseTableKey(key: string): {
+  layerId: string;
+  family: string | null;
+} {
+  const at = key.indexOf(KEY_SEPARATOR);
+  if (at === -1) return { layerId: key, family: null };
+  return {
+    layerId: key.slice(0, at),
+    family: key.slice(at + KEY_SEPARATOR.length),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -396,8 +476,89 @@ async function reviveSource(pending: PendingSource): Promise<LayerTableSource> {
   };
 }
 
-export function getLayerTable(layerId: string): LayerTable | null {
-  return registry.get(layerId) ?? null;
+/**
+ * One layer's table, by family — the bare one when no family is named.
+ *
+ * The default keeps every existing call site (`runQueue`, the export, the
+ * stats tab) reading exactly the table it read before.
+ */
+export function getLayerTable(
+  layerId: string,
+  family: string | null = null,
+): LayerTable | null {
+  return registry.get(layerTableKey(layerId, family)) ?? null;
+}
+
+/** One resolved table, with the key and family that address it again later. */
+export interface ResolvedLayerTable {
+  readonly key: string;
+  readonly layerId: string;
+  readonly familyKey: string | null;
+  readonly info: LayerTable;
+}
+
+/**
+ * The table a consumer that knows nothing about families should use for
+ * `layerId` — and the key it must FREEZE if it is going to own it (R-C′).
+ *
+ * FILE-BACKED FIRST, then the bare table. A streaming layer is given a resident
+ * table by the lifecycle as it is added, before any family view exists, so for
+ * part of a CityParquet layer's life both exist — and the view is strictly
+ * better data: it answers for the whole file rather than for whatever the
+ * camera has delivered. First registered wins among several families, which is
+ * manifest order, so the default lands on Building for a PLATEAU package.
+ *
+ * A resolver is deliberately NOT the whole answer to R-C′: a consumer that
+ * re-resolves mid-operation would retarget when the user switches family, which
+ * is why the owners freeze the triple this returns rather than calling again.
+ */
+export function resolveActiveTable(layerId: string): ResolvedLayerTable | null {
+  let bare: ResolvedLayerTable | null = null;
+  for (const [key, info] of registry) {
+    const parsed = parseTableKey(key);
+    if (parsed.layerId !== layerId) continue;
+    const resolved: ResolvedLayerTable = {
+      key,
+      layerId,
+      familyKey: parsed.family,
+      info,
+    };
+    if (info.fileBacked === true) return resolved;
+    if (parsed.family === null) bare = resolved;
+  }
+  return bare;
+}
+
+/**
+ * Does any of `layerId`'s tables read straight from the file?
+ *
+ * The question the resident rebuilds ask before they run (Codex Critical): a
+ * rebuild from the resident set over a layer whose table is file-backed would
+ * replace whole-file answers with "whatever is on screen", several times a pan.
+ */
+export function hasFileBackedTable(layerId: string): boolean {
+  for (const [key, info] of registry) {
+    if (parseTableKey(key).layerId !== layerId) continue;
+    if (info.fileBacked === true) return true;
+  }
+  return false;
+}
+
+/** Every key the module holds anything for under `layerId` — tables, parked
+ *  sources and enqueues alike, plus the bare key, which a drop must always
+ *  cover (a build still queued has no registry entry yet). */
+function keysForLayer(layerId: string): string[] {
+  const keys = new Set<string>([layerId]);
+  for (const source of [
+    registry.keys(),
+    pendingSources.keys(),
+    lastEnqueueSeq.keys(),
+  ]) {
+    for (const key of source) {
+      if (parseTableKey(key).layerId === layerId) keys.add(key);
+    }
+  }
+  return [...keys];
 }
 
 /**
@@ -417,9 +578,16 @@ export function getLayerTable(layerId: string): LayerTable | null {
  * REBUILT, and it tells a rebuild from a re-describe by the name. `rebuilding`
  * is carried through untouched — a rebuild in flight is still in flight.
  */
-export async function refreshLayerTableColumns(layerId: string): Promise<void> {
-  const entry = useLayerTableStore.getState().tables[layerId];
-  const current = registry.get(layerId);
+export async function refreshLayerTableColumns(
+  layerId: string,
+  family: string | null = null,
+): Promise<void> {
+  // The run that wrote the column owns ONE table (R-C′), so the family it
+  // froze is the one re-described — never "whatever is active now", which a
+  // family switch mid-run would have moved.
+  const key = layerTableKey(layerId, family);
+  const entry = useLayerTableStore.getState().tables[key];
+  const current = registry.get(key);
   if (!entry || entry.state !== "ready" || !current) return;
   const described = await runQuery(
     `DESCRIBE SELECT * FROM ${quoteIdent(current.table)}`,
@@ -431,16 +599,16 @@ export async function refreshLayerTableColumns(layerId: string): Promise<void> {
   // table while the DESCRIBE was in flight has already replaced this entry, and
   // writing `{ ...current, columns }` would put the old table's name back — the
   // grid would then query a table the rebuild dropped.
-  const latest = useLayerTableStore.getState().tables[layerId];
-  const held = registry.get(layerId);
+  const latest = useLayerTableStore.getState().tables[key];
+  const held = registry.get(key);
   if (!latest || latest.state !== "ready" || held?.table !== current.table)
     return;
   const info: LayerTable = {
     ...held,
     columns: columnsFromDescribe(described.rows),
   };
-  registry.set(layerId, info);
-  setState(layerId, { ...latest, info });
+  registry.set(key, info);
+  setState(key, { ...latest, info });
 }
 
 /** Append `task` to the single queue. One queue, not one per layer, so a drop
@@ -493,8 +661,12 @@ export function nextTableName(): string {
  * would have to be awaited, and the publication is one SYNCHRONOUS step.
  */
 export function adoptLayerTable(layerId: string, info: LayerTable): void {
-  registry.set(layerId, info);
-  setState(layerId, { state: "ready", info });
+  // The KEY comes from the table's own `familyKey`, so there is exactly one
+  // door and a caller cannot publish a family table under the bare key (where
+  // the resident rebuilds would then fight it) by forgetting an argument.
+  const key = layerTableKey(layerId, info.familyKey ?? null);
+  registry.set(key, info);
+  setState(key, { state: "ready", info });
 }
 
 /**
@@ -695,6 +867,12 @@ async function buildFromReader(
       // adopted table carries a cut (`adoptLayerTable`).
       sourceFeatureIds: null,
       rowCount: await countRows(table),
+      // MATERIALISED, and the bare key of its layer: only `familyViews` builds
+      // a view, and only over a family. Stated rather than left `undefined` so
+      // the two production builders are the documentation of the default.
+      fileBacked: false,
+      familyKey: null,
+      sourceCrs: null,
     };
   } finally {
     // ALWAYS, success or not: the table (if it was made) survives this, and a
@@ -802,6 +980,9 @@ async function buildFromRows(
       lods: [],
       sourceFeatureIds: null,
       rowCount: await countRows(table),
+      fileBacked: false,
+      familyKey: null,
+      sourceCrs: null,
     };
   } finally {
     if (sourceName !== null) await releaseBuffer(scratch, sourceName);
@@ -961,7 +1142,16 @@ export async function retryEngine(): Promise<void> {
  * replacement, and by `dropLayerTable` (Task 14).
  */
 async function retire(info: LayerTable): Promise<void> {
-  const result = await ddl(`DROP TABLE IF EXISTS ${quoteIdent(info.table)}`);
+  // A VIEW is not a table, and `DROP TABLE IF EXISTS` over one is a SILENT
+  // no-op — DuckDB looks up table-type entries only and the `IF EXISTS`
+  // swallows the miss. The view would survive under a name nothing will ever
+  // use again, which is exactly the invisible growth the warning below exists
+  // to make visible.
+  const result = await ddl(
+    info.fileBacked === true
+      ? `DROP VIEW IF EXISTS ${quoteIdent(info.table)}`
+      : `DROP TABLE IF EXISTS ${quoteIdent(info.table)}`,
+  );
   if (!result.ok) {
     // Not thrown, and not surfaced: the caller has already decided this table
     // is gone, and the registry entry is going either way. But a DROP that
@@ -1316,15 +1506,22 @@ export function enqueueLayerTable(
 }
 
 /**
- * Forget `layerId`'s table.
+ * Forget ONE of `layerId`'s tables — its bare one, or one family's.
  *
  * Goes through the SAME queue as the builds, which is the whole reason there
  * is one: a removal that arrives while a create is in flight waits for it
  * instead of dropping a table that does not exist yet and then watching the
  * create put it back. A layer removed while its build is still QUEUED is
  * skipped outright — the table is never made.
+ *
+ * A layer being REMOVED goes through {@link dropLayerTables} instead, which
+ * covers every family it accumulated; this is the single-key door.
  */
-export function dropLayerTable(layerId: string): Promise<void> {
+export function dropLayerTable(
+  layerId: string,
+  family: string | null = null,
+): Promise<void> {
+  const key = layerTableKey(layerId, family);
   // NOTHING to forget: no table, no parked source, and no enqueue this module
   // has not already finished with (`lastEnqueueSeq` is deleted by the drop that
   // settles a layer, and a build still queued always has its entry). Returning
@@ -1334,26 +1531,26 @@ export function dropLayerTable(layerId: string): Promise<void> {
   // this for EVERY layer, geospatial ones included; most of them were never in
   // here at all.
   if (
-    !registry.has(layerId) &&
-    !pendingSources.has(layerId) &&
-    !lastEnqueueSeq.has(layerId)
+    !registry.has(key) &&
+    !pendingSources.has(key) &&
+    !lastEnqueueSeq.has(key)
   ) {
     return Promise.resolve();
   }
   // Everything enqueued for this layer BEFORE now is superseded; anything
   // enqueued after — a re-add of the same id — takes a higher number and runs.
   const seq = ++seqCounter;
-  cancelBefore.set(layerId, seq);
+  cancelBefore.set(key, seq);
   // A removed layer must not come back on the next `retryEngine()`. This is the
   // one thing a build's own cancellation check CANNOT cover: a layer parked
   // while the engine was down has no build in flight to cancel, so without this
   // the retry would enqueue a fresh one for a layer nobody can see.
-  pendingSources.delete(layerId);
-  setState(layerId, null);
+  pendingSources.delete(key);
+  setState(key, null);
   return enqueue(async () => {
-    const info = registry.get(layerId);
+    const info = registry.get(key);
     if (info) {
-      registry.delete(layerId);
+      registry.delete(key);
       try {
         // DROP TABLE first, dropBuffer second (inside `retire`): a VFS name that
         // has been dropped still RESOLVES, to zero bytes, so releasing it under a
@@ -1382,13 +1579,34 @@ export function dropLayerTable(layerId: string): Promise<void> {
     // Unless a NEWER enqueue has claimed the id since (a remove-then-re-add of
     // the same file): that one's entry is alive and blanking it would empty a
     // table the user is looking at.
-    if ((lastEnqueueSeq.get(layerId) ?? 0) <= seq) {
-      setState(layerId, null);
+    if ((lastEnqueueSeq.get(key) ?? 0) <= seq) {
+      setState(key, null);
       // Nothing is queued for this layer any more, so its bookkeeping goes with
       // it. `cancelBefore` deliberately STAYS: it is the record that everything
       // up to `seq` was cancelled, and forgetting it would let a build still
       // somewhere in the queue publish a table for a removed layer.
-      lastEnqueueSeq.delete(layerId);
+      lastEnqueueSeq.delete(key);
     }
   });
+}
+
+/**
+ * Forget EVERY table `layerId` owns — its bare one and one per family.
+ *
+ * What layer removal calls. A CityParquet layer accumulates a table per family
+ * the user opened, and dropping only the bare key would leave a view per family
+ * in the database for the life of the page, each holding its source
+ * registration open.
+ *
+ * The bare key is always included, even when nothing is registered under it: a
+ * build that is still QUEUED has no registry entry yet, and the drop's job is
+ * to record the cancellation before it can publish (see {@link dropLayerTable}).
+ */
+export function dropLayerTables(layerId: string): Promise<void> {
+  return Promise.all(
+    keysForLayer(layerId).map((key) => {
+      const parsed = parseTableKey(key);
+      return dropLayerTable(parsed.layerId, parsed.family);
+    }),
+  ).then(() => {});
 }
