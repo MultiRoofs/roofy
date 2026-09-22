@@ -69,7 +69,7 @@ describe("decideCityParquetMode — urls", () => {
       headLength,
     });
     expect(headLength).toHaveBeenCalledWith(url);
-    expect(mode).toEqual({
+    expect(mode).toMatchObject({
       mode: "stream",
       source: { url },
       totalBytes: 335 * MB,
@@ -111,7 +111,7 @@ describe("decideCityParquetMode — urls", () => {
       http,
       headLength,
     });
-    expect(mode).toEqual({
+    expect(mode).toMatchObject({
       mode: "stream",
       source: {
         urls: [
@@ -159,7 +159,7 @@ describe("decideCityParquetMode — urls", () => {
       footerSize,
     });
     expect(footerSize).toHaveBeenCalledWith(url);
-    expect(mode).toEqual({
+    expect(mode).toMatchObject({
       mode: "stream",
       source: { url },
       totalBytes: 400 * MB,
@@ -227,7 +227,7 @@ describe("decideCityParquetMode — urls", () => {
       http,
       headLength: async () => null,
     });
-    expect(mode).toEqual({
+    expect(mode).toMatchObject({
       mode: "stream",
       source: {
         urls: [
@@ -255,7 +255,7 @@ describe("decideCityParquetMode — local files", () => {
       files: [a, b, textures],
     });
     warn.mockRestore();
-    expect(mode).toEqual({
+    expect(mode).toMatchObject({
       mode: "stream",
       source: { blobs: [a, b] },
       totalBytes: 200 * MB,
@@ -266,7 +266,11 @@ describe("decideCityParquetMode — local files", () => {
     const file = sizedFile("yokohama.parquet", 335 * MB);
     expect(
       await decideCityParquetMode({ kind: "files", files: [file] }),
-    ).toEqual({ mode: "stream", source: { blob: file }, totalBytes: 335 * MB });
+    ).toMatchObject({
+      mode: "stream",
+      source: { blob: file },
+      totalBytes: 335 * MB,
+    });
   });
 
   it("keeps a small selection static", async () => {
@@ -281,5 +285,120 @@ describe("decideCityParquetMode — local files", () => {
     expect(
       await decideCityParquetMode({ kind: "files", files: [readme] }),
     ).toEqual({ mode: "static" });
+  });
+});
+
+/**
+ * The FAMILIES a streamed source resolves to (ruling R-A′): a key for the label
+ * and the Building default, an href for disambiguation, the resolved URL or
+ * `File` for the stream and for DuckDB, and the declared size.
+ */
+describe("decideCityParquetMode — families", () => {
+  it("names one family per object table, in manifest order, with the asset key", async () => {
+    const http = manifestHttp({
+      // The asset key is preferred over the basename (Task 1): both files are
+      // called `objects.parquet`, and only the keys tell them apart.
+      building: {
+        href: "objects.parquet",
+        roles: ["cityparquet-objects"],
+        "file:size": 300 * MB,
+      },
+      bridge: {
+        href: "bridge/objects.parquet",
+        roles: ["cityparquet-objects"],
+        "file:size": 10 * MB,
+      },
+    });
+    const mode = await decideCityParquetMode({
+      kind: "url",
+      url: "https://x.test/pkg/",
+      http,
+      headLength: async () => null,
+    });
+    expect(mode.mode).toBe("stream");
+    if (mode.mode !== "stream") return;
+    expect(mode.families).toEqual([
+      {
+        key: "building",
+        href: "objects.parquet",
+        size: 300 * MB,
+        source: { url: "https://x.test/pkg/objects.parquet" },
+      },
+      {
+        key: "bridge",
+        href: "bridge/objects.parquet",
+        size: 10 * MB,
+        source: { url: "https://x.test/pkg/bridge/objects.parquet" },
+      },
+    ]);
+  });
+
+  it("falls back to the extension-stripped basename with no manifest key", async () => {
+    const http: HttpClient = {
+      fetchText: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: JSON.stringify({
+          items: [
+            { name: "t/building.parquet", size: String(200 * MB) },
+            { name: "t/water_body.parquet", size: String(20 * MB) },
+          ],
+        }),
+      }),
+      fetchBytes: async () => {
+        throw new Error("unused");
+      },
+    };
+    const mode = await decideCityParquetMode({
+      kind: "url",
+      url: "gs://bkt/t/*.parquet",
+      http,
+      headLength: async () => null,
+    });
+    expect(mode.mode).toBe("stream");
+    if (mode.mode !== "stream") return;
+    expect(mode.families.map((f) => f.key)).toEqual(["building", "water_body"]);
+  });
+
+  it("gives a lone streamed table one family", async () => {
+    const mode = await decideCityParquetMode({
+      kind: "url",
+      url: "https://x.test/y/building.parquet",
+      http: noHttp,
+      headLength: async () => 335 * MB,
+    });
+    expect(mode.mode).toBe("stream");
+    if (mode.mode !== "stream") return;
+    expect(mode.families).toEqual([
+      {
+        key: "building",
+        href: "building.parquet",
+        size: 335 * MB,
+        source: { url: "https://x.test/y/building.parquet" },
+      },
+    ]);
+  });
+
+  it("carries the picked File itself as a local family's source", async () => {
+    const a = sizedFile("building.parquet", 120 * MB, "pkg/building.parquet");
+    const b = sizedFile("bridge.parquet", 80 * MB, "pkg/bridge.parquet");
+    const mode = await decideCityParquetMode({ kind: "files", files: [a, b] });
+    expect(mode.mode).toBe("stream");
+    if (mode.mode !== "stream") return;
+    expect(mode.families).toEqual([
+      {
+        key: "building",
+        href: "building.parquet",
+        size: 120 * MB,
+        source: { file: a },
+      },
+      {
+        key: "bridge",
+        href: "bridge.parquet",
+        size: 80 * MB,
+        source: { file: b },
+      },
+    ]);
   });
 });

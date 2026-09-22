@@ -727,6 +727,9 @@ describe("cityParquetTargets", () => {
         url: "https://x.test/delft/building.parquet",
         name: "building.parquet",
         size: 22930,
+        // The manifest's own asset key, carried through as the OBJECT FAMILY
+        // (ruling R-A′) for a streamed package's family list.
+        family: "building",
       },
     ]);
   });
@@ -828,8 +831,10 @@ describe("cityParquetFileTargets", () => {
       pickedFile(meta, "pkg/metadata.json"),
     ]);
     expect(targets.tables).toEqual([
-      { name: "a/building.parquet", file: a },
-      { name: "b/building.parquet", file: b },
+      // The manifest's asset keys (`a`, `b`) are the families here: both files
+      // are called `building.parquet`, and only the keys tell them apart.
+      { name: "a/building.parquet", file: a, family: "a" },
+      { name: "b/building.parquet", file: b, family: "b" },
     ]);
     expect(targets.sidecars).toEqual({ textures });
   });

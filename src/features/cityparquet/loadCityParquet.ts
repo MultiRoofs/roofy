@@ -238,7 +238,19 @@ type Target = { url: string; name: string };
 /** An object table to load, with its byte size when the source declared one
  *  (a manifest's `file:size`, a bucket listing's size) — `null` when it did
  *  not, and the caller must learn it some other way if it needs it. */
-export type CityParquetTableTarget = Target & { readonly size: number | null };
+export type CityParquetTableTarget = Target & {
+  readonly size: number | null;
+  /**
+   * The OBJECT FAMILY key the manifest named this table with (ruling R-A′) —
+   * absent when nothing but the file name says what the table holds, and the
+   * caller derives the key from {@link Target.name} instead.
+   *
+   * Only a manifest can supply it: a STAC asset key (`building`,
+   * `water_body`) is a writer's statement about the table's contents, while a
+   * bucket listing and a lone URL give nothing but a path.
+   */
+  readonly family?: string;
+};
 
 /** Everything a source resolves to: the object tables to load, and the
  *  appearance sidecars found beside them (fetched too, when present). */
@@ -358,10 +370,17 @@ function manifestTargets(
     name: href,
   });
   return {
-    tables: hrefs.map((href) => {
+    tables: hrefs.map((href, index) => {
       const t = target(href);
+      // BY INDEX, never by href: `families` pairs one-to-one with
+      // `objectTables` in order, and two tables may share an href-derived key.
+      const family = parsed.families[index]?.key;
       // The manifest's own figure first; a bucket listing fills the gaps.
-      return { ...t, size: parsed.sizes[href] ?? listedSize(t.url) };
+      return {
+        ...t,
+        size: parsed.sizes[href] ?? listedSize(t.url),
+        ...(family === undefined ? {} : { family }),
+      };
     }),
     sidecars: sidecarTargets(parsed.sidecars, target),
   };
@@ -599,6 +618,9 @@ export interface CityParquetFileTargets {
   readonly tables: ReadonlyArray<{
     readonly name: string;
     readonly file: File;
+    /** The manifest's object-family key for this table (R-A′), absent when the
+     *  folder ships no manifest and the file name is all there is. */
+    readonly family?: string;
   }>;
   readonly sidecars: { readonly textures?: File; readonly materials?: File };
 }
@@ -633,6 +655,8 @@ export async function cityParquetFileTargets(
   const manifestFile = byPath.get(MANIFEST_FILENAME);
   let names: string[];
   let sidecarNames: { textures?: string; materials?: string };
+  /** The manifest's family key per table, by INDEX into `names`. */
+  let familyKeys: ReadonlyArray<string> = [];
   if (manifestFile === undefined) {
     const parquet = [...byPath.keys()].filter((path) =>
       path.endsWith(".parquet"),
@@ -652,6 +676,7 @@ export async function cityParquetFileTargets(
     const parsed = parseCityParquetManifest(manifest);
     names = parsed.objectTables;
     sidecarNames = parsed.sidecars;
+    familyKeys = parsed.families.map((f) => f.key);
   }
 
   if (names.length === 0) {
@@ -672,14 +697,16 @@ export async function cityParquetFileTargets(
     );
   }
 
-  const tables = names.map((name) => {
+  const tables = names.map((name, index) => {
     const file = fileForHref(name, byPath);
     if (file === undefined) {
       throw new Error(
         `The folder is missing "${name}", which its ${MANIFEST_FILENAME} declares as an object table.`,
       );
     }
-    return { name, file };
+    // BY INDEX: `families` pairs one-to-one with `objectTables` in order.
+    const family = familyKeys[index];
+    return { name, file, ...(family === undefined ? {} : { family }) };
   });
   const sidecars: { textures?: File; materials?: File } = {};
   for (const kind of ["textures", "materials"] as const) {

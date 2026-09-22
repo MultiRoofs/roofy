@@ -39,18 +39,43 @@ import {
   type CityParquetTargets,
 } from "./loadCityParquet";
 import { classifyCityParquetUrl } from "./sourceClassify";
+import { familyKeyFromName } from "../layers/familyStore";
 
 /** Above this many bytes of object tables a CityParquet source streams. */
 export const CITYPARQUET_STREAM_THRESHOLD_BYTES = 128 * 1024 * 1024;
+
+/**
+ * One OBJECT FAMILY of a streamed package (ruling R-A′).
+ *
+ * A family has two identities and they are not interchangeable. Its SOURCE
+ * identity is the resolved URL or the picked `File` — unique, and what DuckDB
+ * registers and the stream worker reads. Its family KEY is the manifest's asset
+ * key when there is one, else the extension-stripped basename; it is a label and
+ * the Building default's test, and two tables can legitimately produce the same
+ * one.
+ */
+export interface CityParquetStreamFamily {
+  readonly key: string;
+  /** The manifest href (or the object/path name) — what tells two families with
+   *  the same key apart, on screen and in a message. */
+  readonly href: string;
+  readonly size: number | null;
+  readonly source: { readonly url: string } | { readonly file: File };
+}
 
 export type CityParquetMode =
   | { readonly mode: "static" }
   | {
       readonly mode: "stream";
+      /** EVERY object table, which is what this source resolves to. The layer
+       *  opens only the ENABLED families (`familyStore`'s R-D default), so a
+       *  fresh open's stream is usually a subset of this. */
       readonly source: StreamSource;
       /** The object tables' summed size, as learned (a lower bound when
        *  some table's size could not be). */
       readonly totalBytes: number;
+      /** One family per object table, in the source's own order. */
+      readonly families: ReadonlyArray<CityParquetStreamFamily>;
     };
 
 /** A byte length, or `null` when it could not be learned. */
@@ -129,6 +154,16 @@ async function decideUrl(
     mode: "stream",
     source: urls.length === 1 ? { url: urls[0]! } : { urls },
     totalBytes,
+    families: targets.tables.map((t, index) => ({
+      // The manifest's asset key when it named one, else the file name.
+      key: t.family ?? familyKeyFromName(t.name),
+      href: t.name,
+      // The size this decision already learned — a HEAD or a footer probe, not
+      // only the declaration — so the panel can state a family's weight without
+      // asking again.
+      size: sizes[index] ?? null,
+      source: { url: t.url },
+    })),
   };
 }
 
@@ -147,6 +182,14 @@ async function decideFiles(
     // A `File` IS a `Blob`: passed through, never read into memory.
     source: blobs.length === 1 ? { blob: blobs[0]! } : { blobs },
     totalBytes,
+    families: targets.tables.map((t) => ({
+      key: t.family ?? familyKeyFromName(t.name),
+      href: t.name,
+      size: t.file.size,
+      // The `File` HANDLE, not its bytes: DuckDB reads it through
+      // `registerFileHandle` and the worker through ranged `Blob` reads.
+      source: { file: t.file },
+    })),
   };
 }
 

@@ -57,6 +57,16 @@ vi.mock("../../../../src/insights/layerTables", () => ({
   // two; the graph under test imports them whether or not this file calls one.
   nextTableName: vi.fn(() => "layer_99"),
   adoptLayerTable: vi.fn(),
+  hasFileBackedTable: vi.fn(() => false),
+  layerTableKey: (layerId: string, family: string | null) =>
+    family === null ? layerId : `${layerId}::${family}`,
+}));
+// A streamed CityParquet layer ensures its ACTIVE family's view as it opens
+// (ruling S3). No DuckDB here, so it simply succeeds.
+vi.mock("../../../../src/insights/familyViews", () => ({
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyView: vi.fn(async () => {}),
+  dropFamilyViews: vi.fn(async () => {}),
 }));
 
 /**
@@ -599,6 +609,14 @@ describe("useLayerFileLoader — streaming large CityParquet sources", () => {
       mode: "stream",
       source: { urls },
       totalBytes: 610 * MB,
+      // Two BUILDING tables, so R-D's default opens both and the stream still
+      // carries the pair.
+      families: urls.map((url) => ({
+        key: "building",
+        href: url,
+        size: 305 * MB,
+        source: { url },
+      })),
     });
     let holds = 0;
     const holdEngine = <T>(open: () => Promise<T>): Promise<T> => {
@@ -660,6 +678,14 @@ describe("useLayerFileLoader — streaming large CityParquet sources", () => {
       mode: "stream",
       source: { blob: file },
       totalBytes: 335 * MB,
+      families: [
+        {
+          key: "yokohama",
+          href: "yokohama.parquet",
+          size: 335 * MB,
+          source: { file },
+        },
+      ],
     });
     const { result } = renderHook(() => useLayerFileLoader());
     await act(async () => {
@@ -692,6 +718,12 @@ describe("useLayerFileLoader — streaming large CityParquet sources", () => {
       mode: "stream",
       source: { blobs: files },
       totalBytes: 200 * MB,
+      families: files.map((file, i) => ({
+        key: "building",
+        href: `${i === 0 ? "a" : "b"}/building.parquet`,
+        size: 100 * MB,
+        source: { file },
+      })),
     });
     const { result } = renderHook(() => useLayerFileLoader());
     await act(async () => {

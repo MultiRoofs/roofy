@@ -16,8 +16,15 @@ import type { CityModelReference } from "../../persistence/types";
 import { browserPlatform } from "../../platform/browser";
 import { addCityLayer, type AddCityLayerInput } from "../layers/addCityLayer";
 import { ensureModelCrsLoadable } from "../layers/ensureCrs";
+import {
+  buildLayerFamilies,
+  streamSourceOf,
+  useFamilyStore,
+} from "../layers/familyStore";
+import { dropFamilyViews } from "../../insights/familyViews";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
+import { useStreamStore } from "../streaming/streamStore";
 import {
   loadCityParquetFromFiles,
   loadCityParquetFromUrl,
@@ -51,23 +58,56 @@ function openStream(
   settings: CityParquetLayerSettings,
   deps: CityParquetLayerDeps,
 ): Promise<string> {
-  const open = async (): Promise<string> =>
-    openStreamingLayer({
-      plugin: await deps.resolveStreamPlugin(),
-      format: "cityparquet",
-      source: mode.source,
-      name: settings.name,
-      modelRef,
-      rules: settings.rules,
-      colorBy: settings.colorBy,
-      singleColor: settings.singleColor,
-      unmatchedColor: settings.unmatchedColor,
-      visible: settings.visible,
-      hiddenTypes: settings.hiddenTypes,
-      attributeOrders: settings.attributeOrders,
-      tablePresentation: settings.tablePresentation,
-      selectedAppearance: settings.selectedAppearance,
-    });
+  const open = async (): Promise<string> => {
+    const plugin = await deps.resolveStreamPlugin();
+    // MINTED HERE, not by `openStreamingLayer`, because the families have to be
+    // published against the layer id BEFORE the row lands: the table lifecycle
+    // subscribes to `layerStore` and would otherwise give this layer a bare
+    // resident table that nothing may ever refresh once a family view exists
+    // (ruling S3).
+    const id = crypto.randomUUID();
+    const families = buildLayerFamilies(mode.families);
+    useFamilyStore.getState().setFamilies(id, families);
+    const opened = useFamilyStore.getState().layers[id]?.opened ?? [];
+    // ONLY the enabled families' files — Building alone for a PLATEAU package
+    // (R-D). The rest are available, and each still gets a table on demand.
+    const source = streamSourceOf(
+      families.filter((family) => opened.includes(family.key)),
+    );
+    try {
+      const layerId = await openStreamingLayer({
+        id,
+        plugin,
+        format: "cityparquet",
+        source,
+        name: settings.name,
+        modelRef,
+        rules: settings.rules,
+        colorBy: settings.colorBy,
+        singleColor: settings.singleColor,
+        unmatchedColor: settings.unmatchedColor,
+        visible: settings.visible,
+        hiddenTypes: settings.hiddenTypes,
+        attributeOrders: settings.attributeOrders,
+        tablePresentation: settings.tablePresentation,
+        selectedAppearance: settings.selectedAppearance,
+      });
+      // The header's per-table counts, paired with the families the stream was
+      // opened with STRICTLY BY ORDER: `tables[i].name` is a label the reader
+      // chose, never an identity.
+      const tables = useStreamStore.getState().streams[layerId]?.header.tables;
+      if (tables !== undefined) {
+        useFamilyStore.getState().applyStreamTables(layerId, opened, tables);
+      }
+      return layerId;
+    } catch (error) {
+      // No row was added, so nothing may be left claiming this id has families —
+      // and the active family's view, which `setFamilies` started, goes with it.
+      useFamilyStore.getState().forgetLayer(id);
+      void dropFamilyViews(id);
+      throw error;
+    }
+  };
   return deps.holdEngine ? deps.holdEngine(open) : open();
 }
 

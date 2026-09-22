@@ -14,11 +14,14 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { Rule } from "../../../../src/features/rules/types";
+import { useFamilyStore } from "../../../../src/features/layers/familyStore";
 
 const mocks = vi.hoisted(() => ({
   decide: vi.fn<(input: unknown) => Promise<unknown>>(),
   loadUrl: vi.fn<(url: string) => Promise<unknown>>(),
   enqueue: vi.fn(async () => {}),
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyViews: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../../src/features/cityparquet/streamDecision", () => ({
@@ -37,6 +40,11 @@ vi.mock("../../../../src/insights/layerTables", () => ({
   enqueueLayerTable: mocks.enqueue,
   nextTableName: vi.fn(() => "layer_99"),
   adoptLayerTable: vi.fn(),
+}));
+vi.mock("../../../../src/insights/familyViews", () => ({
+  ensureFamilyView: mocks.ensureFamilyView,
+  dropFamilyView: vi.fn(async () => {}),
+  dropFamilyViews: mocks.dropFamilyViews,
 }));
 
 const HEADER = {
@@ -81,6 +89,110 @@ beforeEach(() => {
   mocks.loadUrl.mockReset();
   useLayerStore.getState().removeAllLayers();
   useStreamStore.setState({ streams: {} });
+  useFamilyStore.setState({ layers: {} });
+  mocks.ensureFamilyView.mockClear();
+  mocks.dropFamilyViews.mockClear();
+});
+
+/** A two-family package as the decision reports it. */
+function twoFamilyStream() {
+  return {
+    mode: "stream",
+    source: { urls: [`${URL_}building.parquet`, `${URL_}bridge.parquet`] },
+    totalBytes: 335 * 1024 * 1024,
+    families: [
+      {
+        key: "building",
+        href: "building.parquet",
+        size: 300 * 1024 * 1024,
+        source: { url: `${URL_}building.parquet` },
+      },
+      {
+        key: "bridge",
+        href: "bridge.parquet",
+        size: 35 * 1024 * 1024,
+        source: { url: `${URL_}bridge.parquet` },
+      },
+    ],
+  };
+}
+
+describe("addCityParquetLayerFromUrl — object families", () => {
+  it("opens BUILDING alone and registers every family against the layer", async () => {
+    mocks.decide.mockResolvedValue(twoFamilyStream());
+    const plugin = fakePlugin();
+    const layerId = await addCityParquetLayerFromUrl(
+      URL_,
+      { name: "yokohama-shi" },
+      { resolveStreamPlugin: async () => plugin },
+    );
+    // Only the ENABLED family's file is streamed — one url, so `{url}`.
+    expect(plugin.openStream.mock.calls[0]![0]).toMatchObject({
+      id: layerId,
+      source: { url: `${URL_}building.parquet` },
+    });
+    const entry = useFamilyStore.getState().layers[layerId]!;
+    expect(entry.families.map((f) => f.key)).toEqual(["building", "bridge"]);
+    expect([...entry.enabled]).toEqual(["building"]);
+    expect(entry.active).toBe("building");
+    // The families were registered BEFORE the row landed, so the table
+    // lifecycle never built this layer a bare resident table (ruling S3).
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("records the opened family's row count from the header, by ORDER", async () => {
+    mocks.decide.mockResolvedValue(twoFamilyStream());
+    const plugin = fakePlugin();
+    plugin.openStream.mockImplementationOnce((opts: { id: string }) =>
+      Promise.resolve({
+        id: opts.id,
+        grid: { originX: 0, originY: 0, rootCell: 1000, maxLevel: 4 },
+        // A name that matches NO family key: `tables[i].name` is a label.
+        header: { ...HEADER, tables: [{ name: "0", rowCount: 884106 }] },
+        level: null,
+        ladder: [],
+        typesSeen: [],
+        appearanceThemes: [],
+        status: "idle",
+        message: null,
+        version: 0,
+        onStatus: () => () => {},
+        onLadder: () => () => {},
+        onTypes: () => () => {},
+        onAppearanceThemes: () => () => {},
+        onCommit: () => () => {},
+      } as unknown as FcbStreamLayerHandle),
+    );
+    const layerId = await addCityParquetLayerFromUrl(
+      URL_,
+      { name: "yokohama-shi" },
+      { resolveStreamPlugin: async () => plugin },
+    );
+    const byKey = new Map(
+      useFamilyStore
+        .getState()
+        .layers[layerId]!.families.map((f) => [f.key, f.rowCount]),
+    );
+    expect(byKey.get("building")).toBe(884106);
+    expect(byKey.get("bridge")).toBeNull();
+  });
+
+  it("forgets the families when the open is refused", async () => {
+    mocks.decide.mockResolvedValue(twoFamilyStream());
+    const plugin = fakePlugin();
+    plugin.openStream.mockRejectedValueOnce(new Error("no range requests"));
+    await expect(
+      addCityParquetLayerFromUrl(
+        URL_,
+        { name: "yokohama-shi" },
+        { resolveStreamPlugin: async () => plugin },
+      ),
+    ).rejects.toThrow(/range requests/);
+    // Nothing is left claiming this layer has families — and the view the
+    // active family may already have started goes with it.
+    expect(Object.keys(useFamilyStore.getState().layers)).toHaveLength(0);
+    expect(mocks.dropFamilyViews).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("addCityParquetLayerFromUrl", () => {
@@ -89,6 +201,14 @@ describe("addCityParquetLayerFromUrl", () => {
       mode: "stream",
       source: { url: `${URL_}building.parquet` },
       totalBytes: 335 * 1024 * 1024,
+      families: [
+        {
+          key: "building",
+          href: "building.parquet",
+          size: 335 * 1024 * 1024,
+          source: { url: `${URL_}building.parquet` },
+        },
+      ],
     });
     const plugin = fakePlugin();
     const holdEngine = vi.fn(<T>(open: () => Promise<T>) => open());
@@ -131,6 +251,14 @@ describe("addCityParquetLayerFromUrl", () => {
       mode: "stream",
       source: { url: `${URL_}building.parquet` },
       totalBytes: 335 * 1024 * 1024,
+      families: [
+        {
+          key: "building",
+          href: "building.parquet",
+          size: 335 * 1024 * 1024,
+          source: { url: `${URL_}building.parquet` },
+        },
+      ],
     });
     const plugin = fakePlugin();
     plugin.openStream.mockRejectedValueOnce(
