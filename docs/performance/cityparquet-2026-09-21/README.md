@@ -128,8 +128,8 @@ A follow-up should report bytes fetched, peak memory, time to first useful city 
 
 Source files captured for this audit:
 
-- https://cityparquet.open3d.city/data/plateau/nishitokyo/building.parquet — SHA-256 `f3c3a7a5e62f77dfd1484a3b5f6054c109d272ccb5360c87c2a3fa11036dd869`
-- https://cityparquet.open3d.city/data/plateau/yokohama/building.parquet — SHA-256 `af97ac05425146027f0b21463cf3e800541aaa98b906d0116e7bef0c08b40369`
+- https://cityparquet.open3d.city/data/plateau/nishitokyo-shi/building.parquet (moved from `…/plateau/nishitokyo/` by 2026-09-22; same SHA) — SHA-256 `f3c3a7a5e62f77dfd1484a3b5f6054c109d272ccb5360c87c2a3fa11036dd869`
+- https://cityparquet.open3d.city/data/plateau/yokohama-shi/building.parquet (moved from `…/plateau/yokohama/`; SHA not re-checked) — SHA-256 `af97ac05425146027f0b21463cf3e800541aaa98b906d0116e7bef0c08b40369`
 
 The automated retained harness reproduces **Node CPU stages only**. Browser timings, frame counters, database timings and CPU trace were a one-off manual audit with agent-browser `profiler start` / `profiler stop`, performance marks around the loader/add/table-ready milestones, a Long Task observer, 100 ms heap sampling, and the WebGL/rAF counters described above. Browser instrumentation and the temporary trace-reduction script are not retained as a runnable regression harness; the raw local trace and compact evidence are retained. A repeatable browser harness is a follow-up before comparing an optimization's browser timing to this baseline.
 

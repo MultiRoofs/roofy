@@ -803,11 +803,13 @@ Nishitokyo `[2,1,0] → [2,1]` changes no object's winner yet re-triangulated al
   rare rebuild but couple the comparison to the filters; revealing an object
   rebuilds with the recorded selection anyway.
 - Cost: equal LoD sets answer without visiting objects; otherwise one pass over
-  the surfaces' LoD labels, no geometry copied. On a synthetic model with
-  Nishitokyo's LoD shape (1.7 M triangles; Linux, Node 24, not a browser):
-  `[2,1,0] → [2,1]` 6.0 s → 95 ms, reordering 6.3 s → 0.1 ms, while
-  `[2] → [2,1]` still rebuilds (7.3 s). Logs:
-  `docs/performance/cityparquet-2026-09-21/lod-switch-synthetic-*.jsonl`;
-  rerun with `npx vitest run -c scripts/performance/vitest.config.ts lod-switch`
+  the surfaces' LoD labels, no geometry copied. Real Nishitokyo
+  (`plateau/nishitokyo-shi/building.parquet`, same SHA as the capture;
+  1,913,792 triangles; Linux, Node 24, not a browser): `[2,1,0] → [2,1]`
+  141 ms and no rebuild, against 11.2 s for the same rebuild forced;
+  reordering 0.1 ms; `[2] → [2,1]` still rebuilds (10.7 s). The synthetic
+  before/after (6.0 s → 95 ms) agrees. Logs:
+  `docs/performance/cityparquet-2026-09-21/lod-switch-*.jsonl`; rerun with
+  `npx vitest run -c scripts/performance/vitest.config.ts lod-switch`
   (`AUDIT_FILE=<nishitokyo parquet>` for the real dataset).
 - Streaming layers (`FcbStreamLayerHandle.setLod`) are untouched.
