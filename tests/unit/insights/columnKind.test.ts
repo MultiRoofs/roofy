@@ -97,6 +97,16 @@ describe("isDroppedColumn", () => {
     }
   });
 
+  it("drops a LEGACY bare `geometry` column", () => {
+    // CityParquet's pre-suffix grammar wrote one unsuffixed `geometry` column
+    // (`lodFromColumnName` answers `{lod: null}` for it), and a real package
+    // still in that dialect would otherwise put a WKB blob of every object in
+    // the browsing view — the one column that must never reach a grid, a
+    // filter or an export. The suffixed names cover every modern file; this is
+    // the one spelling the LoD pattern cannot match.
+    expect(isDroppedColumn("geometry")).toBe(true);
+  });
+
   it("keeps a user attribute that merely STARTS with a dropped word", () => {
     // A reader column of that family always carries the LoD suffix; these are
     // ordinary third-party attribute names, and hiding one would take it out

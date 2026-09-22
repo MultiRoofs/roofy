@@ -74,9 +74,23 @@ export function isTextColumn(column: ColumnInfo): boolean {
 const DROPPED =
   /^(geometry|geometry_properties|material|texture)_lod\d+(_\d+)?$/;
 
-/** Whether a reader column is left out of a layer's browsing table. */
+/**
+ * Whether a reader column is left out of a layer's browsing table.
+ *
+ * A BARE `geometry` is dropped as well, and only that one of the four names.
+ * CityParquet's pre-suffix grammar wrote a single unsuffixed geometry column
+ * (`lodFromColumnName` in `navara-cityparquet` still reads it, as an LoD of
+ * `null`), and a package in that dialect would otherwise put a WKB blob of
+ * every object into the view — the exact column this list exists to keep out.
+ * Its siblings (`geometry_properties`, `material`, `texture`, unsuffixed) are
+ * deliberately NOT matched: `material` and `texture` are plausible third-party
+ * ATTRIBUTE names, and this module's rule is that over-dropping — a column the
+ * user can see in their file missing from the table, the filter bar and the
+ * export with nothing to show it happened — is the worse failure. A legacy
+ * file's view therefore still carries those three, JSON and all.
+ */
 export function isDroppedColumn(name: string): boolean {
-  return name === "template" || DROPPED.test(name);
+  return name === "template" || name === "geometry" || DROPPED.test(name);
 }
 
 /**
