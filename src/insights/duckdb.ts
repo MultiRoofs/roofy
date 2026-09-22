@@ -803,6 +803,116 @@ export async function registerBuffer(
   );
 }
 
+/**
+ * What a registration DID, never a throw.
+ *
+ * A boolean would do for {@link registerBuffer}, whose failure has one cause
+ * (the bytes could not be handed over). These two can fail for reasons the user
+ * can act on — a URL that 404s or is blocked by CORS, a `File` the browser will
+ * not read any more — and the message is what the family's table state shows
+ * instead of a bare "failed".
+ */
+export type RegisterOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string };
+
+const NOT_RUNNING_OUTCOME: RegisterOutcome = {
+  ok: false,
+  message: NOT_RUNNING,
+};
+
+/**
+ * Register `url` as a DuckDB file that is read over HTTP, in RANGES.
+ *
+ * Nothing is downloaded here, and nothing is copied: `read_parquet` of this
+ * name reads the footer and then only the column chunks a query needs. That is
+ * the whole of ruling R-B′ — the family "table" is a view over this, so a
+ * 884 106-row table costs 26 ms to publish and no JS heap at all, against
+ * 961 ms and 247 MB of DuckDB memory to materialise (measured, see
+ * `docs/performance/cityparquet-2026-09-21/duckdb-read-parquet-spike.json`).
+ *
+ * `directIO` is FALSE, exactly as the spike ran it: it is what lets the HTTP
+ * filesystem serve ranged reads out of its own buffering rather than reading
+ * through on every request.
+ *
+ * `name` is interpolated into `read_parquet('<name>')` by the caller, so it
+ * must be a name this app GENERATED — never a URL, a filename or anything else
+ * a third party chose. Registering the same name again replaces what it points
+ * at (the same rule as {@link registerBuffer}).
+ */
+export async function registerParquetUrl(
+  name: string,
+  url: string,
+): Promise<RegisterOutcome> {
+  if (!db || status.state !== "ready") return NOT_RUNNING_OUTCOME;
+  const live = db;
+  return await settleOnDeath(
+    (async (): Promise<RegisterOutcome> => {
+      try {
+        await live.registerFileURL(
+          name,
+          url,
+          duckdb.DuckDBDataProtocol.HTTP,
+          false,
+        );
+        return { ok: true };
+      } catch (error) {
+        console.warn(`DuckDB could not register "${url}":`, error);
+        return { ok: false, message: formatDuckDBError(error) };
+      }
+    })(),
+    NOT_RUNNING_OUTCOME,
+  );
+}
+
+/**
+ * Register a local `File` as a DuckDB file, read through `FileReader`.
+ *
+ * The local-package twin of {@link registerParquetUrl}: a `File` is a REFERENCE
+ * to bytes on disk, so a package the user picked from a folder is read in the
+ * same ranged way and never lands on the JS heap.
+ *
+ * `directIO` is TRUE here, which is how duckdb-wasm's own examples register a
+ * picked file — the FileReader protocol reads the slices DuckDB asks for and
+ * has no buffering layer of its own to bypass.
+ */
+export async function registerParquetFile(
+  name: string,
+  file: File,
+): Promise<RegisterOutcome> {
+  if (!db || status.state !== "ready") return NOT_RUNNING_OUTCOME;
+  const live = db;
+  return await settleOnDeath(
+    (async (): Promise<RegisterOutcome> => {
+      try {
+        await live.registerFileHandle(
+          name,
+          file,
+          duckdb.DuckDBDataProtocol.BROWSER_FILEREADER,
+          true,
+        );
+        return { ok: true };
+      } catch (error) {
+        console.warn(`DuckDB could not register the file "${name}":`, error);
+        return { ok: false, message: formatDuckDBError(error) };
+      }
+    })(),
+    NOT_RUNNING_OUTCOME,
+  );
+}
+
+/**
+ * Forget a registered source (a URL or a `File` handle).
+ *
+ * {@link dropBuffer} by another name — the VFS entry goes the same way — and
+ * spelled separately because what it releases is a REGISTRATION, not bytes this
+ * app holds: the caller that drops one must have retired every view over it
+ * first, since a dropped name still resolves, to nothing.
+ */
+export async function dropRegisteredFile(name: string): Promise<void> {
+  await dropBuffer(name);
+}
+
 /** Drop a VFS entry. Never throws: a drop that fails must not discard a
  *  result already produced, and the name is dead either way. */
 export async function dropBuffer(name: string): Promise<void> {
