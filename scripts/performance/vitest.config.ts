@@ -11,6 +11,7 @@ export default defineConfig({
     include: [
       "scripts/performance/cityparquet-profile.test.ts",
       "scripts/performance/lod-switch.test.ts",
+      "scripts/performance/cityparquet-stream.test.ts",
     ],
     environment: "node",
     maxWorkers: 1,
