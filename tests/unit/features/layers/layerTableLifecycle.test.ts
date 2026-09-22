@@ -32,6 +32,10 @@ vi.mock("../../../../src/insights/familyViews", () => ({
     droppedFamilies.push(layerId);
     dropped.push(layerId);
   }),
+  // The family store ensures the ACTIVE family's view as a layer opens (ruling
+  // S3); no DuckDB here, so it simply succeeds.
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyView: vi.fn(async () => {}),
 }));
 
 const clearMapFilter = vi.fn();
@@ -65,6 +69,8 @@ import type { RunRecord } from "../../../../src/features/processing/types";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+const { useFamilyStore } =
+  await import("../../../../src/features/layers/familyStore");
 
 function emptyModel(): CityModel {
   return {
@@ -117,6 +123,9 @@ beforeEach(() => {
   // The REGISTRY as well as the store: `hasFileBackedTable` reads the registry,
   // and a family view adopted by one case would otherwise silence the next.
   resetLayerTablesForTest();
+  // A layer with FAMILIES is never given a bare resident table (ruling S3), so
+  // a leaked family entry would silence every rebuild case below.
+  useFamilyStore.setState({ layers: {} });
   // The toolbox is a table CONSUMER too, so its `open` and its in-flight runs
   // are inputs to every gate below — a leaked `open: true` would make the
   // panel-closed cases pass for the wrong reason.
@@ -410,6 +419,64 @@ describe("a FILE-BACKED table is never rebuilt from residents", () => {
     useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
     enqueued.length = 0;
     await refreshStreamingTable("S");
+    expect(enqueued).toEqual(["S"]);
+  });
+});
+
+/**
+ * Ruling S3: a layer with object FAMILIES never gets a bare resident table at
+ * all.
+ *
+ * The inconsistency this closes: the lifecycle used to build one the moment the
+ * row landed, and the file-backed guards above then FROZE it — leaving a stale
+ * (usually empty) snapshot under the bare key for any reader that looked it up
+ * by layer id. Families are published before the row, so the bare build never
+ * happens and there is nothing stale to read.
+ */
+describe("a layer with object families gets no bare resident table", () => {
+  function withFamilies(layerId: string): void {
+    useFamilyStore.getState().setFamilies(layerId, [
+      {
+        key: "building",
+        rawKey: "building",
+        label: "Building",
+        href: "building.parquet",
+        source: { url: "https://x.test/building.parquet" },
+        size: null,
+        rowCount: null,
+      },
+    ]);
+  }
+
+  it("is not enqueued when its row lands", () => {
+    withFamilies("S");
+    enqueued.length = 0;
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    expect(enqueued).toEqual([]);
+  });
+
+  it("is not enqueued by a commit or by the consumer sweep either", () => {
+    withFamilies("S");
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    enqueued.length = 0;
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("forgets its families when the layer is removed", () => {
+    withFamilies("S");
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({ layers: [] });
+    expect(useFamilyStore.getState().layers.S).toBeUndefined();
+    expect(droppedFamilies).toContain("S");
+  });
+
+  it("still enqueues a streaming layer with NO families", () => {
+    enqueued.length = 0;
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
     expect(enqueued).toEqual(["S"]);
   });
 });

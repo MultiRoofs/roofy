@@ -512,7 +512,26 @@ export interface ResolvedLayerTable {
  * re-resolves mid-operation would retarget when the user switches family, which
  * is why the owners freeze the triple this returns rather than calling again.
  */
-export function resolveActiveTable(layerId: string): ResolvedLayerTable | null {
+export function resolveActiveTable(
+  layerId: string,
+  /**
+   * The family the user is actually looking at (`familyStore`'s `active`), when
+   * the caller knows it.
+   *
+   * It wins over the file-backed scan below, which is only a FALLBACK ordering —
+   * "first registered", i.e. manifest order — and would aim a run at Building
+   * while the table panel showed Bridge. `null`/absent keeps the old answer for
+   * every caller that has no family to offer.
+   */
+  preferFamily: string | null = null,
+): ResolvedLayerTable | null {
+  if (preferFamily !== null) {
+    const key = layerTableKey(layerId, preferFamily);
+    const info = registry.get(key);
+    if (info !== undefined) {
+      return { key, layerId, familyKey: preferFamily, info };
+    }
+  }
   const picked = pickActive(
     registry,
     layerId,

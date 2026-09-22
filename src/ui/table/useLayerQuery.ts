@@ -24,9 +24,11 @@ import {
 import { runQuery } from "../../insights/duckdb";
 import type { ColumnInfo } from "../../insights/columnKind";
 import {
+  layerTableKey,
   useLayerTableStore,
   type LayerTable,
 } from "../../insights/layerTables";
+import { useActiveFamily } from "../../features/layers/familyStore";
 import {
   buildCountSql,
   buildFeatureScopeWhere,
@@ -85,8 +87,12 @@ function countOf(rows: ReadonlyArray<Record<string, unknown>>): number {
 }
 
 export function useLayerQuery(layerId: string | null): LayerQueryView {
+  // Ruling S3: a CityParquet layer's rows live in its ACTIVE family's view, under
+  // the composite key. `null` — every other layer — is the bare key this hook has
+  // always read.
+  const family = useActiveFamily(layerId);
   const tableState = useLayerTableStore((s) =>
-    layerId === null ? undefined : s.tables[layerId],
+    layerId === null ? undefined : s.tables[layerTableKey(layerId, family)],
   );
   const query = useQueryStore((s) =>
     layerId === null ? null : layerQuery(s, layerId),

@@ -80,6 +80,7 @@ import {
   type GeoRecord,
 } from "../geoLayers/geoRecords";
 import { ensureModelCrsLoadable } from "../layers/ensureCrs";
+import { getActiveFamily } from "../layers/familyStore";
 import { epsgForLayer } from "../../scene/cursorCrsReadout";
 import { SOURCE_NEEDS_AREAS } from "./crossLayerParams";
 import {
@@ -625,8 +626,12 @@ export function submitRun(request: RunRequest): string {
       ? (request.sourceLayerId ?? request.targetLayerId)
       : request.targetLayerId;
   // ONE resolution, frozen: the table AND the family it belongs to, so every
-  // later step addresses exactly what the user pressed Run over.
-  const active = resolveActiveTable(computeLayerId);
+  // later step addresses exactly what the user pressed Run over — the family the
+  // panel was SHOWING, not whichever one the manifest happened to list first.
+  const active = resolveActiveTable(
+    computeLayerId,
+    getActiveFamily(computeLayerId),
+  );
   return queueRun({
     ...request,
     computeLayerId,

@@ -65,6 +65,7 @@ import type { ToolDefinition, ToolId } from "../../features/processing/types";
 import type { LayerTable } from "../../insights/layerTables";
 import {
   eligibilityContextFor,
+  tableEntryFor,
   useEligibilityInputs,
 } from "./useEligibilityContext";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
@@ -161,7 +162,6 @@ export function useToolForm(toolId: ToolId) {
   const layers = useLayerStore((s) => s.layers);
   const geoLayers = useGeoLayerStore((s) => s.layers);
   const inputs = useEligibilityInputs();
-  const { tables } = inputs;
   const drafts = useProcessingStore((s) => s.drafts);
   const runs = useProcessingStore((s) => s.runs);
   useComputedColumnStore((s) => s.byLayer); // subscribe: the replace warning depends on it
@@ -176,8 +176,10 @@ export function useToolForm(toolId: ToolId) {
   // opens on a layer rather than on a blank select — §5's "a disabled row still
   // opens the tool view".
   const candidates = useMemo(
-    () => layers.filter((l) => tables[l.id]?.state === "ready"),
-    [layers, tables],
+    () => layers.filter((l) => tableEntryFor(inputs, l.id)?.state === "ready"),
+    // `inputs` carries both halves of the resolution (the tables and the family
+    // records), and both are referentially stable between store writes.
+    [layers, inputs],
   );
   const eligibleTargets = useMemo(
     () =>
@@ -376,7 +378,9 @@ export function useToolForm(toolId: ToolId) {
   const cityLayer: Layer | null = vectorTargeted
     ? (layers.find((l) => l.id === sourceLayerId) ?? null)
     : target;
-  const cityTableState = cityLayer ? tables[cityLayer.id] : undefined;
+  const cityTableState = cityLayer
+    ? tableEntryFor(inputs, cityLayer.id)
+    : undefined;
   const cityTable =
     cityTableState !== undefined && cityTableState.state === "ready"
       ? cityTableState.info

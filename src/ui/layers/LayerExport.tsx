@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ActiveLayer } from "../../features/workspace/activeLayer";
-import { useLayerTableStore } from "../../insights/layerTables";
+import { layerTableKey, useLayerTableStore } from "../../insights/layerTables";
+import { useActiveFamily } from "../../features/layers/familyStore";
 import { epsgOf } from "../../features/layers/layerPresentation";
 import { ActionIcon } from "../ActionIcon";
 import { ExportDialog } from "../table/ExportDialog";
@@ -8,7 +9,12 @@ import { GeoLayerExport } from "./GeoLayerExport";
 /** Owned by the layer, independent of whether its table drawer is mounted. */
 export function LayerExport({ item }: { item: ActiveLayer }) {
   const [open, setOpen] = useState(false);
-  const entry = useLayerTableStore((s) => s.tables[item.layer.id]);
+  // The ACTIVE family's table for a CityParquet layer (ruling S3): an export
+  // writes the family the user is looking at.
+  const family = useActiveFamily(item.layer.id);
+  const entry = useLayerTableStore(
+    (s) => s.tables[layerTableKey(item.layer.id, family)],
+  );
   const cityReady = item.kind === "city" && entry?.state === "ready";
   const geo =
     item.kind === "geo" && item.layer.kind === "geojson" ? item.layer : null;

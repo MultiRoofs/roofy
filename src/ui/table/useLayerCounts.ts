@@ -3,6 +3,7 @@ import {
   rootFeatureId,
   parentsIndexOf,
 } from "../../domain/citymodel/featureId";
+import { useActiveFamily } from "../../features/layers/familyStore";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
@@ -10,6 +11,7 @@ import { getResidentModel } from "../../features/streaming/residentModel";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { runQuery } from "../../insights/duckdb";
 import {
+  layerTableKey,
   useLayerTableStore,
   type LayerTable,
 } from "../../insights/layerTables";
@@ -46,8 +48,11 @@ function count(rows: ReadonlyArray<Record<string, unknown>>): number | null {
 }
 
 export function useLayerCounts(layerId: string | null): LayerCounts {
+  // The ACTIVE family's table for a CityParquet layer (ruling S3); the bare key
+  // for every other one.
+  const family = useActiveFamily(layerId);
   const tableState = useLayerTableStore((state) =>
-    layerId === null ? undefined : state.tables[layerId],
+    layerId === null ? undefined : state.tables[layerTableKey(layerId, family)],
   );
   const query = useQueryStore((state) =>
     layerId === null ? null : layerQuery(state, layerId),
