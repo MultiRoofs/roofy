@@ -200,6 +200,27 @@ vi.mock(
   }),
 );
 
+/**
+ * The static-or-stream DECISION is faked, static and immediate: these cases
+ * pin the static rebuild, and the real decision would size a `gs://` source
+ * by LISTING the bucket (a real fetch under jsdom — slow, flaky, and network).
+ * Its own suite is `streamDecision.test.ts`.
+ */
+const decideCityParquetMode = vi.hoisted(() =>
+  vi.fn(async (_input: unknown) => ({ mode: "static" as const })),
+);
+vi.mock("../../../src/features/cityparquet/streamDecision", () => ({
+  CITYPARQUET_STREAM_THRESHOLD_BYTES: 128 * 1024 * 1024,
+  decideCityParquetMode,
+}));
+
+/** No path in this file may reach the network; a stray probe fails loudly. */
+const fetchSpy = vi.fn(async (input: unknown) => {
+  throw new Error(
+    `unexpected network request in a jsdom test: ${String(input)}`,
+  );
+});
+
 const { App } = await import("../../../src/app/App");
 const { useLayerStore } =
   await import("../../../src/features/layers/layerStore");
@@ -269,6 +290,9 @@ function shareHash(
 
 beforeEach(() => {
   extensionReady = false;
+  decideCityParquetMode.mockClear();
+  fetchSpy.mockClear();
+  vi.stubGlobal("fetch", fetchSpy);
   loadFromUrl.mockReset();
   loadFromUrl.mockResolvedValue(jsonLoaded);
   loadCityParquetFromUrl.mockReset();
@@ -282,6 +306,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   cleanup();
   location.hash = "";
 });
@@ -312,6 +337,12 @@ describe("App snapshot restore — CityParquet layers", () => {
     expect(loadCityParquetFromUrl).toHaveBeenCalledWith(PARQUET_URL);
     // The CityJSON path would have parsed a bucket listing as JSON.
     expect(loadFromUrl).not.toHaveBeenCalled();
+    // The restore re-ran the decision for the saved URL, and nothing probed
+    // the network on the way.
+    expect(decideCityParquetMode).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "url", url: PARQUET_URL }),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
 
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("cityparquet");

@@ -126,6 +126,39 @@ describe("addCityParquetLayerFromUrl", () => {
     expect(layer.modelRef).toEqual({ type: "url", url: URL_ });
   });
 
+  it("runs a streamed open inside the hold, and releases it when the open is refused", async () => {
+    mocks.decide.mockResolvedValue({
+      mode: "stream",
+      source: { url: `${URL_}building.parquet` },
+      totalBytes: 335 * 1024 * 1024,
+    });
+    const plugin = fakePlugin();
+    plugin.openStream.mockRejectedValueOnce(
+      new Error("The server does not support range requests."),
+    );
+    let holds = 0;
+    let peak = 0;
+    const holdEngine = async <T>(open: () => Promise<T>): Promise<T> => {
+      holds += 1;
+      peak = Math.max(peak, holds);
+      try {
+        return await open();
+      } finally {
+        holds -= 1;
+      }
+    };
+    await expect(
+      addCityParquetLayerFromUrl(
+        URL_,
+        { name: "yokohama-shi" },
+        { resolveStreamPlugin: async () => plugin, holdEngine },
+      ),
+    ).rejects.toThrow(/range requests/);
+    expect(peak).toBe(1);
+    expect(holds).toBe(0);
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+  });
+
   it("reads a small source whole, keeping its settings (and never touches the plugin)", async () => {
     mocks.decide.mockResolvedValue({ mode: "static" });
     const model: CityModel = {
@@ -139,13 +172,19 @@ describe("addCityParquetLayerFromUrl", () => {
     };
     mocks.loadUrl.mockResolvedValue(model);
     const resolveStreamPlugin = vi.fn();
+    const holdEngine = vi.fn(<T>(open: () => Promise<T>) => open());
     const layerId = await addCityParquetLayerFromUrl(
       URL_,
       { name: "delft", visible: false },
-      { resolveStreamPlugin },
+      {
+        resolveStreamPlugin,
+        holdEngine: holdEngine as <T>(open: () => Promise<T>) => Promise<T>,
+      },
     );
     expect(mocks.loadUrl).toHaveBeenCalledWith(URL_);
     expect(resolveStreamPlugin).not.toHaveBeenCalled();
+    // A static load mounts the viewport as a consequence: no boot hold.
+    expect(holdEngine).not.toHaveBeenCalled();
     const layer = useLayerStore
       .getState()
       .layers.find((l) => l.id === layerId)!;
