@@ -202,9 +202,11 @@ describe("hasFileBackedTable", () => {
 
 describe("retiring a file-backed table", () => {
   it("DROPs a VIEW, not a table", async () => {
-    // `DROP TABLE IF EXISTS` over a view is a silent no-op in DuckDB: the view
-    // would survive under a name nothing will ever use again, which is memory
-    // held for the life of the page and invisible to every code path.
+    // DuckDB REFUSES `DROP TABLE IF EXISTS` over a view ("is of type View,
+    // trying to drop type Table" — measured in the integration suite), and
+    // `retire` only warns about a failed drop: the view would survive under a
+    // name nothing will ever use again, holding its source registration open
+    // for the life of the page.
     adoptLayerTable("L", info("layer_7", "building", true));
     await dropLayerTable("L", "building");
     expect(sql).toContain('DROP VIEW IF EXISTS "layer_7"');

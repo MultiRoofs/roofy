@@ -1142,11 +1142,12 @@ export async function retryEngine(): Promise<void> {
  * replacement, and by `dropLayerTable` (Task 14).
  */
 async function retire(info: LayerTable): Promise<void> {
-  // A VIEW is not a table, and `DROP TABLE IF EXISTS` over one is a SILENT
-  // no-op — DuckDB looks up table-type entries only and the `IF EXISTS`
-  // swallows the miss. The view would survive under a name nothing will ever
-  // use again, which is exactly the invisible growth the warning below exists
-  // to make visible.
+  // A VIEW is not a table, and `DROP TABLE IF EXISTS` over one is REFUSED:
+  // DuckDB 1.5.5 answers "Existing object … is of type View, trying to drop
+  // type Table" rather than treating it as a missing table (measured in
+  // `tests/integration/duckdb/familyViews.test.ts`). That failure only reaches
+  // the warning below, so the view would survive under a name nothing will ever
+  // use again — holding its source registration open with it.
   const result = await ddl(
     info.fileBacked === true
       ? `DROP VIEW IF EXISTS ${quoteIdent(info.table)}`
