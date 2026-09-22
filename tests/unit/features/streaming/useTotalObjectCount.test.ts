@@ -89,4 +89,13 @@ describe("useTotalObjectCount", () => {
     const { result } = renderHook(() => useTotalObjectCount());
     expect(result.current).toEqual({ loaded: 15, total: null });
   });
+
+  it("a stream whose layer has left the layer store does not count toward the total", () => {
+    useLayerStore.setState({ layers: [layer("P", [], true)] });
+    useStreamStore.setState({
+      streams: { P: stream(10, 1000), GONE: stream(7, 500) },
+    });
+    const { result } = renderHook(() => useTotalObjectCount());
+    expect(result.current).toEqual({ loaded: 10, total: 1000 });
+  });
 });

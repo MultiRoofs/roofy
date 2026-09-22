@@ -45,10 +45,18 @@ export function useTotalObjectCount(): TotalObjectCount {
     for (const entry of Object.values(s.streams)) sum += entry.version;
     return sum;
   });
+  // Scoped to the layer list, not to `streams`: the stream store is not
+  // cleared in the same tick a layer leaves `layers` (the viewport reconciles
+  // one effect cycle later, and an undone run removes its layer without
+  // closing a stream), so iterating `streams` would count a departed layer's
+  // dataset in the total while `loaded` no longer counts its objects. A
+  // layer whose stream is not registered yet, or whose header states no
+  // object count (FlatCityBuf), makes the total unknown.
   const streamedTotal = useStreamStore((s): number | null => {
     let sum = 0;
-    for (const entry of Object.values(s.streams)) {
-      const count = entry.header.objectsCount;
+    for (const layer of layers) {
+      if (!layer.isStreaming) continue;
+      const count = s.streams[layer.id]?.header.objectsCount;
       if (count === undefined) return null;
       sum += count;
     }
@@ -57,14 +65,9 @@ export function useTotalObjectCount(): TotalObjectCount {
 
   let loaded = 0;
   let staticTotal = 0;
-  let streamsKnown = streamedTotal !== null;
-  const streams = useStreamStore.getState().streams;
   for (const layer of layers) {
     if (layer.isStreaming) {
       loaded += getResidentModel(layer.id, versionSum).featureCount;
-      // A streaming layer whose stream is not registered yet has no header
-      // to read a size from.
-      if (!(layer.id in streams)) streamsKnown = false;
     } else {
       const count = Object.keys(layer.model.objects).length;
       loaded += count;
@@ -73,6 +76,6 @@ export function useTotalObjectCount(): TotalObjectCount {
   }
   return {
     loaded,
-    total: streamsKnown ? staticTotal + (streamedTotal ?? 0) : null,
+    total: streamedTotal === null ? null : staticTotal + streamedTotal,
   };
 }
