@@ -84,6 +84,19 @@ export interface StreamState {
    *  model) select this field, not `streams` as a whole and not
    *  `useLayerStore.layers`. */
   readonly version: number;
+  /**
+   * How many times this layer's HANDLE has been replaced (ruling R-E′).
+   *
+   * `0` is a first open; anything higher is a handle a family toggle's reopen
+   * produced. The viewport's reconciler reads both halves of that: the NUMBER
+   * changing is its reason to re-run when the layer id has not moved, and
+   * `> 0` is what keeps the sole-layer camera fit off — a reopen must leave the
+   * camera exactly where the user put it.
+   *
+   * Optional, reading as `0`, so the three dozen fixtures that build a
+   * `StreamState` by hand keep compiling; `openStreamingLayer` always states it.
+   */
+  readonly generation?: number;
 }
 
 export interface StreamStoreState {
