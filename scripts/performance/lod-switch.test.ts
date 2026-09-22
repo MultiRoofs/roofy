@@ -1,7 +1,8 @@
 // @vitest-environment node
+/// <reference types="node" />
 //
-// Times static-mesh LoD switches through the real `CityModelMesh.setLod` and
-// counts geometry rebuilds. Runs on a synthetic model with Nishitokyo's LoD
+// Times static-mesh LoD switches (the real `CityModelMesh.setLod`) and the
+// geoid height correction (`setHeightOffset`), and counts geometry rebuilds. Runs on a synthetic model with Nishitokyo's LoD
 // shape (84,394 objects with LoDs 0/1, 468 with 0/1/2), in EPSG:32654 — or on
 // the real file when AUDIT_FILE points at a downloaded Nishitokyo parquet.
 //
@@ -126,6 +127,12 @@ it("counts and times static LoD switches", async () => {
   });
   record("construct [2,1,0]", performance.now() - t, mesh);
 
+  // The geoid sample lands after construction on every load (Tokyo N ~ +37 m).
+  rebuild.mockClear();
+  t = performance.now();
+  mesh.setHeightOffset(37);
+  const geoid = record("setHeightOffset(0 -> 37)", performance.now() - t, mesh);
+
   const steps: Array<[string, readonly string[]]> = [
     ["[2,1,0] -> [2]", ["2"]],
     ["[2] -> [2,1,0]", ["2", "1", "0"]],
@@ -151,6 +158,7 @@ it("counts and times static LoD switches", async () => {
     mesh,
   );
 
+  expect(geoid.rebuilds).toBe(0);
   const byStep = Object.fromEntries(results.map((r) => [r.step, r]));
   expect(byStep["[2,1,0] -> [2,1]"]!.rebuilds).toBe(0);
   expect(byStep["[2,1] -> [1,2] (reordered)"]!.rebuilds).toBe(0);

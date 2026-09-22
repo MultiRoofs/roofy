@@ -813,3 +813,33 @@ Nishitokyo `[2,1,0] → [2,1]` changes no object's winner yet re-triangulated al
   `npx vitest run -c scripts/performance/vitest.config.ts lod-switch`
   (`AUDIT_FILE=<nishitokyo parquet>` for the real dataset).
 - Streaming layers (`FcbStreamLayerHandle.setLod`) are untouched.
+
+### The geoid height correction moves vertices; it does not rebuild
+
+The mesh is built at height offset 0 and the geoid sample lands later, on
+every load. `setHeightOffset` used to rebuild the whole mesh for it —
+Nishitokyo 2.7 s on the M4 Max (dev build), 9.25 s on the Linux host (Node) —
+and now calls `raisePositionsInEnu` (navara-core `geo/raiseEnu.ts`) on the
+existing position buffer: 0.27 s on the same host and file, no rebuild.
+
+- Why not just move the frame: the origin rises `dh` along its normal, each
+  vertex along its OWN normal, and those fan out — a frame-only shift is
+  `≈ N·d/R` off (6 cm at 10 km, 89 mm at a 21 km corner for N = 37 m).
+  In the (unchanged-rotation) frame the move is `p + dh·(Rᵀn − ẑ)`.
+- `n` must be the geodetic normal: the ellipsoid gradient at the FOOT point.
+  The gradient at the raised vertex is µm off (Codex review: 16 Float32 steps
+  on a coordinate 1 m from the origin). The foot is found without trig
+  (height from the ellipsoid equation, one step down the approximate normal).
+- Accuracy: within two Float32 roundings of a fresh `projectPositionsToEnu`
+  (one for the stored input, one for the store; floored at 1e-8 m each for the
+  double rounding of ECEF) for building heights. The foot-point step leaves
+  ~dh·e²·(h/a)² — 4e-8 m at 5 km above the ellipsoid, nothing at city heights. `raiseEnu.test.ts` holds the oracle; the mesh test
+  compares against a mesh built at the new offset over a 10 km span.
+- Unchanged by the move: normals (they turn by ~N/R ≈ 1e-5 rad, which no
+  lighting shows), colours, picking indices, UVs, texture groups. Refreshed:
+  position upload, bounding sphere (Navara culls on it), a cached bounding box,
+  edge lines. Later rebuilds (LoD, hidden types, appearance) project into the
+  new frame as before.
+- Streaming layers place per cell in the worker and are untouched.
+- Logs: `docs/performance/cityparquet-2026-09-21/geoid-nishitokyo-*.jsonl`
+  (same `lod-switch` benchmark; its `setHeightOffset(0 -> 37)` step).
