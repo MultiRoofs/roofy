@@ -36,6 +36,7 @@ import {
 } from "../../insights/familyViews";
 import { reopenStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
+import { useStreamStore } from "../streaming/streamStore";
 import type { StreamSource } from "@cityjson/navara-flatcitybuf";
 
 export type { FamilySource };
@@ -99,8 +100,15 @@ export interface LayerFamilyState {
    *  in flight may not have caught up with it yet, which is exactly why
    *  {@link opened} is recorded separately. */
   readonly enabled: ReadonlySet<string>;
-  /** The families the live stream was actually opened with, in source order. A
-   *  failed reopen rolls {@link enabled} back to this. */
+  /**
+   * The families the LIVE STREAM is actually open with, in source order.
+   *
+   * Empty when there is no stream — including after a FAILED reopen, which
+   * removed the old handle before trying the new one. That matters: a reopen job
+   * whose desired set equals `opened` is a no-op, so claiming the previous set
+   * here would let a toggle-on-then-off clear the failure and leave a layer with
+   * no geometry and no Retry.
+   */
   readonly opened: ReadonlyArray<string>;
   /** Which family the table panel is showing. `null` only for a layer with no
    *  families at all. */
@@ -109,12 +117,14 @@ export interface LayerFamilyState {
   readonly table: Readonly<Record<string, FamilyTableState>>;
   readonly reopen: FamilyReopenState;
   /**
-   * Bumped by every reopen AND by the layer's removal.
+   * Bumped when this layer's families are (re)published and when the layer is
+   * FORGOTTEN — not by an ordinary reopen, which the per-layer chain already
+   * serialises.
    *
-   * The cancellation the per-layer queue cannot give on its own: an open that is
-   * still booting its worker when the layer is removed has to be told that what
-   * it is about to register is not wanted, and a number is the only thing that
-   * survives the store entry being deleted.
+   * The cancellation that chain cannot give on its own: an open that is still
+   * booting its worker when the layer is removed has to be told that what it is
+   * about to register is not wanted, and a number is the only thing that
+   * survives the store entry being deleted (see `farewells`).
    */
   readonly generation: number;
 }
@@ -584,7 +594,7 @@ export function retryFamilyReopen(input: {
   if (useFamilyStore.getState().layers[layerId] === undefined) {
     return Promise.resolve(NOT_FOUND);
   }
-  return enqueue(layerId, () => runReopen(plugin, layerId, { force: true }));
+  return enqueue(layerId, () => runReopen(plugin, layerId));
 }
 
 /**
@@ -596,7 +606,6 @@ export function retryFamilyReopen(input: {
 async function runReopen(
   plugin: StreamPlugin,
   layerId: string,
-  options: { readonly force?: boolean } = {},
 ): Promise<FamilyToggleOutcome> {
   const entry = useFamilyStore.getState().layers[layerId];
   if (!entry) return NOT_FOUND;
@@ -609,8 +618,10 @@ async function runReopen(
   const sameAsOpen =
     wanted.length === entry.opened.length &&
     wanted.every((key, i) => entry.opened[i] === key);
-  if (sameAsOpen && options.force !== true) {
-    // Still worth clearing a stale failure: the desired set IS what is open.
+  if (sameAsOpen) {
+    // A FAILURE cannot reach here: it sets `opened` to `[]`, so a desired set
+    // that matches what is open really is open. Still worth clearing a stale
+    // reopen state — a `reopening` left by a superseded job, say.
     if (entry.reopen.state !== "idle") {
       useFamilyStore.setState((s) =>
         patchLayer(s, layerId, (current) => ({
@@ -644,14 +655,24 @@ async function runReopen(
   }
 
   if (!outcome.ok) {
-    // ROLLBACK: the enabled set goes back to what is actually open, so the UI
-    // never claims a family is on while nothing is rendering it, and Retry has
-    // a coherent set to reopen.
+    // A failed reopen leaves NO stream: the old handle was removed before the
+    // open was attempted, so nothing is rendering. `opened` says so — it is
+    // "what the live stream is open with", and claiming the previous set here
+    // would make a toggle-on-then-off read as "the desired set is already open"
+    // and quietly clear the failure, leaving a layer with no geometry, no
+    // `failed` state and no Retry.
+    //
+    // The ROLLBACK is `enabled`, which goes back to the set that was working, so
+    // the UI never claims a family is on that the user never asked for and Retry
+    // has a coherent set to reopen. Those families read `failed` rather than
+    // `closed`: nothing is drawing them, and that is not the user's doing.
+    const rolledBack = entry.opened;
     useFamilyStore.setState((s) =>
       patchLayer(s, layerId, (current) => ({
         ...current,
-        enabled: new Set(current.opened),
-        geometry: geometryFor(current.families, current.opened),
+        enabled: new Set(rolledBack),
+        opened: [],
+        geometry: geometryFor(current.families, [], rolledBack),
         reopen: { state: "failed", message: outcome.message },
       })),
     );
@@ -666,6 +687,14 @@ async function runReopen(
       reopen: { state: "idle" },
     })),
   );
+  // The header the reopen got carries a row count PER OPENED FILE, so a family
+  // enabled after the first open learns its size here — otherwise it would read
+  // as unknown for the rest of the session. By ARRAY ORDER against `wanted`,
+  // which is the order the source list was built in.
+  const tables = useStreamStore.getState().streams[layerId]?.header.tables;
+  if (tables !== undefined) {
+    useFamilyStore.getState().applyStreamTables(layerId, wanted, tables);
+  }
   // A family that is open now can have its table browsed without waiting for a
   // button; the newly active one, if the user had never opened it, gets its view
   // here.
@@ -674,14 +703,25 @@ async function runReopen(
   return { ok: true };
 }
 
-/** Every family's geometry state for a given open list. */
+/**
+ * Every family's geometry state for a given open list.
+ *
+ * `failedKeys` are the families a FAILED reopen was meant to be showing: nothing
+ * is drawing them and the user did not close them, so `failed` is the honest
+ * answer and `closed` would be a lie the Retry button then contradicts.
+ */
 function geometryFor(
   families: ReadonlyArray<LayerFamily>,
   open: ReadonlyArray<string>,
+  failedKeys: ReadonlyArray<string> = [],
 ): Record<string, FamilyGeometryState> {
   const out: Record<string, FamilyGeometryState> = {};
   for (const family of families) {
-    out[family.key] = open.includes(family.key) ? "open" : "closed";
+    out[family.key] = open.includes(family.key)
+      ? "open"
+      : failedKeys.includes(family.key)
+        ? "failed"
+        : "closed";
   }
   return out;
 }

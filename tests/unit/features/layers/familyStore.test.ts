@@ -37,6 +37,7 @@ vi.mock("../../../../src/insights/familyViews", () => ({
 
 import {
   buildLayerFamilies,
+  resetFamilyStoreForTest,
   defaultEnabledKeys,
   familyKeyFromName,
   familyLabel,
@@ -160,7 +161,9 @@ function seedLayer(layerId: string, families: ReadonlyArray<LayerFamily>) {
 }
 
 beforeEach(() => {
-  useFamilyStore.setState({ layers: {} });
+  // The per-layer reopen QUEUES and the farewell generations are module state:
+  // a case that left a chain behind would serialise the next one behind it.
+  resetFamilyStoreForTest();
   useLayerStore.setState({ layers: [] });
   useStreamStore.setState({ streams: {} });
   ensureFamilyView.mockClear();
@@ -341,7 +344,12 @@ describe("enabling a family reopens the stream (R-E′)", () => {
       generation: 0,
     });
     const layerBefore = useLayerStore.getState().layers[0]!;
-    const second = fakeHandle();
+    // Two tables now, and their `name`s match no family key: the pairing is by
+    // ARRAY ORDER against the families the stream was opened with.
+    const second = fakeHandle([
+      { name: "0", rowCount: 884106 },
+      { name: "1", rowCount: 42 },
+    ]);
     const plugin = fakePlugin(async () => second.handle);
 
     const outcome = await setFamilyEnabled({
@@ -378,6 +386,16 @@ describe("enabling a family reopens the stream (R-E′)", () => {
     // Tables are not the reopen's business.
     expect(dropFamilyView).not.toHaveBeenCalled();
     expect(dropFamilyViews).not.toHaveBeenCalled();
+    // The newly opened family's size is known from the header the reopen got —
+    // without this, a family enabled after the first open would read "? rows"
+    // for the rest of the session.
+    const counts = new Map(
+      useFamilyStore
+        .getState()
+        .layers.L1!.families.map((f) => [f.key, f.rowCount]),
+    );
+    expect(counts.get("building")).toBe(884106);
+    expect(counts.get("bridge")).toBe(42);
   });
 
   it("seeds the reopened stream from the layer row, not from defaults", async () => {
@@ -478,6 +496,54 @@ describe("enabling a family reopens the stream (R-E′)", () => {
     );
     // The layer row survives a failed reopen — there is something to retry.
     expect(useLayerStore.getState().layers).toHaveLength(1);
+  });
+
+  it("leaves NOTHING open after a failure, so undoing the toggle still reopens", async () => {
+    seedLayer(
+      "L1",
+      familiesOf(
+        { key: "building", href: "building.parquet" },
+        { key: "bridge", href: "bridge.parquet" },
+      ),
+    );
+    let fail = true;
+    const plugin = fakePlugin(() => {
+      if (fail) throw new Error("nope");
+      return Promise.resolve(fakeHandle().handle);
+    });
+    await setFamilyEnabled({
+      plugin: plugin.plugin,
+      layerId: "L1",
+      family: "bridge",
+      enabled: true,
+    });
+    // The stream is GONE, so nothing is open — not "building is still open".
+    expect(useStreamStore.getState().streams.L1).toBeUndefined();
+    const failed = useFamilyStore.getState().layers.L1!;
+    expect(failed.opened).toEqual([]);
+    expect(failed.geometry.building).toBe("failed");
+
+    // Toggling the family on and off again must NOT read as "the desired set is
+    // already open" and quietly clear the failure — that would leave a layer
+    // with no geometry, no `failed` state and no Retry.
+    fail = false;
+    plugin.openStream.mockClear();
+    await setFamilyEnabled({
+      plugin: plugin.plugin,
+      layerId: "L1",
+      family: "bridge",
+      enabled: true,
+    });
+    await setFamilyEnabled({
+      plugin: plugin.plugin,
+      layerId: "L1",
+      family: "bridge",
+      enabled: false,
+    });
+    expect(plugin.openStream).toHaveBeenCalled();
+    expect(useStreamStore.getState().streams.L1).toBeDefined();
+    expect(useFamilyStore.getState().layers.L1!.opened).toEqual(["building"]);
+    expect(useFamilyStore.getState().layers.L1!.reopen.state).toBe("idle");
   });
 
   it("retries a failed reopen with a HIGHER handle generation", async () => {
