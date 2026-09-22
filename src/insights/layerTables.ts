@@ -1575,6 +1575,12 @@ export function enqueueLayerTable(
  *
  * A layer being REMOVED goes through {@link dropLayerTables} instead, which
  * covers every family it accumulated; this is the single-key door.
+ *
+ * A FILE-BACKED key must not come here directly: retiring the view releases the
+ * registration behind it, and `familyViews` still remembers that name — so the
+ * next `ensureFamilyView` would skip its registration and build a view over a
+ * dropped name, which resolves to nothing. Go through `familyViews`'
+ * `dropFamilyView` / `dropFamilyViews`, which forget the cache as well.
  */
 export function dropLayerTable(
   layerId: string,

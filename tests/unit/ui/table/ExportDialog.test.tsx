@@ -490,6 +490,86 @@ describe("ExportDialog", () => {
     expect(runExport).not.toHaveBeenCalled();
   });
 
+  it("REFUSES to export a resident table the FILE has superseded", async () => {
+    // R-B′/R-C′ interim hazard: once a family's view exists, the layer's old
+    // resident table is frozen at whatever was loaded when it was last built —
+    // and `refreshStreamingTable` rightly refuses to rebuild it. Exporting it
+    // would hand back that snapshot as if it were the layer, with nothing on
+    // screen to say so, so the dialog refuses until a family's own table is
+    // the one it was handed.
+    useLayerTableStore.setState({
+      tables: {
+        L: { state: "ready", info: FALLBACK_TABLE },
+        "L::building": {
+          state: "ready",
+          info: {
+            ...FALLBACK_TABLE,
+            table: "layer_9",
+            fileBacked: true,
+            familyKey: "building",
+          },
+        },
+      },
+    } as never);
+    open({ table: FALLBACK_TABLE, isStreaming: true });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("object family");
+    expect(
+      (screen.getByRole("button", { name: "Export" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(runExport).not.toHaveBeenCalled();
+  });
+
+  it("exports a FAMILY's own file-backed table without complaint", async () => {
+    const familyTable = {
+      ...FALLBACK_TABLE,
+      table: "layer_9",
+      fileBacked: true,
+      familyKey: "building",
+    };
+    useLayerTableStore.setState({
+      tables: { "L::building": { state: "ready", info: familyTable } },
+    } as never);
+    open({ table: familyTable, isStreaming: true });
+
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Export" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("waits while the table it was HANDED is rebuilding, by its own key", async () => {
+    // The `rebuilding` flag has to be read from the entry that holds THIS
+    // table: a family's view lives under `${layerId}::${family}`, so a lookup
+    // by the bare layer id would watch a table this dialog is not exporting.
+    const familyTable = {
+      ...FALLBACK_TABLE,
+      table: "layer_9",
+      fileBacked: true,
+      familyKey: "building",
+    };
+    useLayerTableStore.setState({
+      tables: {
+        "L::building": {
+          state: "ready",
+          info: familyTable,
+          rebuilding: true,
+        },
+      },
+    } as never);
+    open({ table: familyTable, isStreaming: true });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Refreshing table…" }),
+      ).toBeTruthy(),
+    );
+  });
+
   it("exports normally when the refresh succeeded", async () => {
     open({ table: FALLBACK_TABLE, isStreaming: true });
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());

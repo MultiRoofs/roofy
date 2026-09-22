@@ -43,6 +43,7 @@ import {
 import { EngineDeadError, racedWithDeath } from "./engineAwait";
 import {
   adoptLayerTable,
+  dropLayerTable,
   dropLayerTables,
   getLayerTable,
   nextTableName,
@@ -351,6 +352,31 @@ export function ensureFamilyView(input: {
       throw error;
     }
   });
+}
+
+/**
+ * Give up ONE family's view and the registration behind it.
+ *
+ * What disabling a family calls. Both halves matter: `dropLayerTable` retires
+ * the view AND releases its `sourceName`, and forgetting the cache entry is what
+ * makes RE-enabling the family work — a dropped VFS name still resolves, to
+ * nothing, so a cached name would build a view over an empty file with no error
+ * anywhere. Which is also why a file-backed table must never be dropped through
+ * `layerTables` directly.
+ */
+export async function dropFamilyView(
+  layerId: string,
+  family: string,
+): Promise<void> {
+  const name = getLayerTable(layerId, family)?.sourceName ?? null;
+  const byIdentity = registrations.get(layerId);
+  if (byIdentity && name !== null) {
+    for (const [identity, registered] of byIdentity) {
+      if (registered === name) byIdentity.delete(identity);
+    }
+    if (byIdentity.size === 0) registrations.delete(layerId);
+  }
+  await dropLayerTable(layerId, family);
 }
 
 /**

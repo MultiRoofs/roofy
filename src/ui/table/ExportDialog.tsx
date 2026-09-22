@@ -16,6 +16,7 @@ import { createPortal } from "react-dom";
 import { runQuery } from "../../insights/duckdb";
 import type { LodColumn } from "../../insights/columnKind";
 import {
+  parseTableKey,
   useLayerTableStore,
   type LayerTable,
 } from "../../insights/layerTables";
@@ -113,6 +114,10 @@ const RELINK_REASON = "Re-link the file to export this layer";
  * Named up front, with the engine's own sentence appended: "could not be
  * rebuilt" says what happened to the table, and DuckDB's message says why.
  */
+/** Why Export is withheld over a table the file-backed family views replaced. */
+const SUPERSEDED_BY_FAMILY =
+  "This layer is now read straight from the file, one table per object family. This table covers only the objects that happened to be loaded, so exporting it is withheld — export the family's own table instead.";
+
 const REFRESH_FAILED_PREFIX =
   "This layer's table could not be rebuilt, so an export would write an out-of-date set of objects. ";
 
@@ -243,10 +248,36 @@ export function ExportDialog({
   // the grid and wrong for an export: writing the previous resident set is
   // exactly what the rebuild exists to prevent. So the button waits, and says
   // why rather than looking broken.
-  const rebuilding = useLayerTableStore((s) => {
-    const entry = s.tables[layerId];
-    return entry?.state === "ready" && entry.rebuilding === true;
-  });
+  const rebuilding = useLayerTableStore((s) =>
+    // By the table this dialog was HANDED, not by the layer's bare key: a
+    // CityParquet family's view lives under `${layerId}::${family}` (R-C′), and
+    // a bare lookup would watch a table this dialog is not exporting.
+    Object.entries(s.tables).some(
+      ([key, entry]) =>
+        parseTableKey(key).layerId === layerId &&
+        entry.state === "ready" &&
+        entry.info.table === table.table &&
+        entry.rebuilding === true,
+    ),
+  );
+  /**
+   * The layer reads from the FILE now, and this is not that table.
+   *
+   * A REFUSAL, for the same reason as a failed refresh: once a family's view
+   * exists, the layer's older resident table is frozen at whatever was loaded
+   * when it was last built — `refreshStreamingTable` rightly will not rebuild it
+   * — so an export of it would hand back that snapshot as if it were the layer.
+   * Waiting does not fix it; choosing the family's own table does.
+   */
+  const supersededByFamily = useLayerTableStore((s) =>
+    Object.entries(s.tables).some(
+      ([key, entry]) =>
+        parseTableKey(key).layerId === layerId &&
+        entry.state === "ready" &&
+        entry.info.fileBacked === true &&
+        entry.info.table !== table.table,
+    ),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<ReadonlyArray<string>>([]);
@@ -660,6 +691,12 @@ export function ExportDialog({
             </p>
           )}
 
+          {supersededByFamily && (
+            <p className="export-error" role="alert">
+              {SUPERSEDED_BY_FAMILY}
+            </p>
+          )}
+
           {error !== null && (
             <p className="export-error" role="alert">
               {error}
@@ -690,6 +727,7 @@ export function ExportDialog({
               busy ||
               rebuilding ||
               refreshFailure !== null ||
+              supersededByFamily ||
               selectedTypes.size === 0
             }
             onClick={() => void handleExport()}

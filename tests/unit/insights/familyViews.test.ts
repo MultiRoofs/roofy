@@ -113,6 +113,7 @@ vi.mock("../../../src/insights/duckdb", () => {
 const {
   buildFamilyViewSql,
   describeParquetSql,
+  dropFamilyView,
   dropFamilyViews,
   ensureFamilyView,
   keptFamilyColumns,
@@ -387,6 +388,54 @@ describe("ensureFamilyView", () => {
       sourceCrs: null,
     });
     expect(registered).toHaveLength(2);
+  });
+});
+
+describe("dropFamilyView", () => {
+  it("takes ONE family and leaves the layer's others alone", async () => {
+    await ensureFamilyView({
+      layerId: "L",
+      family: "building",
+      source: { url: "https://example.test/building.parquet" },
+      sourceCrs: null,
+    });
+    await ensureFamilyView({
+      layerId: "L",
+      family: "bridge",
+      source: { url: "https://example.test/bridge.parquet" },
+      sourceCrs: null,
+    });
+    sql.length = 0;
+
+    await dropFamilyView("L", "bridge");
+
+    expect(sql).toContain('DROP VIEW IF EXISTS "layer_2"');
+    expect(sql).not.toContain('DROP VIEW IF EXISTS "layer_1"');
+    expect(getLayerTable("L", "bridge")).toBeNull();
+    expect(getLayerTable("L", "building")?.table).toBe("layer_1");
+  });
+
+  it("forgets the registration, so re-enabling the family registers again", async () => {
+    // The drop released the file behind the view, and a dropped VFS name still
+    // RESOLVES — to nothing. A cache entry left behind would make the next
+    // ensure skip its registration and build a view over an empty file.
+    await ensureFamilyView({
+      layerId: "L",
+      family: "bridge",
+      source: { url: "https://example.test/bridge.parquet" },
+      sourceCrs: null,
+    });
+    await dropFamilyView("L", "bridge");
+    registered.length = 0;
+
+    await ensureFamilyView({
+      layerId: "L",
+      family: "bridge",
+      source: { url: "https://example.test/bridge.parquet" },
+      sourceCrs: null,
+    });
+    expect(registered).toHaveLength(1);
+    expect(registered[0]?.name).not.toBe("family_1.parquet");
   });
 });
 
