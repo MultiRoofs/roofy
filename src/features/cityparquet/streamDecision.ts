@@ -11,9 +11,9 @@
  * streamed), so they neither count nor ride in the stream source. Each table's
  * size comes from the cheapest source that knows it: the source's own
  * declaration (a manifest's `file:size`, a bucket listing's size), then a
- * `HEAD`, then the table's Parquet footer (the sum of its row groups' compressed
- * sizes) — so an unknown size never silently routes a huge table into the
- * static path. When NO size can be learned (no HEAD, no ranges) the source
+ * `HEAD`, then a ranged open of the table itself, which learns its byte length
+ * from the range probe — so an unknown size never silently routes a huge table
+ * into the static path. When NO size can be learned (no HEAD, no ranges) the source
  * stays static, as before: a server that answers neither could not serve the
  * stream's range reads either.
  *
@@ -63,8 +63,9 @@ export type CityParquetModeInput =
       readonly http: HttpClient;
       /** The `Content-Length` of a `HEAD`, or `null`. */
       readonly headLength: SizeProbe;
-      /** The table's size from its Parquet footer, or `null` — tried only
-       *  when `headLength` has no answer. */
+      /** The table's byte length, learned by opening its Parquet footer
+       *  through a ranged read, or `null` — tried only when `headLength` has
+       *  no answer. */
       readonly footerSize?: SizeProbe;
     }
   | { readonly kind: "files"; readonly files: ReadonlyArray<File> };

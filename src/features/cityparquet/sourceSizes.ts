@@ -29,22 +29,28 @@ export async function browserHeadLength(url: string): Promise<number | null> {
 }
 
 /**
- * A table's size from its Parquet footer: the sum of its row groups'
- * `total_compressed_size`, read through a ranged buffer (only the footer is
- * fetched). The buffer's own byte length stands in when a row group omits the
- * field (it is optional in the format). `null` when the server serves no
- * ranges, or the file is not a readable CityParquet table.
+ * A table's size, learned by opening it through a ranged buffer when `HEAD`
+ * gave nothing: the buffer's own `byteLength`, which it established from the
+ * ranged probe's `Content-Range` (or a `Content-Length` it did see). Only the
+ * footer is ever fetched. `null` when the server serves no ranges, or the file
+ * is not a readable CityParquet table.
+ *
+ * `readCityParquetSchema` is the gate, not the measurement: its job here is to
+ * answer "is this a CityParquet table at all", so a JPEG behind a `.parquet`
+ * URL comes back `null` rather than as a size.
+ *
+ * It used to sum the row groups' `total_compressed_size` instead. That is a
+ * smaller number than the file — the footer, the page indexes and the magic
+ * bytes sit outside every row group — and it is the wrong one: the 128 MiB
+ * streaming threshold is written about the bytes a static load would have to
+ * download, so a 140 MiB table whose row groups sum to 120 MiB was routed
+ * static (Codex milestone review, Important).
  */
 export async function browserFooterSize(url: string): Promise<number | null> {
   try {
     const buffer = await asyncBufferFromHttp(url);
-    const { metadata } = await readCityParquetSchema(buffer);
-    let total = 0;
-    for (const group of metadata.row_groups) {
-      if (group.total_compressed_size === undefined) return buffer.byteLength;
-      total += Number(group.total_compressed_size);
-    }
-    return total;
+    await readCityParquetSchema(buffer);
+    return buffer.byteLength;
   } catch {
     return null;
   }

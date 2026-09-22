@@ -55,7 +55,7 @@ describe("browserHeadLength", () => {
 });
 
 describe("browserFooterSize", () => {
-  it("sums the row groups' compressed sizes from a ranged footer read", async () => {
+  it("answers the resource length the footer probe learned, not the row groups' sum", async () => {
     const bytes = new Uint8Array(await readFile(FIXTURE));
     vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
       const range = new Headers(init?.headers).get("Range");
@@ -74,11 +74,13 @@ describe("browserFooterSize", () => {
       });
     });
     const size = await browserFooterSize("https://x.test/big.parquet");
-    expect(size).not.toBeNull();
-    expect(size!).toBeGreaterThan(0);
-    // The row groups' sum, not the file's length: the footer and the magic
-    // bytes are outside every row group.
-    expect(size!).toBeLessThan(bytes.byteLength);
+    // Codex milestone review (Important): the probe ALREADY learned the
+    // file's byte length (from Content-Range here, Content-Length otherwise),
+    // and that is the number the 128 MiB threshold is written about. Summing
+    // the row groups' compressed sizes instead omits the footer, the page
+    // indexes and the magic bytes, which is enough to call a table over the
+    // threshold "static".
+    expect(size).toBe(bytes.byteLength);
   });
 
   it("is null when the server serves no ranges", async () => {
