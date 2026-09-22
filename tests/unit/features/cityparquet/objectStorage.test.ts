@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   globToRegExp,
   globLiteralPrefix,
+  listStorageEntries,
   listStorageObjects,
   storageObjectUrl,
   MAX_CITYPARQUET_FILES,
@@ -110,5 +111,54 @@ describe("listStorageObjects", () => {
   });
   it("caps the file budget at a documented constant", () => {
     expect(MAX_CITYPARQUET_FILES).toBe(64);
+  });
+});
+
+describe("listStorageEntries", () => {
+  it("pairs each GCS object with its size (sent as a string), and asks for it", async () => {
+    const urls: string[] = [];
+    const base = fakeHttp({
+      "storage/v1/b/bkt/o": {
+        items: [
+          { name: "t/1/building.parquet", size: "351272960" },
+          { name: "t/2/building.parquet" },
+          { name: "t/3/building.parquet", size: "nope" },
+        ],
+      },
+    });
+    const http: HttpClient = {
+      ...base,
+      fetchText: (url) => {
+        urls.push(url);
+        return base.fetchText(url);
+      },
+    };
+    const entries = await listStorageEntries(
+      { provider: "gcs", bucket: "bkt" },
+      "t/",
+      http,
+    );
+    expect(entries).toEqual([
+      { name: "t/1/building.parquet", size: 351272960 },
+      { name: "t/2/building.parquet", size: null },
+      { name: "t/3/building.parquet", size: null },
+    ]);
+    expect(decodeURIComponent(urls[0]!)).toContain("items/size");
+  });
+
+  it("pairs each S3 key with its <Size>", async () => {
+    const http = fakeHttp({
+      "list-type=2":
+        "<ListBucketResult><Contents><Key>t/1.parquet</Key><Size>610</Size></Contents><Contents><Key>t/2.parquet</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>",
+    });
+    const entries = await listStorageEntries(
+      { provider: "s3", bucket: "bkt" },
+      "t/",
+      http,
+    );
+    expect(entries).toEqual([
+      { name: "t/1.parquet", size: 610 },
+      { name: "t/2.parquet", size: null },
+    ]);
   });
 });

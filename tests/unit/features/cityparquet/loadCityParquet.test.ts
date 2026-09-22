@@ -13,11 +13,14 @@ import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  cityParquetFileTargets,
   cityParquetLayerNameFromUrl,
+  cityParquetTargets,
   loadCityParquetFromFiles,
   loadCityParquetFromUrl,
 } from "../../../../src/features/cityparquet/loadCityParquet";
 import { MAX_CITYPARQUET_FILES } from "../../../../src/features/cityparquet/objectStorage";
+import { classifyCityParquetUrl } from "../../../../src/features/cityparquet/sourceClassify";
 import type { HttpClient } from "../../../../src/platform/types";
 
 /**
@@ -686,5 +689,160 @@ describe("geographic CityParquet load integration", () => {
     } finally {
       assemble.mockRestore();
     }
+  });
+});
+
+/** A classified source, asserting the URL is one. */
+function sourceOf(url: string) {
+  const source = classifyCityParquetUrl(url);
+  if (source === null) throw new Error(`not a source: ${url}`);
+  return source;
+}
+
+describe("cityParquetTargets", () => {
+  it("a lone table resolves to itself, its size unknown, with no request", async () => {
+    const fetchText = vi.fn<HttpClient["fetchText"]>();
+    const http: HttpClient = { fetchText, fetchBytes: vi.fn() };
+    const targets = await cityParquetTargets(
+      sourceOf("https://x.test/yokohama-shi/building.parquet"),
+      http,
+    );
+    expect(targets.tables).toEqual([
+      {
+        url: "https://x.test/yokohama-shi/building.parquet",
+        name: "building.parquet",
+        size: null,
+      },
+    ]);
+    expect(fetchText).not.toHaveBeenCalled();
+  });
+
+  it("a package directory carries each table's manifest file:size", async () => {
+    const targets = await cityParquetTargets(
+      sourceOf("https://x.test/delft/"),
+      await packageHttp(),
+    );
+    expect(targets.tables).toEqual([
+      {
+        url: "https://x.test/delft/building.parquet",
+        name: "building.parquet",
+        size: 22930,
+      },
+    ]);
+  });
+
+  it("a bucket listing carries each object's listed size (storage-dir, storage-glob)", async () => {
+    const sizes: Record<string, string> = {
+      "tiles/a/building.parquet": "100",
+      "tiles/b/materials.parquet": "7",
+    };
+    const names = [
+      "tiles/a/building.parquet",
+      "tiles/b/building.parquet",
+      "tiles/b/materials.parquet",
+    ];
+    const http: HttpClient = {
+      async fetchText() {
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: JSON.stringify({
+            items: names.map((name) => ({ name, size: sizes[name] })),
+          }),
+        };
+      },
+      fetchBytes: vi.fn(),
+    };
+    const glob = await cityParquetTargets(
+      sourceOf("gs://bkt/tiles/*/building.parquet"),
+      http,
+    );
+    expect(glob.tables.map((t) => [t.name, t.size])).toEqual([
+      ["tiles/a/building.parquet", 100],
+      ["tiles/b/building.parquet", null],
+    ]);
+    // The sidecar is a sidecar, not a table to size.
+    expect(glob.sidecars.materials?.name).toBe("tiles/b/materials.parquet");
+  });
+
+  it("a listed manifest's sizes win, the listing fills the rest (storage-dir)", async () => {
+    const manifest = JSON.stringify({
+      type: "Feature",
+      assets: {
+        a: {
+          href: "./a/building.parquet",
+          roles: ["cityparquet-objects"],
+          "file:size": 500,
+        },
+        b: { href: "./b/building.parquet", roles: ["cityparquet-objects"] },
+      },
+    });
+    const http: HttpClient = {
+      async fetchText(url) {
+        if (url.includes("/storage/v1/b/")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: JSON.stringify({
+              items: [
+                { name: "pkg/metadata.json", size: "10" },
+                { name: "pkg/a/building.parquet", size: "1" },
+                { name: "pkg/b/building.parquet", size: "250" },
+              ],
+            }),
+          };
+        }
+        return { ok: true, status: 200, statusText: "OK", text: manifest };
+      },
+      fetchBytes: vi.fn(),
+    };
+    const targets = await cityParquetTargets(sourceOf("gs://bkt/pkg/"), http);
+    expect(targets.tables.map((t) => [t.name, t.size])).toEqual([
+      ["a/building.parquet", 500],
+      ["b/building.parquet", 250],
+    ]);
+  });
+});
+
+describe("cityParquetFileTargets", () => {
+  it("picks the object tables of a picked folder, by its manifest, sidecars apart", async () => {
+    const meta = JSON.stringify({
+      type: "Feature",
+      assets: {
+        a: { href: "./a/building.parquet", roles: ["cityparquet-objects"] },
+        b: { href: "./b/building.parquet", roles: ["cityparquet-objects"] },
+        t: { href: "./textures.parquet", roles: ["cityparquet-sidecar"] },
+      },
+    });
+    const a = pickedFile("A", "pkg/a/building.parquet");
+    const b = pickedFile("B", "pkg/b/building.parquet");
+    const stray = pickedFile("S", "pkg/stray.parquet");
+    const textures = pickedFile("T", "pkg/textures.parquet");
+    const targets = await cityParquetFileTargets([
+      a,
+      b,
+      stray,
+      textures,
+      pickedFile(meta, "pkg/metadata.json"),
+    ]);
+    expect(targets.tables).toEqual([
+      { name: "a/building.parquet", file: a },
+      { name: "b/building.parquet", file: b },
+    ]);
+    expect(targets.sidecars).toEqual({ textures });
+  });
+
+  it("without a manifest takes every .parquet minus the sidecars", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const building = new File(["x"], "building.parquet");
+    const materials = new File(["m"], "materials.parquet");
+    const targets = await cityParquetFileTargets([building, materials]);
+    expect(targets.tables).toEqual([
+      { name: "building.parquet", file: building },
+    ]);
+    expect(targets.sidecars).toEqual({ materials });
+    warn.mockRestore();
   });
 });

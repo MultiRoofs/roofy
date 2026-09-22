@@ -90,7 +90,7 @@ import {
   modelTableSource,
   urlSourceProvider,
 } from "../features/layers/addCityLayer";
-import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet";
+import { addCityParquetLayerFromUrl } from "../features/cityparquet/addCityParquetLayer";
 import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
 import { useEscapeClearsSelection } from "../features/selection/useEscapeClearsSelection";
@@ -618,6 +618,27 @@ export function App({
     }, [awaitSceneHandle]);
 
   /**
+   * Run an open with the 3D engine held up: the boot hold itself, for a
+   * source that is KNOWN to stream. {@link withEngineBooting} takes it for a
+   * `.fcb`; a CityParquet source only learns it streams once it has been
+   * sized, so the loader takes it at that point (`holdEngine` in
+   * `addCityParquetLayer.ts`).
+   */
+  const holdEngine = useCallback(
+    async <T,>(open: () => Promise<T>): Promise<T> => {
+      bootHoldsRef.current += 1;
+      setEngineBooting(true);
+      try {
+        return await open();
+      } finally {
+        bootHoldsRef.current -= 1;
+        if (bootHoldsRef.current === 0) setEngineBooting(false);
+      }
+    },
+    [],
+  );
+
+  /**
    * Run a layer open with the 3D engine mounted, when the source needs it.
    *
    * `.fcb` only: streaming is the one format whose layer cannot exist before
@@ -643,16 +664,9 @@ export function App({
       if ((encoding ?? detectEncoding(source)) !== "flatcitybuf") {
         return await open();
       }
-      bootHoldsRef.current += 1;
-      setEngineBooting(true);
-      try {
-        return await open();
-      } finally {
-        bootHoldsRef.current -= 1;
-        if (bootHoldsRef.current === 0) setEngineBooting(false);
-      }
+      return await holdEngine(open);
     },
-    [],
+    [holdEngine],
   );
 
   // File loading
@@ -667,7 +681,7 @@ export function App({
     pending,
     failed,
     dismissFailed,
-  } = useLayerFileLoader({ resolveStreamPlugin });
+  } = useLayerFileLoader({ resolveStreamPlugin, holdEngine });
 
   /*
    * A failed load has ONE surface, and since 12.2 it is a ROW.
@@ -1255,24 +1269,24 @@ export function App({
               // `isCityParquetUrl`, not `detectEncoding`, because a saved
               // `gs://` bucket or package directory has no extension. Any
               // throw (including the unlistable-wildcard explanation) is
-              // caught by this loop's per-layer `catch` and counted.
-              const parsed = await loadCityParquetFromUrl(modelRef.url);
-              await ensureModelCrsLoadable(parsed);
-              layerId = addCityLayer({
-                name,
-                model: parsed,
-                modelRef,
-                visible,
-                rules,
-                colorBy,
-                singleColor,
-                unmatchedColor,
-                hiddenTypes,
-                attributeOrders,
-                tablePresentation,
-                selectedAppearance: appearance,
-                duckdb: { kind: "model", model: parsed },
-              });
+              // caught by this loop's per-layer `catch` and counted. The
+              // static/stream decision re-runs: a large source streams.
+              layerId = await addCityParquetLayerFromUrl(
+                modelRef.url,
+                {
+                  name,
+                  visible,
+                  rules,
+                  colorBy,
+                  singleColor,
+                  unmatchedColor,
+                  hiddenTypes,
+                  attributeOrders,
+                  tablePresentation,
+                  selectedAppearance: appearance,
+                },
+                { resolveStreamPlugin, holdEngine },
+              );
             } else {
               const parsed = await loadFromUrl(modelRef.url);
               await ensureModelCrsLoadable(parsed.model);
@@ -1415,6 +1429,7 @@ export function App({
       persistenceStore,
       clearError,
       resolveStreamPlugin,
+      holdEngine,
       withEngineBooting,
       applyCameraWhenReady,
       showToast,
@@ -1556,23 +1571,23 @@ export function App({
           } else if (isCityParquetUrl(sl.modelUrl)) {
             // Same arm as the snapshot restore above and the loader hook: a
             // shared CityParquet link would otherwise hand parquet bytes to
-            // `JSON.parse`. Failures are counted by this loop's `catch`.
-            const parsed = await loadCityParquetFromUrl(sl.modelUrl);
-            await ensureModelCrsLoadable(parsed);
-            addCityLayer({
-              name,
-              model: parsed,
-              modelRef: { type: "url", url: sl.modelUrl },
-              selectedLods: sl.selectedLods,
-              visible,
-              attributeOrders: sl.attributeOrders,
-              tablePresentation: sl.tablePresentation,
-              rules,
-              colorBy,
-              singleColor,
-              unmatchedColor,
-              duckdb: { kind: "model", model: parsed },
-            });
+            // `JSON.parse`. Failures are counted by this loop's `catch`. A
+            // large source streams, decided afresh for this link.
+            await addCityParquetLayerFromUrl(
+              sl.modelUrl,
+              {
+                name,
+                selectedLods: sl.selectedLods,
+                visible,
+                attributeOrders: sl.attributeOrders,
+                tablePresentation: sl.tablePresentation,
+                rules,
+                colorBy,
+                singleColor,
+                unmatchedColor,
+              },
+              { resolveStreamPlugin, holdEngine },
+            );
           } else {
             const parsed = await loadFromUrl(sl.modelUrl);
             await ensureModelCrsLoadable(parsed.model);

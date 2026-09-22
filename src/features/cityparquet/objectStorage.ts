@@ -135,9 +135,31 @@ async function fetchListing(
   return response.text;
 }
 
+/** One listed object: its full name and its byte size, when the listing
+ *  said (a missing or unparsable size is `null`, never a guess). */
+export interface StorageEntry {
+  readonly name: string;
+  readonly size: number | null;
+}
+
+/** A listing's size field as a byte count, or `null`. */
+function sizeOf(raw: unknown): number | null {
+  const n =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && raw.trim() !== ""
+        ? Number(raw)
+        : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 /** One page of the GCS JSON listing API, typed as loosely as it arrives. */
 interface GcsListPage {
-  readonly items?: readonly { readonly name?: unknown }[];
+  readonly items?: readonly {
+    readonly name?: unknown;
+    /** A decimal STRING in the JSON API (it is a uint64). */
+    readonly size?: unknown;
+  }[];
   readonly nextPageToken?: unknown;
 }
 
@@ -146,13 +168,13 @@ async function listGcsObjects(
   store: StorageRef,
   prefix: string,
   http: HttpClient,
-): Promise<string[]> {
+): Promise<StorageEntry[]> {
   const base =
     `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(store.bucket)}/o` +
     `?prefix=${encodeURIComponent(prefix)}&maxResults=${PAGE_SIZE}` +
-    `&fields=${encodeURIComponent("items/name,nextPageToken")}`;
+    `&fields=${encodeURIComponent("items/name,items/size,nextPageToken")}`;
 
-  const names: string[] = [];
+  const entries: StorageEntry[] = [];
   let pageToken = "";
   for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
     const url = pageToken
@@ -168,7 +190,9 @@ async function listGcsObjects(
       );
     }
     for (const item of parsed.items ?? []) {
-      if (typeof item?.name === "string") names.push(item.name);
+      if (typeof item?.name === "string") {
+        entries.push({ name: item.name, size: sizeOf(item.size) });
+      }
     }
     const next =
       typeof parsed.nextPageToken === "string" ? parsed.nextPageToken : "";
@@ -176,7 +200,7 @@ async function listGcsObjects(
     if (next === "" || next === pageToken) break;
     pageToken = next;
   }
-  return names;
+  return entries;
 }
 
 /** Decode the five XML entities S3 uses to escape a key. */
@@ -200,27 +224,33 @@ async function listS3Objects(
   store: StorageRef,
   prefix: string,
   http: HttpClient,
-): Promise<string[]> {
+): Promise<StorageEntry[]> {
   const base =
     `https://${store.bucket}.s3.amazonaws.com/?list-type=2` +
     `&prefix=${encodeURIComponent(prefix)}&max-keys=${PAGE_SIZE}`;
 
-  const names: string[] = [];
+  const entries: StorageEntry[] = [];
   let token = "";
   for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
     const url = token
       ? `${base}&continuation-token=${encodeURIComponent(token)}`
       : base;
     const xml = await fetchListing(url, store, http);
-    for (const match of xml.matchAll(/<Key>([^<]*)<\/Key>/g)) {
-      names.push(unescapeXml(match[1] ?? ""));
+    // Per <Contents> block, so each <Key> pairs with ITS <Size>.
+    for (const match of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+      const block = match[1] ?? "";
+      if (!/<Key>/.test(block)) continue;
+      entries.push({
+        name: xmlTagText(block, "Key"),
+        size: sizeOf(xmlTagText(block, "Size")),
+      });
     }
     const truncated = xmlTagText(xml, "IsTruncated") === "true";
     const next = xmlTagText(xml, "NextContinuationToken");
     if (!truncated || next === "" || next === token) break;
     token = next;
   }
-  return names;
+  return entries;
 }
 
 /**
@@ -234,6 +264,16 @@ export async function listStorageObjects(
   prefix: string,
   http: HttpClient,
 ): Promise<string[]> {
+  return (await listStorageEntries(store, prefix, http)).map((e) => e.name);
+}
+
+/** {@link listStorageObjects}, with each object's size as the listing gave
+ *  it — what the CityParquet loader sizes a bucket source by. */
+export async function listStorageEntries(
+  store: StorageRef,
+  prefix: string,
+  http: HttpClient,
+): Promise<StorageEntry[]> {
   return store.provider === "gcs"
     ? listGcsObjects(store, prefix, http)
     : listS3Objects(store, prefix, http);

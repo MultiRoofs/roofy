@@ -204,6 +204,59 @@ describe("openStreamingLayer", () => {
     expect("url" in source).toBe(false);
   });
 
+  it("opens a flatcitybuf stream by default, with a flatcitybuf stub model", async () => {
+    const plugin = fakePlugin();
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+    });
+    expect(plugin.openStream.mock.calls[0]![0].format).toBe("flatcitybuf");
+    const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
+    expect(layer!.model.sourceEncoding).toBe("flatcitybuf");
+  });
+
+  it("opens a CityParquet url list in the cityparquet worker, with a cityparquet stub model", async () => {
+    const plugin = fakePlugin();
+    const urls = [
+      "https://x/yokohama-shi/a/building.parquet",
+      "https://x/yokohama-shi/b/building.parquet",
+    ];
+    const layerId = await openStreamingLayer({
+      plugin,
+      format: "cityparquet",
+      source: { urls },
+      name: "yokohama-shi",
+      modelRef: { type: "url", url: "https://x/yokohama-shi/" },
+    });
+    const opts = plugin.openStream.mock.calls[0]![0];
+    expect(opts.format).toBe("cityparquet");
+    expect(opts.source).toEqual({ urls });
+    const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
+    expect(layer!.model.sourceEncoding).toBe("cityparquet");
+    expect(layer!.model.metadata.referenceSystem).toBe(HEADER.referenceSystem);
+    expect(layer!.model.bbox).toEqual(HEADER.extent);
+    expect(layer!.modelRef).toEqual({
+      type: "url",
+      url: "https://x/yokohama-shi/",
+    });
+  });
+
+  it("passes a picked folder's blobs straight through", async () => {
+    const plugin = fakePlugin();
+    const blobs = [new Blob(["a"]), new Blob(["b"])];
+    await openStreamingLayer({
+      plugin,
+      format: "cityparquet",
+      source: { blobs },
+      name: "pkg",
+      modelRef: { type: "file", fileName: "pkg" },
+    });
+    const source = plugin.openStream.mock.calls[0]![0].source;
+    expect("blobs" in source && source.blobs[0]).toBe(blobs[0]);
+  });
+
   it("rejects and registers nothing when the plugin refuses the file (admission, CRS, missing extent)", async () => {
     const plugin = fakePlugin();
     plugin.openStream.mockRejectedValueOnce(

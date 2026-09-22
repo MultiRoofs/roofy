@@ -100,6 +100,28 @@ vi.mock(
   }),
 );
 
+/**
+ * The static-or-stream DECISION is faked (its own suite is
+ * `streamDecision.test.ts`): static by default, so every CityParquet test
+ * below keeps today's whole-file path and nothing probes a real server; the
+ * streaming tests flip it.
+ */
+const decision = vi.hoisted(() => ({
+  decideCityParquetMode: vi.fn<(input: unknown) => Promise<unknown>>(
+    async () => ({ mode: "static" }),
+  ),
+}));
+
+vi.mock(
+  "../../../../src/features/cityparquet/streamDecision",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../src/features/cityparquet/streamDecision")
+    >()),
+    decideCityParquetMode: decision.decideCityParquetMode,
+  }),
+);
+
 const PARQUET_MODEL: CityModel = {
   sourceEncoding: "cityparquet",
   metadata: { referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/28992" },
@@ -155,6 +177,8 @@ function installPlugin(): void {
 beforeEach(() => {
   installPlugin();
   tables.enqueueLayerTable.mockClear();
+  decision.decideCityParquetMode.mockReset();
+  decision.decideCityParquetMode.mockResolvedValue({ mode: "static" });
   useLayerStore.getState().removeAllLayers();
   useStreamStore.setState({ streams: {} });
 });
@@ -551,6 +575,138 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     });
 
     expect(cityparquet.loadCityParquetFromUrl).not.toHaveBeenCalled();
+  });
+});
+
+describe("useLayerFileLoader — streaming large CityParquet sources", () => {
+  const MB = 1024 * 1024;
+
+  beforeEach(() => {
+    cityparquet.loadCityParquetFromUrl.mockReset();
+    cityparquet.loadCityParquetFromFiles.mockReset();
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
+    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_MODEL);
+  });
+
+  it("streams a package the decision sizes over the threshold, never reading it whole", async () => {
+    const urls = [
+      "https://x/yokohama-shi/a/building.parquet",
+      "https://x/yokohama-shi/b/building.parquet",
+    ];
+    decision.decideCityParquetMode.mockResolvedValue({
+      mode: "stream",
+      source: { urls },
+      totalBytes: 610 * MB,
+    });
+    let holds = 0;
+    const holdEngine = <T>(open: () => Promise<T>): Promise<T> => {
+      holds += 1;
+      return open();
+    };
+    const { result } = renderHook(() => useLayerFileLoader({ holdEngine }));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/yokohama-shi/", {
+        attributeOrders: { Building: ["height"] },
+      });
+    });
+
+    expect(decision.decideCityParquetMode).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "url", url: "https://x/yokohama-shi/" }),
+    );
+    expect(cityparquet.loadCityParquetFromUrl).not.toHaveBeenCalled();
+    expect(openStream).toHaveBeenCalledTimes(1);
+    const opts = openStream.mock.calls[0]![0] as {
+      format?: string;
+      source: unknown;
+    };
+    expect(opts.format).toBe("cityparquet");
+    expect(opts.source).toEqual({ urls });
+    // The open ran under an engine hold: from the landing page there is no
+    // viewport yet, and a stream cannot exist without one.
+    expect(holds).toBe(1);
+
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.isStreaming).toBe(true);
+    expect(layer.name).toBe("yokohama-shi");
+    expect(layer.model.sourceEncoding).toBe("cityparquet");
+    // The modelRef is the URL the user gave, so save/share/restore re-run
+    // the decision rather than pinning today's tables.
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url: "https://x/yokohama-shi/",
+    });
+    expect(layer.attributeOrders).toEqual({ Building: ["height"] });
+    expect(result.current.error).toBeNull();
+  });
+
+  it("keeps a source the decision calls static on today's whole-file path", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft/building.parquet");
+    });
+    expect(decision.decideCityParquetMode).toHaveBeenCalledTimes(1);
+    expect(cityparquet.loadCityParquetFromUrl).toHaveBeenCalledWith(
+      "https://x/delft/building.parquet",
+    );
+    expect(openStream).not.toHaveBeenCalled();
+  });
+
+  it("streams a large dropped .parquet as a Blob", async () => {
+    const file = new File(["PAR1"], "yokohama.parquet");
+    decision.decideCityParquetMode.mockResolvedValue({
+      mode: "stream",
+      source: { blob: file },
+      totalBytes: 335 * MB,
+    });
+    const { result } = renderHook(() => useLayerFileLoader());
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+    expect(decision.decideCityParquetMode).toHaveBeenCalledWith({
+      kind: "files",
+      files: [file],
+    });
+    expect(cityparquet.loadCityParquetFromFiles).not.toHaveBeenCalled();
+    const opts = openStream.mock.calls[0]![0] as {
+      format?: string;
+      source: { blob?: Blob };
+    };
+    expect(opts.format).toBe("cityparquet");
+    expect(opts.source.blob).toBe(file);
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.modelRef).toEqual({
+      type: "file",
+      fileName: "yokohama.parquet",
+    });
+  });
+
+  it("streams a large picked folder as its object tables' blobs, named after the folder", async () => {
+    const files = [
+      pickedFile("yokohama-shi/a/building.parquet"),
+      pickedFile("yokohama-shi/b/building.parquet"),
+    ];
+    decision.decideCityParquetMode.mockResolvedValue({
+      mode: "stream",
+      source: { blobs: files },
+      totalBytes: 200 * MB,
+    });
+    const { result } = renderHook(() => useLayerFileLoader());
+    await act(async () => {
+      await result.current.addLayerFromFiles(files, { visible: false });
+    });
+    expect(cityparquet.loadCityParquetFromFiles).not.toHaveBeenCalled();
+    const opts = openStream.mock.calls[0]![0] as {
+      format?: string;
+      source: { blobs?: Blob[] };
+      visible?: boolean;
+    };
+    expect(opts.format).toBe("cityparquet");
+    expect(opts.source.blobs).toEqual(files);
+    expect(opts.visible).toBe(false);
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.name).toBe("yokohama-shi");
+    expect(layer.modelRef).toEqual({ type: "file", fileName: "yokohama-shi" });
   });
 });
 

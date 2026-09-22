@@ -1,7 +1,8 @@
 import { type TablePresentation } from "../query/tablePresentation";
 import { type AttributeOrders } from "../attributes/attributeOrder";
 /**
- * Opens a `.fcb` source (URL or local `File`/`Blob`) for viewport streaming
+ * Opens a `.fcb` source (URL or local `File`/`Blob`) — or a large CityParquet
+ * source, in its own worker (`format: "cityparquet"`) — for viewport streaming
  * and registers it with the two stores the UI reads.
  *
  * Everything that used to happen here — spinning up a `WorkerClient`, the
@@ -32,6 +33,7 @@ import { type AttributeOrders } from "../attributes/attributeOrder";
  * module and its callers do) satisfies that without any extra step.
  */
 import type { AppearanceTheme } from "@cityjson/navara-core";
+import type { StreamSource, WorkerFormat } from "@cityjson/navara-flatcitybuf";
 import { useStreamStore } from "./streamStore";
 import type { StreamPlugin } from "./streamPlugin";
 import { useLayerStore } from "../layers/layerStore";
@@ -50,7 +52,12 @@ export interface OpenStreamingLayerInput {
    *  `streamPlugin.ts` so this stays a pure function a test can drive with a
    *  fake. Call sites resolve it with `requireStreamPlugin()`. */
   readonly plugin: StreamPlugin;
-  readonly source: { readonly url: string } | { readonly blob: Blob };
+  /** One file (`url`/`blob`) or a CityParquet package's object tables
+   *  (`urls`/`blobs`). */
+  readonly source: StreamSource;
+  /** Which worker reads the source. Default `"flatcitybuf"`; a large
+   *  CityParquet source streams with `"cityparquet"` (`streamDecision.ts`). */
+  readonly format?: WorkerFormat;
   readonly name: string;
   readonly modelRef: CityModelReference;
   readonly rules?: ReadonlyArray<Rule>;
@@ -91,9 +98,11 @@ export async function openStreamingLayer(
   // draw from, so a seed built from a different answer would be an
   // equal-but-distinct array the first `syncStreamState` reads as a change.
   const styling = { rules, ...colorBy };
+  const format = input.format ?? "flatcitybuf";
   const handle = await input.plugin.openStream({
     id,
     source: input.source,
+    format,
     // The EFFECTIVE list, so the very first cell is baked exactly like every
     // cell that arrives after it — a rule with zero conditions colours a
     // streamed roof, which is the whole premise of "Color by".
@@ -107,7 +116,7 @@ export async function openStreamingLayer(
   });
 
   const model: CityModel = {
-    sourceEncoding: "flatcitybuf",
+    sourceEncoding: format === "cityparquet" ? "cityparquet" : "flatcitybuf",
     metadata: { referenceSystem: handle.header.referenceSystem },
     bbox: handle.header.extent ?? null,
     objects: {},

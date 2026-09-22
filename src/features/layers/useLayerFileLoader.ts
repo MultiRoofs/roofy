@@ -18,11 +18,12 @@ import {
   decodeModelBytes,
   isGzipBytes,
 } from "../../domain/citymodel/loadCityModel";
+import { cityParquetLayerNameFromUrl } from "../cityparquet/loadCityParquet";
 import {
-  cityParquetLayerNameFromUrl,
-  loadCityParquetFromFiles,
-  loadCityParquetFromUrl,
-} from "../cityparquet/loadCityParquet";
+  addCityParquetLayerFromFiles,
+  addCityParquetLayerFromUrl,
+  type CityParquetLayerDeps,
+} from "../cityparquet/addCityParquetLayer";
 import {
   isZipBytes,
   parseCityGmlArchive,
@@ -218,6 +219,13 @@ export interface LayerFileLoaderOptions {
    * viewport to ask — the error state below surfaces either one identically.
    */
   readonly resolveStreamPlugin?: () => Promise<StreamPlugin>;
+  /**
+   * Hold the 3D engine up around an open that turned out to stream — a large
+   * CityParquet source, whose format alone does not say it needs the engine
+   * (App's boot hold; see `CityParquetLayerDeps.holdEngine`). Absent: the
+   * open runs as is.
+   */
+  readonly holdEngine?: CityParquetLayerDeps["holdEngine"];
 }
 
 const defaultResolveStreamPlugin = async (): Promise<StreamPlugin> =>
@@ -316,6 +324,13 @@ export function useLayerFileLoader(
   );
   resolveStreamPlugin.current =
     options.resolveStreamPlugin ?? defaultResolveStreamPlugin;
+  const holdEngine = useRef(options.holdEngine);
+  holdEngine.current = options.holdEngine;
+  /** Read at call time, through the refs, for the same identity reason. */
+  const cityParquetDeps = (): CityParquetLayerDeps => ({
+    resolveStreamPlugin: () => resolveStreamPlugin.current(),
+    holdEngine: holdEngine.current,
+  });
 
   const addLayerFromFile = useCallback(
     (file: File, overrides?: LayerOverrides): Promise<string | null> =>
@@ -352,26 +367,24 @@ export function useLayerFileLoader(
             });
           } else if (encoding === "cityparquet") {
             // A lone `.parquet` drop is a one-table package — the same loader as
-            // a picked folder, given a selection of one.
-            const model = await loadCityParquetFromFiles([file]);
-            await ensureModelCrsLoadable(model);
-            layerId = addCityLayer({
-              name: file.name,
-              model,
-              modelRef: { type: "file", fileName: file.name },
-              visible: overrides?.visible,
-              rules: overrides?.rules,
-              colorBy: overrides?.colorBy,
-              singleColor: overrides?.singleColor,
-              unmatchedColor: overrides?.unmatchedColor,
-              hiddenTypes: overrides?.hiddenTypes,
-              attributeOrders: overrides?.attributeOrders,
-              tablePresentation: overrides?.tablePresentation,
-              selectedAppearance: overrides?.selectedAppearance,
-              // The parser produces the model and nothing else — a CityParquet
-              // table is not something a cityjson reader can read.
-              duckdb: { kind: "model", model },
-            });
+            // a picked folder, given a selection of one (streamed when large).
+            layerId = await addCityParquetLayerFromFiles(
+              [file],
+              file.name,
+              {
+                name: file.name,
+                visible: overrides?.visible,
+                rules: overrides?.rules,
+                colorBy: overrides?.colorBy,
+                singleColor: overrides?.singleColor,
+                unmatchedColor: overrides?.unmatchedColor,
+                hiddenTypes: overrides?.hiddenTypes,
+                attributeOrders: overrides?.attributeOrders,
+                tablePresentation: overrides?.tablePresentation,
+                selectedAppearance: overrides?.selectedAppearance,
+              },
+              cityParquetDeps(),
+            );
           } else {
             // Bytes, not `file.text()`: a dropped `.city.json.gz` — the form 3D
             // BAG ships in, and therefore the form a user saves off the catalog
@@ -445,25 +458,25 @@ export function useLayerFileLoader(
         },
         async () => {
           const name = packageNameFromFiles(files);
-          const model = await loadCityParquetFromFiles(files);
-          await ensureModelCrsLoadable(model);
-          const layerId = addCityLayer({
+          // The FOLDER is the source, so that is what a snapshot records as
+          // needing re-selection — no single file could re-link this layer.
+          const layerId = await addCityParquetLayerFromFiles(
+            files,
             name,
-            model,
-            // The FOLDER is the source, so that is what a snapshot records as
-            // needing re-selection — no single file could re-link this layer.
-            modelRef: { type: "file", fileName: name },
-            visible: overrides?.visible,
-            rules: overrides?.rules,
-            colorBy: overrides?.colorBy,
-            singleColor: overrides?.singleColor,
-            unmatchedColor: overrides?.unmatchedColor,
-            hiddenTypes: overrides?.hiddenTypes,
-            attributeOrders: overrides?.attributeOrders,
-            tablePresentation: overrides?.tablePresentation,
-            selectedAppearance: overrides?.selectedAppearance,
-            duckdb: { kind: "model", model },
-          });
+            {
+              name,
+              visible: overrides?.visible,
+              rules: overrides?.rules,
+              colorBy: overrides?.colorBy,
+              singleColor: overrides?.singleColor,
+              unmatchedColor: overrides?.unmatchedColor,
+              hiddenTypes: overrides?.hiddenTypes,
+              attributeOrders: overrides?.attributeOrders,
+              tablePresentation: overrides?.tablePresentation,
+              selectedAppearance: overrides?.selectedAppearance,
+            },
+            cityParquetDeps(),
+          );
           applyPostCreateOverrides(layerId, overrides);
           return layerId;
         },
@@ -507,16 +520,17 @@ export function useLayerFileLoader(
               ? overrides.encoding === "cityparquet"
               : isCityParquetUrl(url);
           if (isParquet) {
-            const model = await loadCityParquetFromUrl(url);
-            await ensureModelCrsLoadable(model);
-            return addCityLayer({
-              name: cityParquetLayerNameFromUrl(url),
-              model,
-              modelRef: { type: "url", url },
-              attributeOrders: overrides?.attributeOrders,
-              tablePresentation: overrides?.tablePresentation,
-              duckdb: { kind: "model", model },
-            });
+            // Read whole, or streamed when the source is large — decided
+            // there, and again on every restore of this `modelRef`.
+            return await addCityParquetLayerFromUrl(
+              url,
+              {
+                name: cityParquetLayerNameFromUrl(url),
+                attributeOrders: overrides?.attributeOrders,
+                tablePresentation: overrides?.tablePresentation,
+              },
+              cityParquetDeps(),
+            );
           }
 
           const parsed = await loadFromUrl(url, undefined, encoding);
