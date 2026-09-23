@@ -2,9 +2,16 @@ import type { StreamStatus } from "../features/streaming/streamStore";
 
 interface StatusBarProps {
   readonly objectCount: number;
-  /** The objects the layers' datasets hold in total, or `null` when unknown
-   *  (any FlatCityBuf stream). Differs from `objectCount` only while a
-   *  stream holds part of its dataset. */
+  /**
+   * The objects the layers' OPENED data holds in total, or `null` when unknown
+   * (any FlatCityBuf stream). Differs from `objectCount` only while a stream
+   * holds part of its dataset.
+   *
+   * For a CityParquet package that is the opened FAMILIES' rows, not the whole
+   * package (`useTotalObjectCount`): a viewer showing Building alone must not be
+   * measured against five families nobody asked for — it could never reach that
+   * total, and the bar would read as a stream stuck at 1%.
+   */
   readonly totalObjectCount?: number | null;
   readonly fps?: number;
   readonly cursorPosition?: readonly [number, number, number] | null;
@@ -26,7 +33,13 @@ export function StatusBar({
       <div className="statusbar__left">
         <span>Navara</span>
         {fps !== undefined && <span>· {fps} FPS</span>}
-        <span>
+        <span
+          title={
+            totalObjectCount !== null && totalObjectCount !== objectCount
+              ? "Objects near the camera, against the objects the opened data holds"
+              : undefined
+          }
+        >
           ·{" "}
           {totalObjectCount !== null && totalObjectCount !== objectCount
             ? `${formatCount(objectCount)} of ${formatCount(totalObjectCount)}`

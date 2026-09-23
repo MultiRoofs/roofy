@@ -4,17 +4,34 @@
  * says how many objects its dataset holds (CityParquet does, FlatCityBuf
  * does not).
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
+
+// Publishing a layer's families ensures the active one's view; there is no
+// DuckDB here and the file's CRS is a ranged read, so both are faked.
+vi.mock("../../../../src/insights/familyViews", () => ({
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyView: vi.fn(async () => {}),
+  dropFamilyViews: vi.fn(async () => {}),
+}));
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
 import { useTotalObjectCount } from "../../../../src/features/streaming/useTotalObjectCount";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
+import {
+  buildLayerFamilies,
+  resetFamilyStoreForTest,
+  useFamilyStore,
+} from "../../../../src/features/layers/familyStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 
 afterEach(() => {
   cleanup();
   useLayerStore.setState({ layers: [] });
   useStreamStore.setState({ streams: {} });
+  resetFamilyStoreForTest();
 });
 
 function layer(id: string, objectIds: string[], isStreaming: boolean): Layer {
@@ -88,6 +105,60 @@ describe("useTotalObjectCount", () => {
     });
     const { result } = renderHook(() => useTotalObjectCount());
     expect(result.current).toEqual({ loaded: 15, total: null });
+  });
+
+  it("counts the OPENED families' objects for a package, not the whole package", () => {
+    // Ruling R-D opens Building alone, so "N of M" must be N of the BUILDINGS —
+    // measuring the loaded objects against a total that includes four families
+    // nobody opened reads as a stream that has barely started.
+    useLayerStore.setState({ layers: [layer("P", [], true)] });
+    useStreamStore.setState({ streams: { P: stream(12301, 884106) } });
+    const families = buildLayerFamilies([
+      {
+        key: "building",
+        href: "building.parquet",
+        size: null,
+        source: { url: "https://x/building.parquet" },
+      },
+      {
+        key: "bridge",
+        href: "bridge.parquet",
+        size: null,
+        source: { url: "https://x/bridge.parquet" },
+      },
+    ]).map((family) => ({
+      ...family,
+      rowCount: family.key === "building" ? 884106 : 4200,
+    }));
+    useFamilyStore.getState().setFamilies("P", families);
+    const { result } = renderHook(() => useTotalObjectCount());
+    expect(result.current).toEqual({ loaded: 12301, total: 884106 });
+
+    // Open the bridge family too, and the total grows by its rows.
+    useFamilyStore.setState((s) => ({
+      layers: {
+        ...s.layers,
+        P: { ...s.layers.P!, opened: ["building", "bridge"] },
+      },
+    }));
+    const second = renderHook(() => useTotalObjectCount());
+    expect(second.result.current.total).toBe(884106 + 4200);
+  });
+
+  it("falls back to the header when a family's size is not known yet", () => {
+    useLayerStore.setState({ layers: [layer("P", [], true)] });
+    useStreamStore.setState({ streams: { P: stream(10, 1000) } });
+    const families = buildLayerFamilies([
+      {
+        key: "building",
+        href: "building.parquet",
+        size: null,
+        source: { url: "https://x/building.parquet" },
+      },
+    ]);
+    useFamilyStore.getState().setFamilies("P", families);
+    const { result } = renderHook(() => useTotalObjectCount());
+    expect(result.current).toEqual({ loaded: 10, total: 1000 });
   });
 
   it("a stream whose layer has left the layer store does not count toward the total", () => {

@@ -37,6 +37,7 @@ import { AppearanceSelector } from "../sidebar/AppearanceSelector";
 import { LodSelector } from "../sidebar/LodSelector";
 import { formatCount } from "../table/tableText";
 import { KIND_LABEL, sourceOf } from "./geoLayerMeta";
+import { useOpenedFamilyRows } from "../../features/layers/familyStore";
 import { LayerFamilies } from "./LayerFamilies";
 import { LayerTypeToggles } from "./LayerTypeToggles";
 import { CityObjectIcon } from "./CityObjectIcon";
@@ -61,6 +62,12 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   const streamThemes = useStreamStore(
     (s) => s.streams[layerId]?.appearanceThemes,
   );
+  // The OPENED families' rows are the honest denominator for a package (the same
+  // rule the status bar uses), and their presence is also what tells a
+  // file-backed family table from a FlatCityBuf layer's resident one. Subscribed
+  // UNCONDITIONALLY, like every other selector here: the geo branch below returns
+  // early, and a hook after it would change this component's hook order.
+  const openedRows = useOpenedFamilyRows(layerId);
   const setCameraSync = useLayerStore((s) => s.setCameraSync);
   const [metadataOpen, setMetadataOpen] = useState(false);
   // The SYNC/FROZEN badge is labelled by the caption beside it rather than
@@ -89,6 +96,8 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   const resident = streaming
     ? getResidentModel(layerId, streamVersion ?? 0)
     : null;
+  const hasFamilies = openedRows !== null;
+  const total = openedRows ?? streamObjectsCount ?? null;
 
   return (
     <>
@@ -128,10 +137,16 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
             )}. Includes a margin around the viewport and cells not yet evicted.`}
           >
             {`Showing the objects in view — ${formatCount(resident.featureCount)}${
-              streamObjectsCount !== undefined
-                ? ` of ${formatCount(streamObjectsCount)}`
-                : ""
-            } loaded. The table and statistics cover loaded objects only.`}
+              total !== null ? ` of ${formatCount(total)}` : ""
+            } loaded. ${
+              // A FAMILY's table is a view over the FILE (ruling R-B′), so it
+              // answers for rows the camera never delivered: what is partial is
+              // the SCENE, not the table. A FlatCityBuf layer's table really is
+              // built from the resident set, and keeps the older sentence.
+              hasFamilies
+                ? "The table and statistics cover the whole family, whatever is on screen."
+                : "The table and statistics cover loaded objects only."
+            }`}
           </p>
         )}
         {streaming ? (

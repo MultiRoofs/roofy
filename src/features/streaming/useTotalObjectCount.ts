@@ -13,8 +13,17 @@
  * the file may hold a million features, and the viewer has fetched the ones
  * near the camera — and `total` is the dataset's size where the stream's
  * header states it, so the status bar can say "12.3K of 884.1K".
+ *
+ * THE TOTAL IS THE OPENED FAMILIES'. A CityParquet package is a set of object
+ * families and only the enabled ones are streaming (ruling R-D opens Building
+ * alone), so measuring the loaded objects against the whole package would read
+ * as a stream that has barely started — and would never reach its own total. The
+ * opened families' own row counts are the honest denominator, and the stream
+ * header is the fallback for a layer whose families have not reported theirs yet
+ * (and for every layer that has no families at all).
  */
 import { useLayerStore } from "../layers/layerStore";
+import { openedFamilyRows, useFamilyStore } from "../layers/familyStore";
 import { useStreamStore } from "./streamStore";
 import { getResidentModel } from "./residentModel";
 
@@ -40,6 +49,7 @@ export interface TotalObjectCount {
  */
 export function useTotalObjectCount(): TotalObjectCount {
   const layers = useLayerStore((s) => s.layers);
+  const families = useFamilyStore((s) => s.layers);
   const versionSum = useStreamStore((s) => {
     let sum = 0;
     for (const entry of Object.values(s.streams)) sum += entry.version;
@@ -56,7 +66,12 @@ export function useTotalObjectCount(): TotalObjectCount {
     let sum = 0;
     for (const layer of layers) {
       if (!layer.isStreaming) continue;
-      const count = s.streams[layer.id]?.header.objectsCount;
+      // The OPENED families first: the header of a package opened with Building
+      // alone already counts only that file, but the families are the app's own
+      // answer and the one that survives a reopen the header has not caught up
+      // with.
+      const opened = openedFamilyRows(families[layer.id]);
+      const count = opened ?? s.streams[layer.id]?.header.objectsCount;
       if (count === undefined) return null;
       sum += count;
     }

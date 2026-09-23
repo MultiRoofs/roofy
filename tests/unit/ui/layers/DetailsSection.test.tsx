@@ -376,6 +376,23 @@ describe("DetailsSection — object families", () => {
     });
   }
 
+  it("says the table covers the whole family, not only what is in view", () => {
+    // The old line — "The table and statistics cover loaded objects only" — is
+    // FALSE for a family view: it reads the file, so it answers for rows the
+    // camera never delivered. What is partial is the SCENE.
+    seedStream("L", {
+      featureCount: 12301,
+      cellCount: 7,
+      objectsCount: 884106,
+    });
+    seedFamilies({ rowCounts: { building: 884106 } });
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    const line = screen.getByText(
+      "Showing the objects in view — 12,301 of 884,106 loaded. The table and statistics cover the whole family, whatever is on screen.",
+    );
+    expect(line.getAttribute("title")).toContain("7 resident cells");
+  });
+
   it("lists every available family with its own state", () => {
     seedFamilies({ rowCounts: { building: 1204 } });
     render(<DetailsSection item={city({ isStreaming: true })} />);

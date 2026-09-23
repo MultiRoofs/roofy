@@ -513,6 +513,41 @@ export function useActiveFamily(layerId: string | null): string | null {
 }
 
 /**
+ * The rows the OPENED families hold, or `null` when this layer has no families —
+ * or when one opened family has not learnt its size yet, which is a total nobody
+ * can state rather than a smaller one.
+ *
+ * The honest denominator of "N of M" for a package: ruling R-D opens Building
+ * alone, so measuring the loaded objects against every family would read as a
+ * stream that has barely started and would never reach its own total. ONE rule,
+ * exported, because the status bar and the details panel both need it and two
+ * copies is how they come to disagree.
+ */
+export function openedFamilyRows(
+  entry: LayerFamilyState | undefined,
+): number | null {
+  if (entry === undefined || entry.families.length === 0) return null;
+  // NOTHING open — a failed reopen — is not a total of zero: the stream header
+  // still describes what this layer had, and a "0 of 0" beside a scene being
+  // rebuilt says less than the number it replaces.
+  if (entry.opened.length === 0) return null;
+  let sum = 0;
+  for (const key of entry.opened) {
+    const family = entry.families.find((f) => f.key === key);
+    if (family?.rowCount === undefined || family.rowCount === null) return null;
+    sum += family.rowCount;
+  }
+  return sum;
+}
+
+/** {@link openedFamilyRows} for one layer, as a hook. */
+export function useOpenedFamilyRows(layerId: string | null): number | null {
+  return useFamilyStore((s) =>
+    layerId === null ? null : openedFamilyRows(s.layers[layerId]),
+  );
+}
+
+/**
  * One family's TABLE state, or `null` when the layer has no families (or that
  * family is not one of them).
  *
