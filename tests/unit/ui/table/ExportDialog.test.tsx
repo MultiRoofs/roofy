@@ -122,6 +122,16 @@ const FALLBACK_TABLE = {
   lods: [],
 };
 
+/** A CityParquet family's table: a VIEW over the file (R-B′), which answers for
+ *  objects the camera never delivered. */
+const FAMILY_TABLE = {
+  ...FALLBACK_TABLE,
+  sourceName: "family_1.parquet",
+  fileBacked: true,
+  familyKey: "building",
+  sourceCrs: "EPSG:6697",
+};
+
 function open(over: Record<string, unknown> = {}) {
   const onClose = vi.fn();
   render(
@@ -710,6 +720,89 @@ describe("ExportDialog", () => {
     expect((runExport.mock.calls[0]![0] as { where: string }).where).toBe(
       'COALESCE("feature_id", "id") IN (\'B1\')',
     );
+  });
+
+  it("resolves a selected id the residents never held through the family's VIEW", async () => {
+    // A streamed CityParquet family: the table reads the whole file, so a
+    // BuildingPart the camera never delivered can be selected in the grid and is
+    // nowhere in the resident model. Resolving its root through the residents
+    // found nothing, so the export compared the PART's id against `feature_id`
+    // and wrote a file with no features in it at all.
+    useLayerStore.setState({
+      layers: [
+        {
+          id: "L",
+          name: "yokohama",
+          isStreaming: true,
+          model: { objects: {} },
+        },
+      ] as never,
+    });
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: "L", objectId: "P1" });
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes('"id" IN')
+        ? {
+            ok: true,
+            columns: ["id", "feature_id"],
+            rows: [{ id: "P1", feature_id: "B1" }],
+          }
+        : { ok: true, columns: ["value"], rows: [{ value: "Building" }] },
+    );
+    open({ table: FAMILY_TABLE, isStreaming: true });
+
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Selected records"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect((runExport.mock.calls[0]![0] as { where: string }).where).toBe(
+      'COALESCE("feature_id", "id") IN (\'B1\')',
+    );
+    // Asked of the table this dialog is exporting, by the selected ids.
+    expect(
+      runQuery.mock.calls
+        .map((c) => c[0] as string)
+        .some(
+          (sql) =>
+            sql.includes('FROM "layer_1"') &&
+            sql.includes("\"id\" IN ('P1')") &&
+            sql.includes("DISTINCT"),
+        ),
+    ).toBe(true);
+  });
+
+  it("REFUSES a selected export when the view could not be asked", async () => {
+    // Exporting the raw selected ids would write the wrong features (or none),
+    // and silence is what made the empty file so hard to explain.
+    useLayerStore.setState({
+      layers: [
+        {
+          id: "L",
+          name: "yokohama",
+          isStreaming: true,
+          model: { objects: {} },
+        },
+      ] as never,
+    });
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: "L", objectId: "P1" });
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes('"id" IN')
+        ? { ok: false, message: "IO Error: could not read footer" }
+        : { ok: true, columns: ["value"], rows: [{ value: "Building" }] },
+    );
+    open({ table: FAMILY_TABLE, isStreaming: true });
+
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Selected records"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("IO Error: could not read footer");
+    expect(runExport).not.toHaveBeenCalled();
   });
 
   it("runs an attribute export with the chosen columns and downloads it", async () => {

@@ -15,6 +15,7 @@ import {
   useLayerTableStore,
   type LayerTable,
 } from "../../insights/layerTables";
+import { buildSelectedRootsSubquery } from "../../insights/selectedFeatures";
 import {
   buildCountSql,
   buildFeatureScopeWhere,
@@ -113,12 +114,23 @@ export function useLayerCounts(layerId: string | null): LayerCounts {
             .filter(Boolean)
             .join(" AND ")
         : compiled.where;
+    // The FILE decides which feature a selected object belongs to when the table
+    // is a view over it (ruling R-B′): its rows include objects the camera never
+    // delivered, so `selectedFeatures` — resolved through the residents — leaves
+    // an unloaded part pointing at itself and the count answers zero over a
+    // selection the user can see. As a SUBQUERY, so this stays three statements.
+    const selectedRootsIn =
+      table.fileBacked === true
+        ? `(${buildSelectedRootsSubquery(table.table, selectedIds)})`
+        : `(${selectedFeatures.map(quoteLiteral).join(", ")})`;
     const selectedWhere =
-      selectedFeatures.length === 0
+      selectedIds.length === 0
         ? "FALSE"
         : query.view === "buildings"
-          ? `COALESCE("feature_id", "id") IN (${selectedFeatures.map(quoteLiteral).join(", ")}) AND ${rootBuildings}`
-          : `"id" IN (${selectedFeatures.map(quoteLiteral).join(", ")})`;
+          ? `COALESCE("feature_id", "id") IN ${selectedRootsIn} AND ${rootBuildings}`
+          : // The RAW reading counts rows by their own id, which needs no
+            // resolution at all — on any table.
+            `"id" IN (${selectedIds.map(quoteLiteral).join(", ")})`;
     setCounts({ ...UNKNOWN, key, loading: true });
     void Promise.all([
       runQuery(buildCountSql(table.table, rootWhere)),
@@ -157,6 +169,10 @@ export function useLayerCounts(layerId: string | null): LayerCounts {
     query?.applied,
     query?.view,
     selectedFeatures.join("\u0000"),
+    // The SELECTION itself as well: a file-backed table's predicate is built
+    // from `selectedIds`, and two ids that the residents cannot tell apart would
+    // otherwise leave the count describing the previous selection.
+    selectedIds.join("\u0000"),
     table,
   ]);
 

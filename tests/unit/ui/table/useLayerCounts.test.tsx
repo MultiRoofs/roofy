@@ -113,6 +113,45 @@ describe("useLayerCounts", () => {
     );
   });
 
+  it("counts a selected object the residents never held for a FILE-backed table", async () => {
+    // A streamed CityParquet family's table reads the whole file, so a part the
+    // camera never delivered can be selected. Resolving its root through the
+    // residents found nothing, so the selected count asked about the PART's id
+    // against `feature_id` and answered zero — "Nothing selected on this layer"
+    // over a selection the user can see.
+    useLayerTableStore.setState({
+      tables: {
+        L: {
+          state: "ready",
+          info: { ...TABLE, fileBacked: true, familyKey: "building" },
+        },
+      },
+      tablePanelOpen: false,
+    });
+    useLayerStore.setState({
+      layers: [{ id: "L", isStreaming: true, model: { objects: {} } }] as never,
+    });
+    runQuery.mockResolvedValue({ ok: true, columns: ["n"], rows: [{ n: 1 }] });
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: "L", objectId: "P1" });
+    render(<Probe />);
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(screen.getByTestId("counts").textContent!),
+      ).toMatchObject({ selected: 1 }),
+    );
+    // The FILE answers which feature the selected id belongs to — one statement,
+    // no resident index and no second round trip.
+    const selected = runQuery.mock.calls
+      .map(([sql]) => sql as string)
+      .find((sql) => sql.includes('"id" IN'));
+    expect(selected).toContain(
+      'COALESCE("feature_id", "id") IN (SELECT DISTINCT COALESCE("feature_id", "id") FROM "layer_1" WHERE "id" IN (\'P1\'))',
+    );
+  });
+
   it("settles with §6.1's sentence when the engine dies under the counts", async () => {
     // THE OFF-QUEUE HAZARD. These three counts are awaited OUTSIDE the table
     // FIFO, and `duckdb.ts` used to leave a request its worker died under

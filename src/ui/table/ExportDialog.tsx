@@ -22,6 +22,7 @@ import {
 } from "../../insights/layerTables";
 import { runExport, type ExportRequest } from "../../insights/export";
 import { computedColumnsOf } from "../../insights/computedColumns";
+import { resolveSelectedFeatureIds } from "../../insights/selectedFeatures";
 import {
   buildRootTypesSql,
   compileFilter,
@@ -168,7 +169,17 @@ export function ExportDialog({
     s.layers.find((candidate) => candidate.id === layerId),
   );
   const streamVersion = useStreamStore((s) => s.streams[layerId]?.version);
-  const selectedFeatureIds = useMemo(() => {
+  /**
+   * The selected objects' FEATURE roots, from the residents.
+   *
+   * Right for every layer whose table was built from the model it can see. NOT
+   * right for a file-backed family table, which answers for objects the camera
+   * never delivered: a selected BuildingPart that is not resident resolves to
+   * ITSELF here, and the predicate then compares a part id against `feature_id`
+   * and matches nothing. {@link fileBackedIds} is the answer for that case, and
+   * this one is the fallback while it is still being asked.
+   */
+  const residentFeatureIds = useMemo(() => {
     if (!layer) return selectedObjectIds;
     const objects = layer.isStreaming
       ? getResidentModel(layerId, streamVersion ?? 0).objects
@@ -176,6 +187,35 @@ export function ExportDialog({
     const parents = parentsIndexOf(objects);
     return selectedObjectIds.map((id) => rootFeatureId(id, parents));
   }, [layer, layerId, selectedObjectIds.join("\u0000"), streamVersion]);
+  /** The same question asked of the FILE, for a file-backed table: `null` until
+   *  the answer lands, and only ever used for the count on screen — the export
+   *  asks for itself, so a click that beats this effect still writes the right
+   *  features. */
+  const [fileBackedIds, setFileBackedIds] =
+    useState<ReadonlyArray<string> | null>(null);
+  const fileBacked = table.fileBacked === true;
+  useEffect(() => {
+    if (!fileBacked || selectedObjectIds.length === 0) {
+      setFileBackedIds(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const resolved = await resolveSelectedFeatureIds(
+        table.table,
+        selectedObjectIds,
+      );
+      if (cancelled) return;
+      // A failure leaves the resident reading on screen; the export refuses with
+      // the engine's own sentence rather than writing the wrong features.
+      setFileBackedIds(resolved.ok ? resolved.featureIds : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileBacked, table.table, selectedObjectIds.join("\u0000")]);
+  const selectedFeatureIds = fileBackedIds ?? residentFeatureIds;
 
   const attributeColumns = useMemo(
     () => table.columns.filter((c) => !FIXED_COLUMNS.has(c.name)),
@@ -395,7 +435,16 @@ export function ExportDialog({
         if (!compiled.ok) throw new Error(compiled.message);
         where = compiled.where;
       } else if (effectiveScope === "selected") {
-        const ids = [...new Set(selectedFeatureIds)];
+        // ASKED HERE, not read off the effect above: the effect is what the count
+        // renders from, and an export must not depend on having won a race with
+        // it. For every other layer this is the residents' own answer, unchanged.
+        const roots = fileBacked
+          ? await resolveSelectedFeatureIds(table.table, selectedObjectIds)
+          : ({ ok: true, featureIds: residentFeatureIds } as const);
+        // The ENGINE's sentence: exporting the raw selected ids would write the
+        // wrong features, or a file with none in it.
+        if (!roots.ok) throw new Error(roots.message);
+        const ids = [...new Set(roots.featureIds)];
         if (ids.length === 0)
           throw new Error(
             "Select at least one building to export selected records.",
@@ -495,6 +544,9 @@ export function ExportDialog({
     lod,
     layerId,
     effectiveScope,
+    fileBacked,
+    residentFeatureIds,
+    selectedObjectIds,
     query.applied,
     rootTypes,
     selectedAttributes,
