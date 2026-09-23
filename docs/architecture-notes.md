@@ -1324,18 +1324,49 @@ regression.
   heights carry `heightOffset` like a vertex does.
 
   `orientExteriorRing` keeps the `2.5e-4`-of-the-diagonal magnitude floor added
-  in between, now as the BACKSTOP for an object with no file box at all — a
-  CityParquet child row whose bbox columns are null. The constant sits between
-  the measured populations (residue 1.5e-6 … 2.0e-5 of the diagonal, a real
-  reference 1.0e-1 for a 30 m building down to 3.4e-3 for a pathological 1 m
-  slab), and it covers exactly one shape: ONE planar face. For such an object
-  with two or more near-coplanar faces the upper one is still inverted above a
-  step of 2.5e-4 of the diagonal (2.2 cm over 40 m). That residue is pinned by a
-  test, not by this sentence; closing it means judging the box's degeneracy
-  rather than one face's offset within it. Note also that a refused flip keeps
-  the FILE's winding, which is deterministic and spec-conformant but not
-  necessarily right — real CityJSON does point normals into the building on the
-  faces this heuristic exists for.
+  in between, now as the BACKSTOP for an object the row box cannot judge. The
+  constant sits between the measured populations (residue 1.5e-6 … 2.0e-5 of the
+  diagonal, a real reference 1.0e-1 for a 30 m building down to 3.4e-3 for a
+  pathological 1 m slab), and it covers exactly one shape: ONE planar face. For
+  an object with two or more near-coplanar faces the upper one is still inverted
+  above a step of 2.5e-4 of the diagonal (2.2 cm over 40 m). Note also that a
+  refused flip keeps the FILE's winding, which is deterministic and
+  spec-conformant but not necessarily right — real CityJSON does point normals
+  into the building on the faces this heuristic exists for.
+
+  It is narrowed, not closed, and the boundary is worth stating because the next
+  person will meet it. `orientExteriorRing` is a one-bit test — does this face's
+  centroid sit on the far side of the object's bbox CENTRE from where its normal
+  points — so **a face is inverted whenever the object's box fails to put that
+  face clearly on ONE side of its centre.** Four ways in, each measured by the
+  fix round's re-review and each pinned in
+  `navara-core/tests/geo/geodeticRingsToEnu.test.ts` except the last:
+  - **no box** — a CityParquet child row whose `bbox` columns are null
+    (`readBBox` returns `null` if any of the six fields is missing or
+    non-finite). The row is still read, still placed, and counted as
+    `invalidBBoxRows`.
+  - **a z-degenerate or near-flat box**, which is VALID data: `readBBox` accepts
+    `zmin == zmax` and `familyIndex` accepts `minZ <= maxZ`. A table whose only
+    geometry is LoD 0 footprints has such a box legitimately — `zmin..zmax` IS
+    the footprint's own step — so the row box equals the tight box, the
+    inversion returns on entirely correct data, and `invalidBBoxRows` stays 0:
+    nothing says the reference carried no information.
+  - **the read LoD's geometry on the wrong side of a box dominated by geometry
+    the read dropped** — a single roof at 8 m inside a 0..40 m row box inverts,
+    flipping at exactly `boxHeight / 2`. A child row carrying its parent's
+    extent, a tower's LoD dropped for a low block's LoD 0, and a basement extent
+    under a ground face all reach it.
+  - **a face legitimately facing its own centroid** — the pre-existing concave
+    weakness (an L-shape's inner walls, a courtyard), described in the
+    double-sided-material bullet at the top of this file and untouched by this
+    milestone.
+
+  The middle two are NOT this milestone's regression: `projectCityObjects` seeds
+  from the same row box on the projected path, so they are the bbox-centre
+  heuristic's own limit, restated with numbers. Closing all four at once needs a
+  real inside/outside test instead of a box centre — signed volume, or
+  consistency across a closed shell — which is the follow-up in
+  `docs/roadmap.md`.
 
 - **Coverage, not equality.** Two different transforms need not select
   identical rows for the same axis-aligned box. The tests assert CONSERVATIVE
