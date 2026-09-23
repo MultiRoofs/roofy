@@ -1272,10 +1272,15 @@ Leaving UTM changes what some measurements MEAN. State them as changed:
   tangent at exactly one point, so a constant-height roof leans away from its
   cell's origin by d/R (0.0032° at 360 m), and reading a bearing off that tilt
   made the SAME roof face read a different bearing per cell. The external
-  reviewer measured 88.28° against 271.80° on a real PLATEAU object; this
-  repo's own tests pin the synthetic case they could reproduce, 225.18° against
-  244.83° for a constant-height roof baked in two cells 400 m apart
-  (`streamWorkerFrame.test.ts`). Every
+  reviewer measured 88.28° against 271.80° on a real PLATEAU object. What this
+  repo's own test pins is the REPAIR, not the defect: "give a constant-height
+  roof no azimuth, in either cell" (`streamWorkerFrame.test.ts`) bakes one
+  constant-height roof in two cells 400 m apart and asserts `azimuthDeg` is
+  `null` in both. The pre-fix pair on that synthetic case — 225.18° against
+  244.83° — is a one-off measurement taken under revert by the fix round's
+  implementer and reproduced by its reviewer, recorded in the milestone's SDD
+  ledger outside the repository; no assertion holds it, and it is only
+  observable by reverting the convention. Every
   app reader treats `null` as "no aspect", never as due north (the Details
   panel and the hover tooltip print "Flat"; `roof_azimuth_deg` writes NULL; an
   azimuth rule condition matches nothing). This does NOT cover a STATIC
