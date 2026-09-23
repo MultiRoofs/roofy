@@ -304,6 +304,38 @@ describe("ensureFamilyView", () => {
     expect(getLayerTable("L", "bridge")?.table).toBe("layer_2");
   });
 
+  it("gives two families over ONE url their own registration, so dropping one leaves the other's file", async () => {
+    // A manifest that lists one href twice (`building` and `bridge` resolving
+    // to the same URL) used to yield ONE registration for both families: the
+    // first drop released the VFS name under the second family's live view,
+    // which then read nothing at all with no error anywhere.
+    const url = "https://example.test/objects.parquet";
+    await ensureFamilyView({
+      layerId: "L",
+      family: "building",
+      source: { url },
+      sourceCrs: null,
+    });
+    await ensureFamilyView({
+      layerId: "L",
+      family: "bridge",
+      source: { url },
+      sourceCrs: null,
+    });
+    const building = getLayerTable("L", "building")?.sourceName;
+    const bridge = getLayerTable("L", "bridge")?.sourceName;
+    expect(registered).toHaveLength(2);
+    expect(building).not.toBeUndefined();
+    expect(bridge).not.toBe(building);
+
+    dropped.length = 0;
+    await dropFamilyView("L", "bridge");
+
+    expect(dropped).toContain(bridge);
+    expect(dropped).not.toContain(building);
+    expect(getLayerTable("L", "building")?.sourceName).toBe(building);
+  });
+
   it("reports a registration that was refused, and publishes nothing", async () => {
     registerFailure = "HTTP 404";
     const outcome = await ensureFamilyView({

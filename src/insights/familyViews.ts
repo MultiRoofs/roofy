@@ -98,7 +98,8 @@ const ENGINE_STOPPED = "Analytics engine stopped";
 export type FamilySource = { readonly url: string } | { readonly file: File };
 
 /**
- * The registered VFS names, per LAYER and per source identity.
+ * The registered VFS names, per LAYER and per FAMILY — one registration per
+ * view, never one shared by whatever resolves to the same source.
  *
  * PER LAYER, not global, and that is not an optimisation: a registration is
  * released when the layer that made it goes away (`retire` drops the view's
@@ -107,8 +108,26 @@ export type FamilySource = { readonly url: string } | { readonly file: File };
  * skip the registration and build a view over an empty file, with no error
  * anywhere. Two layers over one URL therefore hold two registrations on
  * purpose.
+ *
+ * PER FAMILY for the same reason one step down. Keyed by source IDENTITY, two
+ * families of one layer whose hrefs resolve to the same URL (a manifest that
+ * lists one href twice) shared a single registration — and the first
+ * `dropFamilyView` released the VFS name under the OTHER family's live view,
+ * which then read nothing with no error anywhere. `layerTables.retire` releases
+ * a view's `sourceName` unconditionally and knows nothing about families, so a
+ * reference count would need a second owner of that release across a module
+ * boundary `insights/` cannot cross; a duplicate registration, by contrast,
+ * costs nothing — `registerFileURL` stores a URL and `registerFileHandle` a
+ * `File` reference, neither of them bytes.
+ *
+ * The IDENTITY is still remembered per family, because a family whose SOURCE
+ * changed (a re-picked `File`) must register the new one rather than go on
+ * reading the old file under its cached name.
  */
-const registrations = new Map<string, Map<string, string>>();
+const registrations = new Map<
+  string,
+  Map<string, { readonly identity: string; readonly name: string }>
+>();
 
 /**
  * A `File`'s identity, by OBJECT.
@@ -260,20 +279,28 @@ export function buildFamilyViewSql(
 // The engine half
 // ---------------------------------------------------------------------------
 
-/** Forget the cache entry that points at `name`, whatever identity made it. */
-function forget(layerId: string, name: string): void {
-  const byIdentity = registrations.get(layerId);
-  if (!byIdentity) return;
-  for (const [identity, registered] of byIdentity) {
-    if (registered === name) byIdentity.delete(identity);
-  }
-  if (byIdentity.size === 0) registrations.delete(layerId);
+/** Forget one family's registration, and say which name it was — the caller
+ *  releases what nothing else will. */
+function forget(layerId: string, family: string): string | null {
+  const byFamily = registrations.get(layerId);
+  if (!byFamily) return null;
+  const entry = byFamily.get(family);
+  byFamily.delete(family);
+  if (byFamily.size === 0) registrations.delete(layerId);
+  return entry?.name ?? null;
 }
 
-function remember(layerId: string, identity: string, name: string): void {
-  const byIdentity = registrations.get(layerId) ?? new Map<string, string>();
-  byIdentity.set(identity, name);
-  registrations.set(layerId, byIdentity);
+function remember(
+  layerId: string,
+  family: string,
+  identity: string,
+  name: string,
+): void {
+  const byFamily =
+    registrations.get(layerId) ??
+    new Map<string, { readonly identity: string; readonly name: string }>();
+  byFamily.set(family, { identity, name });
+  registrations.set(layerId, byFamily);
 }
 
 /**
@@ -327,7 +354,14 @@ export function ensureFamilyView(input: {
       }
 
       const identity = identityOf(source);
-      let name = registrations.get(layerId)?.get(identity);
+      const cached = registrations.get(layerId)?.get(family);
+      // The cached name only counts for the source it was made for. A family
+      // whose source CHANGED (a re-picked `File`) registers the new one, and the
+      // name it replaces is released after the new view lands — nothing else
+      // will, since `adoptLayerTable` replaces the entry rather than retiring
+      // it. Unreachable today: a re-pick goes through a fresh layer id.
+      const stale = cached !== undefined && cached.identity !== identity;
+      let name = stale ? undefined : cached?.name;
       if (name === undefined) {
         const fresh = `family_${++nameCounter}.parquet`;
         const registered =
@@ -335,7 +369,7 @@ export function ensureFamilyView(input: {
             ? await registerUrl(fresh, source.url)
             : await registerFile(fresh, source.file);
         if (!registered.ok) return { ok: false, message: registered.message };
-        remember(layerId, identity, fresh);
+        remember(layerId, family, identity, fresh);
         name = fresh;
       }
 
@@ -395,6 +429,9 @@ export function ensureFamilyView(input: {
         return SUPERSEDED;
       }
       adoptLayerTable(layerId, info);
+      // The view the new registration replaced is gone, so the old file can go
+      // too (see `stale` above).
+      if (stale && cached !== undefined) await dropRegisteredFile(cached.name);
       return { ok: true };
     } catch (error) {
       // The death released an await that would never have settled. The database
@@ -427,9 +464,15 @@ export async function dropFamilyView(
   // in the registry for this to find, and the counter is the only way to tell it
   // that what it is about to publish is not wanted.
   bumpDrops(familyDrops, layerTableKey(layerId, family));
-  const name = getLayerTable(layerId, family)?.sourceName ?? null;
-  if (name !== null) forget(layerId, name);
+  const cached = forget(layerId, family);
+  // `dropLayerTable` retires the view AND releases the name the view was built
+  // over, which is this family's own — never a sibling's, since every family
+  // holds its own registration.
+  const retired = getLayerTable(layerId, family)?.sourceName ?? null;
   await dropLayerTable(layerId, family);
+  // A registration with no view over it — an ensure that failed after it had
+  // registered — has nothing else to release it.
+  if (cached !== null && cached !== retired) await dropRegisteredFile(cached);
 }
 
 /**
@@ -448,7 +491,9 @@ export async function dropFamilyViews(layerId: string): Promise<void> {
   // Per LAYER, so it also cancels an ensure for a family that has not reached
   // the registry — which is every family whose view is still being built.
   bumpDrops(layerDrops, layerId);
-  const names = [...(registrations.get(layerId)?.values() ?? [])];
+  const names = [...(registrations.get(layerId)?.values() ?? [])].map(
+    (entry) => entry.name,
+  );
   registrations.delete(layerId);
   await dropLayerTables(layerId);
   for (const name of names) await dropRegisteredFile(name);

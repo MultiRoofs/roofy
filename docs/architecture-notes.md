@@ -1003,7 +1003,11 @@ stopped depending on what geometry the camera happened to deliver.
   strictly BY ARRAY ORDER against the families the stream was opened with
   (`familyStore.applyStreamTables`), never by matching those names.
 - **A family's table is a DuckDB VIEW over `read_parquet`, not a copy of the
-  rows.** The source is registered once per layer and per source identity — a
+  rows.** The source is registered once per layer and per FAMILY — one
+  registration per view, so two families whose hrefs resolve to the same URL do
+  not share a name one of them can release under the other's live view (the
+  cached name still records its source identity, so a family whose source
+  changed registers the new one instead of reading the old file) — a
   URL by its text through `registerFileURL` (`DuckDBDataProtocol.HTTP`), a
   picked `File` by its OBJECT through `registerFileHandle` +
   `BROWSER_FILEREADER`, both behind `registerParquetUrl` / `registerParquetFile`
@@ -1120,9 +1124,6 @@ Known limits, deliberately left:
 - Only the ACTIVE family's view is ensured. Another enabled family's table stays
   `absent` until its Table button asks for one; the families block says so
   rather than implying a table exists.
-- Two families that resolve to the same URL (or the same `File`) share ONE
-  registration, so dropping one releases the VFS name under the other's live
-  view. Only reachable when a manifest lists one href twice.
 - A `CREATE VIEW` failure can leave an orphaned registration cached until the
   layer is removed.
 - A processing run cannot ALTER a view, and nothing refuses one yet: "Add
