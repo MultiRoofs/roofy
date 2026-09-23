@@ -320,6 +320,33 @@ describe("default families (R-D)", () => {
     });
   });
 
+  it("does not build a view for a layer that went away during the CRS read", async () => {
+    // The footer read is an AWAIT before `ensureFamilyView` is even called, and
+    // `ensureFamilyView` captures its own supersession baselines on entry — so a
+    // removal that lands inside this window is invisible to it, and it would
+    // register the file, create the view and publish a `ready` table for a layer
+    // that no longer exists.
+    let release = (_crs: string | null) => {};
+    familySourceCrs.mockImplementationOnce(
+      () =>
+        new Promise<string | null>((resolve) => {
+          release = resolve;
+        }),
+    );
+    seedLayer("L1", familiesOf({ key: "building", href: "building.parquet" }));
+    await vi.waitFor(() =>
+      expect(useFamilyStore.getState().layers.L1!.table.building).toBe(
+        "creating",
+      ),
+    );
+    // The layer is removed while the footer read is still in flight.
+    useFamilyStore.getState().forgetLayer("L1");
+    release("EPSG:6697");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ensureFamilyView).not.toHaveBeenCalled();
+  });
+
   it("publishes the view with no CRS claim when the file does not say", async () => {
     familySourceCrs.mockResolvedValueOnce(null);
     seedLayer("L1", familiesOf({ key: "building", href: "building.parquet" }));

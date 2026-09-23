@@ -705,6 +705,13 @@ export async function ensureActiveFamilyView(
   // measured in degrees, which is precisely what the metric-bounds refusal
   // exists to prevent. Cached per source, and `null` when the file does not say.
   const sourceCrs = await familySourceCrs(found.source);
+  // CHECKED BEFORE the ensure, not only after it. `ensureFamilyView` captures
+  // its own supersession baselines when it is CALLED, so a removal that landed
+  // during the footer read is invisible to it: it would register the file,
+  // create the view and publish a `ready` table for a layer that is gone, and
+  // the guard below would only suppress the store write. This is the one window
+  // the awaited CRS opened.
+  if (generationOf(layerId) !== generation) return;
   const outcome = await ensureFamilyView({
     layerId,
     family,

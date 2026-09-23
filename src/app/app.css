@@ -5922,62 +5922,6 @@ button.file-label:disabled {
   color: var(--fg-muted);
 }
 
-/* ── Object families (a streamed CityParquet package) ──────────────────────
-   One row per family, on `.layer-types-item`'s own geometry so the two blocks
-   below each other read as one list: a family is OPENED (the checkbox), a type
-   is VISIBLE (the block under it). The table button is the panel's ghost action
-   (`.active-layer-action`) at the compact control height, never the table
-   toolbar's 24px icon button — this is the layer panel. */
-.layer-families {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.layer-families-item {
-  gap: 8px;
-  /* The row is not itself a label: the checkbox, the state and two buttons each
-     answer for themselves, so the pointer must not promise one target. */
-  cursor: default;
-  min-height: var(--control-height-compact);
-}
-
-.layer-families-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fg);
-}
-
-.layer-families-state {
-  white-space: nowrap;
-  color: var(--fg-muted);
-  font-size: 0.62rem;
-  /* A family's row count changes as the stream learns it; tabular figures keep
-     the buttons beside it from shifting. */
-  font-variant-numeric: tabular-nums;
-}
-
-.layer-families-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  min-height: var(--control-height-compact);
-  white-space: nowrap;
-}
-
-.layer-families-btn[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
-.layer-families-error {
-  color: var(--danger);
-}
-
 /* Every "there is nothing here, and here is why" line in the panel. */
 .active-layer-note {
   margin: 0;
@@ -6130,6 +6074,68 @@ button.file-label:disabled {
   margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+/* ── Object families (a streamed CityParquet package) ──────────────────────
+   One row per family, on `.layer-types-item`'s own geometry so the two blocks
+   below each other read as one list: a family is OPENED (the checkbox), a type
+   is VISIBLE (the block under it). The table button is the panel's ghost action
+   (`.active-layer-action`) at the compact control height, never the table
+   toolbar's 24px icon button — this is the layer panel.
+
+   The ROW selector is doubled (`.layer-types-item.layer-families-item`) on
+   purpose: `.layer-types-item` is defined further down this file with equal
+   specificity, so a single class here lost its gap and its cursor to source
+   order alone — the rows shipped at 0.35rem under a pointer. Specificity, not
+   position, is what keeps this true if either block moves. */
+.layer-families {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layer-types-item.layer-families-item {
+  gap: 8px;
+  /* The row is not itself a label: the checkbox, the state and two buttons each
+     answer for themselves, so the pointer must not promise one target. */
+  cursor: default;
+  min-height: var(--control-height-compact);
+}
+
+.layer-families-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.layer-families-state {
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  /* A family's row count changes as the stream learns it; tabular figures keep
+     the buttons beside it from shifting. */
+  font-variant-numeric: tabular-nums;
+}
+
+.layer-families-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: var(--control-height-compact);
+  white-space: nowrap;
+}
+
+.layer-families-btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.layer-families-error {
+  color: var(--danger);
 }
 
 .layer-types-empty {

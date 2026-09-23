@@ -36,6 +36,15 @@ vi.mock("../../../../src/insights/duckdb", () => ({
 }));
 
 const runExport = vi.fn();
+vi.mock("../../../../src/insights/familyViews", () => ({
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyView: vi.fn(async () => {}),
+  dropFamilyViews: vi.fn(async () => {}),
+}));
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
+
 vi.mock("../../../../src/insights/export", () => ({
   runExport: (request: unknown) => runExport(request),
 }));
@@ -76,6 +85,8 @@ const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
+const { useFamilyStore, buildLayerFamilies, resetFamilyStoreForTest } =
+  await import("../../../../src/features/layers/familyStore");
 const { useSelectionStore } =
   await import("../../../../src/features/selection/selectionStore");
 
@@ -129,6 +140,7 @@ function open(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  resetFamilyStoreForTest();
   deathListeners.clear();
   runQuery.mockReset();
   runQuery.mockResolvedValue({
@@ -454,6 +466,26 @@ describe("ExportDialog", () => {
         "Exports include currently loaded records only, not the whole dataset.",
       ),
     ).toBeTruthy();
+  });
+
+  it("does NOT warn for a family's table, which is read from the file", async () => {
+    // A CityParquet family's rows come from the FILE (R-B′), so an export of one
+    // is not limited to what the camera delivered.
+    useFamilyStore.getState().setFamilies(
+      "L",
+      buildLayerFamilies([
+        {
+          key: "building",
+          href: "building.parquet",
+          size: null,
+          source: { url: "https://x/building.parquet" },
+        },
+      ]),
+    );
+    open({ table: FALLBACK_TABLE, isStreaming: true });
+    await waitFor(() =>
+      expect(screen.queryByText(/currently loaded records only/)).toBeNull(),
+    );
   });
 
   it("forces one table rebuild when it opens on a streaming layer", async () => {

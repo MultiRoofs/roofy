@@ -72,6 +72,7 @@ import {
 import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { NO_LOD, useLodOptions } from "./useLodOptions";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 
 /** An EMPTY prefix is a legal prefix — it is how the bare column names are
  *  asked for, and the collision check below is what refuses it when they are
@@ -453,8 +454,16 @@ export function useToolForm(toolId: ToolId) {
   // `useLayerCounts` answers the ALL count for `matching` when nothing is
   // filtered (its SQL has no WHERE), so "no filter applied" has to come from
   // the query store itself rather than from a null count.
+  //
+  // Through the ACTIVE family's key (R-C′), like the counts beside it and like
+  // the snapshot `submitRun` freezes: the bare key holds no filter for a
+  // CityParquet layer, so reading it disabled the Matching scope over a table
+  // that plainly showed a matching number.
+  const scopeQueryKey = useActiveTableKey(cityLayer?.id ?? null);
   const noFilter = useQueryStore((s) =>
-    cityLayer === null ? true : layerQuery(s, cityLayer.id).applied === null,
+    scopeQueryKey === null
+      ? true
+      : layerQuery(s, scopeQueryKey).applied === null,
   );
 
   // §7.5's defaults need the SOURCE's keys and the TARGET's table, so they are

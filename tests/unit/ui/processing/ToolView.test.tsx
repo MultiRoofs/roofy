@@ -79,6 +79,15 @@ const counts = {
   loading: false,
   message: null as string | null,
 };
+vi.mock("../../../../src/insights/familyViews", () => ({
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyView: vi.fn(async () => {}),
+  dropFamilyViews: vi.fn(async () => {}),
+}));
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
+
 vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
   useLayerCounts: () => counts,
 }));
@@ -101,6 +110,9 @@ const { useComputedColumnStore } =
 const { useShellStore } = await import("../../../../src/ui/shell/shellStore");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
+const { buildLayerFamilies, resetFamilyStoreForTest, useFamilyStore } =
+  await import("../../../../src/features/layers/familyStore");
+const { layerTableKey } = await import("../../../../src/insights/layerTables");
 const { useRuleDraftStore } =
   await import("../../../../src/features/rules/ruleDraftStore");
 const { clearColumnReveals } =
@@ -237,6 +249,7 @@ afterEach(() => {
   useLayerTableStore.setState({ tables: {} });
   useComputedColumnStore.setState({ byLayer: {} });
   useQueryStore.setState({ queries: {} });
+  resetFamilyStoreForTest();
   useRuleDraftStore.setState({ drafts: {} });
   // Open table RETAINS its scroll request until a grid acknowledges it, and no
   // case here renders one — so without this the next case's first listener
@@ -383,6 +396,43 @@ describe("ToolView", () => {
     expect(
       screen.getByRole("radio", { name: "All … buildings" }),
     ).toBeChecked();
+  });
+
+  it("sees a FAMILY's filter — the scope radio and the run agree with the table", () => {
+    // R-C′: a CityParquet layer's filter lives under `${layerId}::${family}`.
+    // Reading the bare key here made the form say "No filter applied" while the
+    // counts beside it showed a matching number and `submitRun` would have
+    // frozen that very filter.
+    counts.matching = 312;
+    const layerId = addCityLayer([], true);
+    act(() => {
+      useFamilyStore.getState().setFamilies(
+        layerId,
+        buildLayerFamilies([
+          {
+            key: "building",
+            href: "building.parquet",
+            size: null,
+            source: { url: "https://x/building.parquet" },
+          },
+        ]),
+      );
+      // The family's own table, which is the only one a reader of this layer
+      // resolves to (ruling S3).
+      const key = layerTableKey(layerId, "building");
+      useLayerTableStore.setState((state) => ({
+        tables: { ...state.tables, [key]: state.tables[layerId]! },
+      }));
+      useQueryStore.getState().setFilter(key, {
+        logic: "AND",
+        conditions: [{ id: "c1", column: "status", op: "=", value: "ok" }],
+      });
+      useQueryStore.getState().applyFilter(key);
+    });
+    render(<ToolView toolId="roof-metrics" />);
+    expect(
+      screen.getByRole("radio", { name: "Matching 312" }),
+    ).not.toBeDisabled();
   });
 
   it("offers Matching with its count once a filter is applied, and runs on it", () => {
@@ -878,5 +928,32 @@ describe("ToolView", () => {
         "Runs over the 2 currently loaded buildings, not the whole dataset.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("does NOT say that of a family's table, which is the whole family", () => {
+    // `counts.all` is the family view's own count (R-B′), so the sentence would
+    // contradict the number it quotes.
+    const layerId = addCityLayer([], true);
+    act(() => {
+      useFamilyStore.getState().setFamilies(
+        layerId,
+        buildLayerFamilies([
+          {
+            key: "building",
+            href: "building.parquet",
+            size: null,
+            source: { url: "https://x/building.parquet" },
+          },
+        ]),
+      );
+      useLayerTableStore.setState((state) => ({
+        tables: {
+          ...state.tables,
+          [layerTableKey(layerId, "building")]: state.tables[layerId]!,
+        },
+      }));
+    });
+    render(<ToolView toolId="height-from-extent" />);
+    expect(screen.queryByText(/currently loaded/)).toBeNull();
   });
 });
