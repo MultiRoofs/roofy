@@ -181,7 +181,9 @@ function accumulateObjectStats(input: ObjectStatsInput): ObjectStats {
     }
   }
 
-  let avgAzimuth = 0;
+  // `null`, not 0, for "nothing to average": 0 is due north. See
+  // `ObjectStats.avgRoofAzimuth`.
+  let avgAzimuth: number | null = null;
   if (azimuthWeight > 0) {
     avgAzimuth = Math.atan2(azimuthSinSum, azimuthCosSum) * (180 / Math.PI);
     if (avgAzimuth < 0) avgAzimuth += 360;

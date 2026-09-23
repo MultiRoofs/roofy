@@ -159,3 +159,77 @@ describe("StatsTab's DuckDB section", () => {
     expect(screen.getByText("Statistics")).toBeTruthy();
   });
 });
+
+/**
+ * The fix-round review's N3. The per-object block's "Avg azimuth" row was gated
+ * on `avgRoofAzimuth > 0`, and `computeStats` returned 0 both for "nothing to
+ * average" and for "due north" — so the row was correctly hidden for an all-flat
+ * building and WRONGLY hidden for a genuinely north-facing one. Same collision
+ * the milestone removed from `computeRoofMetrics`, `aggregate.ts` and
+ * `roofRollUp.ts`; this is the file those two left behind.
+ */
+describe("StatsTab's mean azimuth row", () => {
+  /** One Building whose single RoofSurface slopes down toward `dir`. */
+  const modelWithRoof = (ring: [number, number, number][]): CityModel =>
+    ({
+      sourceEncoding: "cityjson",
+      metadata: {},
+      bbox: [0, 0, 0, 10, 10, 3],
+      vertexCount: 4,
+      objects: {
+        b: {
+          id: "b",
+          objectType: "Building",
+          attributes: {},
+          bbox: [0, 0, 0, 10, 10, 3],
+          lod: "2",
+          parents: [],
+          children: [],
+          surfaces: [
+            { type: "RoofSurface", lod: "2", attributes: {}, rings: [ring] },
+          ],
+        },
+      },
+    }) as unknown as CityModel;
+
+  const selection = {
+    kind: "object" as const,
+    layerId: "L1",
+    objectId: "b",
+  };
+
+  it("shows the row for a north-facing roof, whose mean azimuth IS 0", () => {
+    // z falls from 3 at y = 0 to 0 at y = 10, so the plane's normal tilts
+    // toward +y: it faces north, azimuth 0.
+    render(
+      <StatsTab
+        model={modelWithRoof([
+          [0, 0, 3],
+          [10, 0, 3],
+          [10, 10, 0],
+          [0, 10, 0],
+        ])}
+        selection={selection}
+        layerId={null}
+      />,
+    );
+    expect(screen.getByText("Avg azimuth")).toBeTruthy();
+    expect(screen.getByText(/^N \(0°\)$/)).toBeTruthy();
+  });
+
+  it("hides the row for a flat roof, which has no azimuth at all", () => {
+    render(
+      <StatsTab
+        model={modelWithRoof([
+          [0, 0, 3],
+          [10, 0, 3],
+          [10, 10, 3],
+          [0, 10, 3],
+        ])}
+        selection={selection}
+        layerId={null}
+      />,
+    );
+    expect(screen.queryByText("Avg azimuth")).toBeNull();
+  });
+});

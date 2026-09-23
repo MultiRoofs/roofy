@@ -116,7 +116,7 @@ export function StatsTab({ model, selection, layerId }: StatsTabProps) {
             label="Avg slope"
             value={`${objectStats.avgRoofSlope.toFixed(1)}\u00B0`}
           />
-          {objectStats.avgRoofAzimuth > 0 && (
+          {objectStats.avgRoofAzimuth !== null && (
             <StatRow
               label="Avg azimuth"
               value={`${cardinalFromDeg(objectStats.avgRoofAzimuth)} (${objectStats.avgRoofAzimuth.toFixed(0)}\u00B0)`}

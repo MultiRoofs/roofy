@@ -27,5 +27,10 @@ export interface ObjectStats {
   readonly totalRoofArea: number;
   readonly height: number | null;
   readonly avgRoofSlope: number;
-  readonly avgRoofAzimuth: number;
+  /** The area-weighted circular mean of the object's roof azimuths, or `null`
+   *  when it has none to average — every roof flat, or no roof at all. NOT 0
+   *  for that: 0 is due north, and a gate that cannot tell the two apart hides
+   *  the row for a north-facing building (the same collision
+   *  `computeRoofMetrics` and `aggregateRoofMetrics` removed). */
+  readonly avgRoofAzimuth: number | null;
 }
