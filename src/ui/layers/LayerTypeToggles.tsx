@@ -14,6 +14,13 @@
  * The disclosure renders the caret inline in the row and the list as a
  * full-width block UNDER it (`.layer-item` wraps) — the rows are dense and the
  * panel is 180–480 px wide, so an inline list would have nowhere to go.
+ *
+ * NOT the same question as a CityParquet object FAMILY (`LayerFamilies`, the
+ * block above this one in the details panel). A family is OPENED — its file is
+ * streaming, and its table can be browsed whether or not it is — while a type
+ * here is VISIBLE: it hides geometry that is already loaded, and hides nothing
+ * from the table. `hiddenTypes` stays a CityJSON-type list for that reason, so a
+ * family's types can still be hidden one by one.
  */
 
 import { useState } from "react";

@@ -10,8 +10,20 @@
  * per-layer dropdown is empty exactly when it is first looked at) — labelled
  * as global, so nobody reads it as this layer's setting.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+vi.mock("../../../../src/insights/familyViews", () => ({
+  // The family store ensures the ACTIVE family's view (ruling S3); there is no
+  // DuckDB in a jsdom suite, so it simply succeeds.
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyView: vi.fn(async () => {}),
+  dropFamilyViews: vi.fn(async () => {}),
+}));
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
+
 import { DetailsSection } from "../../../../src/ui/layers/DetailsSection";
 import {
   useLayerStore,
@@ -22,6 +34,13 @@ import {
   type GeoLayer,
 } from "../../../../src/features/geoLayers/geoLayerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
+import {
+  buildLayerFamilies,
+  resetFamilyStoreForTest,
+  useFamilyStore,
+} from "../../../../src/features/layers/familyStore";
+import { useShellStore } from "../../../../src/ui/shell/shellStore";
+import { setStreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 import type { ActiveLayer } from "../../../../src/features/workspace/activeLayer";
 import type {
@@ -35,6 +54,9 @@ afterEach(() => {
   useGeoLayerStore.setState({ layers: [] });
   useStreamStore.setState({ streams: {} });
   useWorkspaceStore.setState({ activeLayerId: null });
+  resetFamilyStoreForTest();
+  setStreamPlugin(null);
+  useShellStore.setState({ drawerOpen: false });
 });
 
 function cityObject(overrides: Partial<CityObject> & { id: string }) {
@@ -305,5 +327,150 @@ describe("DetailsSection — a geospatial layer", () => {
     expect(screen.getByText("https://x/roads.geojson")).toBeTruthy();
     expect(screen.getByText("GeoJSON")).toBeTruthy();
     expect(screen.queryByText("CRS")).toBeNull();
+  });
+});
+
+/**
+ * Ruling R-D/S4's UI: a streamed CityParquet package is a SET of object
+ * families, and this block is where the user says which of them to render and
+ * which one's table to browse. A family is OPENED; a type is VISIBLE — two
+ * different questions, two different blocks, which is why the assertions below
+ * check both survive side by side.
+ */
+describe("DetailsSection — object families", () => {
+  function seedFamilies(
+    over: {
+      readonly enabled?: readonly string[];
+      readonly rowCounts?: Readonly<Record<string, number>>;
+    } = {},
+  ): void {
+    const families = buildLayerFamilies([
+      {
+        key: "building",
+        href: "building.parquet",
+        size: 4096,
+        source: { url: "https://x/building.parquet" },
+      },
+      {
+        key: "bridge",
+        href: "bridge.parquet",
+        size: 512,
+        source: { url: "https://x/bridge.parquet" },
+      },
+      {
+        key: "water_body",
+        href: "water_body.parquet",
+        size: 256,
+        source: { url: "https://x/water_body.parquet" },
+      },
+    ]).map((family) => ({
+      ...family,
+      rowCount: over.rowCounts?.[family.key] ?? null,
+    }));
+    useFamilyStore.getState().setFamilies("L", families, over.enabled);
+    // A toggle reopens the stream, so it needs the live plugin; the engine-down
+    // case has its own assertion below.
+    setStreamPlugin({
+      openStream: async () => ({}) as never,
+      remove: () => {},
+    });
+  }
+
+  it("lists every available family with its own state", () => {
+    seedFamilies({ rowCounts: { building: 1204 } });
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    const group = screen.getByRole("group", { name: "Object families" });
+    expect(group.textContent).toContain("Building");
+    expect(group.textContent).toContain("Bridge");
+    expect(group.textContent).toContain("Water Body");
+    // The OPEN family reports its size; the others are available, not loaded.
+    expect(group.textContent).toContain("1,204 loaded");
+    expect(group.textContent).toContain("Not opened");
+  });
+
+  it("says what is opened and what is merely available", () => {
+    seedFamilies();
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    expect(
+      screen.getByText("Building opened · 2 more families available"),
+    ).toBeTruthy();
+  });
+
+  it("offers a Retry for a family whose reopen failed", () => {
+    seedFamilies();
+    useFamilyStore.setState((s) => ({
+      layers: {
+        ...s.layers,
+        L: {
+          ...s.layers.L!,
+          opened: [],
+          geometry: { ...s.layers.L!.geometry, building: "failed" },
+          reopen: { state: "failed", message: "the server hung up" },
+        },
+      },
+    }));
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    const group = screen.getByRole("group", { name: "Object families" });
+    expect(group.textContent).toContain("Failed");
+    expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
+  });
+
+  it("opens a CLOSED family's table without opening its geometry", () => {
+    seedFamilies();
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show Bridge table" }));
+    // The table panel now shows the bridge family…
+    expect(useFamilyStore.getState().layers.L!.active).toBe("bridge");
+    expect(useShellStore.getState().drawerOpen).toBe(true);
+    // …and nothing about its geometry changed: attributes without rendering.
+    expect(useFamilyStore.getState().layers.L!.geometry.bridge).toBe("closed");
+    expect([...useFamilyStore.getState().layers.L!.enabled]).toEqual([
+      "building",
+    ]);
+  });
+
+  it("keeps the LAST open family's toggle disabled — a layer must render something", () => {
+    seedFamilies();
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    const toggle = screen.getByRole("checkbox", {
+      name: "Show Building geometry",
+    });
+    expect((toggle as HTMLInputElement).disabled).toBe(true);
+    expect(
+      (
+        screen.getByRole("checkbox", {
+          name: "Show Bridge geometry",
+        }) as HTMLInputElement
+      ).disabled,
+    ).toBe(false);
+  });
+
+  it("cannot toggle geometry with no 3D engine, but can still open a table", () => {
+    seedFamilies();
+    setStreamPlugin(null);
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    expect(
+      (
+        screen.getByRole("checkbox", {
+          name: "Show Bridge geometry",
+        }) as HTMLInputElement
+      ).disabled,
+    ).toBe(true);
+    // A view over the file needs no engine at all.
+    fireEvent.click(screen.getByRole("button", { name: "Show Bridge table" }));
+    expect(useFamilyStore.getState().layers.L!.active).toBe("bridge");
+  });
+
+  it("keeps object VISIBILITY a separate block from the families", () => {
+    seedStream("L", { types: ["Building", "Bridge"] });
+    seedFamilies();
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    expect(screen.getByRole("group", { name: "Object families" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Object types" })).toBeTruthy();
+  });
+
+  it("shows no families block for a layer that has none", () => {
+    render(<DetailsSection item={city()} />);
+    expect(screen.queryByRole("group", { name: "Object families" })).toBeNull();
   });
 });

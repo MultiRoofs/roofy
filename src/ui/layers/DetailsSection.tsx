@@ -37,6 +37,7 @@ import { AppearanceSelector } from "../sidebar/AppearanceSelector";
 import { LodSelector } from "../sidebar/LodSelector";
 import { formatCount } from "../table/tableText";
 import { KIND_LABEL, sourceOf } from "./geoLayerMeta";
+import { LayerFamilies } from "./LayerFamilies";
 import { LayerTypeToggles } from "./LayerTypeToggles";
 import { CityObjectIcon } from "./CityObjectIcon";
 import { StreamingLodControl } from "./StreamingLodControl";
@@ -146,6 +147,14 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
           <ObjectTypeCounts model={model} />
         )}
       </div>
+
+      {/* ABOVE Object visibility, and a block of its own: a family is OPENED
+          (its file is streaming, its table can be browsed either way), a type
+          is VISIBLE. One block that mixed them would make "hide Bridge" and
+          "close the bridge family" read as the same act. Renders nothing for
+          every layer that has no families, which is all but a streamed
+          CityParquet package. */}
+      <LayerFamilies layerId={layerId} />
 
       <div className="active-layer-group active-layer-types">
         <h4 className="active-layer-group-title">Object visibility</h4>
