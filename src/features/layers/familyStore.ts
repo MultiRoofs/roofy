@@ -594,6 +594,15 @@ export function openedFamilyRows(
   return sum;
 }
 
+/** Does this layer have object families at all? The reactive form of
+ *  {@link hasFamilies}, for a component that words itself differently for a
+ *  file-backed family table than for a resident one. */
+export function useHasFamilies(layerId: string | null): boolean {
+  return useFamilyStore((s) =>
+    layerId === null ? false : (s.layers[layerId]?.families.length ?? 0) > 0,
+  );
+}
+
 /** {@link openedFamilyRows} for one layer, as a hook. */
 export function useOpenedFamilyRows(layerId: string | null): number | null {
   return useFamilyStore((s) =>

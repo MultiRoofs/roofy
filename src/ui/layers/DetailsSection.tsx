@@ -37,7 +37,10 @@ import { AppearanceSelector } from "../sidebar/AppearanceSelector";
 import { LodSelector } from "../sidebar/LodSelector";
 import { formatCount } from "../table/tableText";
 import { KIND_LABEL, sourceOf } from "./geoLayerMeta";
-import { useOpenedFamilyRows } from "../../features/layers/familyStore";
+import {
+  useHasFamilies,
+  useOpenedFamilyRows,
+} from "../../features/layers/familyStore";
 import { LayerFamilies } from "./LayerFamilies";
 import { LayerTypeToggles } from "./LayerTypeToggles";
 import { CityObjectIcon } from "./CityObjectIcon";
@@ -68,6 +71,10 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   // UNCONDITIONALLY, like every other selector here: the geo branch below returns
   // early, and a hook after it would change this component's hook order.
   const openedRows = useOpenedFamilyRows(layerId);
+  // Whether the table is FILE-backed, which is a property of the layer and not
+  // of the current reopen: `openedRows` is null while a failed reopen has nothing
+  // open, and the table is a family view either way.
+  const hasFamilies = useHasFamilies(layerId);
   const setCameraSync = useLayerStore((s) => s.setCameraSync);
   const [metadataOpen, setMetadataOpen] = useState(false);
   // The SYNC/FROZEN badge is labelled by the caption beside it rather than
@@ -96,7 +103,6 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   const resident = streaming
     ? getResidentModel(layerId, streamVersion ?? 0)
     : null;
-  const hasFamilies = openedRows !== null;
   const total = openedRows ?? streamObjectsCount ?? null;
 
   return (
