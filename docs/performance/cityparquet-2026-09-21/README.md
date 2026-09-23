@@ -256,9 +256,10 @@ tight box of the surfaces that survived LoD filtering (`2f62b9e`), which is
 what stopped a multi-polygon LoD 0 PLATEAU footprint inverting its highest
 polygon — and a third gave flatness a name (`FLAT_INCLINATION_DEG = 0.1`,
 `58e5671`), so a horizontal roof's Main orientation reads "Flat" instead of
-"N (0°)". None of it is observable from a unit test, so it was smoked:
-`winding-flatness-browser-smoke-yokohama.{json,png}` plus `-picked.png`,
-`-lod0.png` and `-lowsun.png`.
+"N (0°)". Each is pinned by unit tests; what no unit test can see is what the
+GPU then does with them — the normal G-buffer, the shading, the picture — so it
+was also smoked: `winding-flatness-browser-smoke-yokohama.{json,png}` plus
+`-picked.png`, `-lod0.png` and `-lowsun.png`.
 
 The frame matches both earlier smokes to the object: 4,508 objects, 12,568
 roof surfaces, 21 resident cells. The **normal G-buffer was read back**, not
