@@ -340,6 +340,46 @@ export function ensureFamilyView(input: {
     message: "This family's table was dropped before its view was created.",
   };
   return runOnTableQueue(async () => {
+    /** The name THIS call registered — never one it inherited from the cache,
+     *  which belongs to a view a drop can see and release for itself. */
+    let ownRegistration: string | null = null;
+    /** The view THIS call created, so a release takes it with it. */
+    let ownView: string | null = null;
+    /** Set immediately before `adoptLayerTable`: what is published is the
+     *  layer's, not ours to undo. */
+    let published = false;
+    /**
+     * Give back what this call made and nothing else.
+     *
+     * Called by the supersession check below AND from the `finally`, because
+     * EVERY early failure exit — a DESCRIBE that could not read the footer, a
+     * file with no browsable columns, a CREATE the binder refused — leaves the
+     * registration behind otherwise. That was invisible for a live layer (the
+     * family's Retry reuses the name) and a leak for a REMOVED one: the removal
+     * had already looked, found nothing, and will never look again.
+     */
+    const release = async (): Promise<void> => {
+      const view = ownView;
+      const name = ownRegistration;
+      ownView = null;
+      ownRegistration = null;
+      if (view === null && name === null) return;
+      try {
+        if (view !== null) await ddl(`DROP VIEW IF EXISTS ${quoteIdent(view)}`);
+        if (name !== null) {
+          forget(layerId, family);
+          await dropRegisteredFile(name);
+        }
+      } catch (error) {
+        // This runs in a `finally`, where a throw would replace the outcome and
+        // break the "never throws" contract that keeps the ONE table FIFO
+        // moving. A death is the ordinary reason: the database that held the
+        // view and the registration is gone, and took both with it.
+        if (!(error instanceof EngineDeadError)) {
+          console.warn(`Could not release the family source ${name}:`, error);
+        }
+      }
+    };
     try {
       // The engine takes ~5 s to come up and the first CityParquet layer of a
       // session lands inside that window. `initDuckDB` is memoised and never
@@ -370,6 +410,7 @@ export function ensureFamilyView(input: {
             : await registerFile(fresh, source.file);
         if (!registered.ok) return { ok: false, message: registered.message };
         remember(layerId, family, identity, fresh);
+        ownRegistration = fresh;
         name = fresh;
       }
 
@@ -393,6 +434,7 @@ export function ensureFamilyView(input: {
         existing?.fileBacked === true ? existing.table : nextTableName();
       const created = await ddl(buildFamilyViewSql(view, name, kept));
       if (!created.ok) return { ok: false, message: created.message };
+      ownView = view;
 
       const info: LayerTable = {
         table: view,
@@ -421,13 +463,16 @@ export function ensureFamilyView(input: {
       // behind for the next ensure to build a dead view over.
       if (superseded()) {
         // Undo our own work rather than leave it for a drop that cannot see it:
-        // the view goes, the registration goes, and the cache forgets the name
-        // so the next ensure registers a fresh one.
-        await ddl(`DROP VIEW IF EXISTS ${quoteIdent(view)}`);
-        forget(layerId, name);
-        await dropRegisteredFile(name);
+        // the view goes, our own registration goes, and the cache forgets the
+        // name so the next ensure registers a fresh one. A registration this
+        // call INHERITED is not released here — the drop that superseded us
+        // captured it from the registry and releases it itself — but the cache
+        // entry goes either way, because that name is about to be dropped.
+        if (ownRegistration === null) forget(layerId, family);
+        await release();
         return SUPERSEDED;
       }
+      published = true;
       adoptLayerTable(layerId, info);
       // The view the new registration replaced is gone, so the old file can go
       // too (see `stale` above).
@@ -442,6 +487,10 @@ export function ensureFamilyView(input: {
         return { ok: false, message: ENGINE_STOPPED };
       }
       throw error;
+    } finally {
+      // EVERY way out but a publication: the outcome has already been decided,
+      // and this only gives back what was made on the way to it.
+      if (!published) await release();
     }
   });
 }

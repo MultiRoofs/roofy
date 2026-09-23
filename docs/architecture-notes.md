@@ -1124,8 +1124,6 @@ Known limits, deliberately left:
 - Only the ACTIVE family's view is ensured. Another enabled family's table stays
   `absent` until its Table button asks for one; the families block says so
   rather than implying a table exists.
-- A `CREATE VIEW` failure can leave an orphaned registration cached until the
-  layer is removed.
 - A processing run cannot ALTER a view, and nothing refuses one yet: "Add
   columns to this layer" for Height from extent on a family layer fails at the
   `ALTER TABLE`. The New-layer destination is fine: it copies the view with

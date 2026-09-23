@@ -29,6 +29,9 @@ let createFailure: string | null = null;
 let engineReady = true;
 /** Holds every DESCRIBE until it is released — the window a drop lands in. */
 let describeGate: { promise: Promise<void>; open: () => void } | null = null;
+/** The same window one step EARLIER: a registration still in flight, which is
+ *  before the ensure has remembered anything a removal could find. */
+let registerGate: { promise: Promise<void>; open: () => void } | null = null;
 /** The death listeners `onEngineDeath` handed out, so a case can fire one. */
 let deathListeners: Array<() => void> = [];
 
@@ -91,6 +94,7 @@ vi.mock("../../../src/insights/duckdb", () => {
     registerBuffer: vi.fn(async () => true),
     registerParquetUrl: vi.fn(async (name: string, url: string) => {
       registered.push({ kind: "url", name, at: url });
+      if (registerGate) await registerGate.promise;
       return registerFailure === null
         ? { ok: true as const }
         : { ok: false as const, message: registerFailure };
@@ -157,6 +161,7 @@ beforeEach(() => {
   createFailure = null;
   engineReady = true;
   describeGate = null;
+  registerGate = null;
   resetLayerTablesForTest();
   resetFamilyViewsForTest();
 });
@@ -561,6 +566,46 @@ describe("a drop that lands while an ensure is IN FLIGHT", () => {
     expect(getLayerTable("L", "building")).toBeNull();
     expect(useLayerTableStore.getState().tables["L::building"]).toBeUndefined();
     expect(dropped).toContain("family_1.parquet");
+  });
+
+  it("releases the registration it made when the DESCRIBE then fails", async () => {
+    // The narrowest window there is: the removal lands while the REGISTRATION is
+    // in flight, so it finds no cached name and no registry entry — and then the
+    // DESCRIBE fails, which returns before the supersession check that would
+    // have undone the registration. Left unreleased, the file stays in the VFS
+    // for the life of the page and its name stays cached under a layer that is
+    // gone, so a re-add under that id builds a view over a dropped name.
+    registerGate = gate();
+    const ensuring = ensureFamilyView({
+      layerId: "L",
+      family: "building",
+      source: { url: "https://example.test/building.parquet" },
+      sourceCrs: null,
+    });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(registered).toHaveLength(1);
+    const dropping = dropFamilyViews("L");
+    describeFailure = "IO Error: could not read footer";
+    registerGate.open();
+    registerGate = null;
+
+    expect((await ensuring).ok).toBe(false);
+    await dropping;
+
+    expect(getLayerTable("L", "building")).toBeNull();
+    expect(dropped).toContain("family_1.parquet");
+
+    // And the cache forgot it, so the next ensure registers a live name.
+    describeFailure = null;
+    registered.length = 0;
+    await ensureFamilyView({
+      layerId: "L",
+      family: "building",
+      source: { url: "https://example.test/building.parquet" },
+      sourceCrs: null,
+    });
+    expect(registered).toHaveLength(1);
+    expect(registered[0]?.name).not.toBe("family_1.parquet");
   });
 
   it("leaves an ensure for ANOTHER family of the same layer alone", async () => {
