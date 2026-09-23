@@ -130,6 +130,19 @@ export interface ToolDefinition {
    * says — it has no source of truthful counts (see `useLodOptions`).
    */
   readonly needsLod: boolean;
+  /**
+   * Does the run MEASURE in metres against the table's own bounds (ruling S2)?
+   *
+   * True for the three cross-layer tools: they read the table's `bbox` columns
+   * (or a proxy built from them) and produce areas, overlaps and distances in
+   * metres. A streamed CityParquet family's view exposes the FILE's bbox — a
+   * PLATEAU package's is degrees — so such a table is refused by name rather
+   * than measured as if degrees were metres.
+   *
+   * REQUIRED on every entry, like `styleByResult`, so a new tool that measures
+   * cannot ship silently exempt from the refusal.
+   */
+  readonly needsMetricBounds: boolean;
   readonly defaultPrefix: string;
   /**
    * The names this tool's run will write, for a prefix and a parameter set.

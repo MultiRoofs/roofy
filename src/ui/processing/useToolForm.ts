@@ -64,6 +64,7 @@ import { sourceWorkloadNote } from "../../features/processing/sourceRead";
 import type { ToolDefinition, ToolId } from "../../features/processing/types";
 import type { LayerTable } from "../../insights/layerTables";
 import {
+  citySourceReason,
   eligibilityContextFor,
   tableEntryFor,
   useEligibilityInputs,
@@ -329,15 +330,21 @@ export function useToolForm(toolId: ToolId) {
       });
     }
     if (tool.sourceKind === "city") {
-      return candidates.map((l) => ({
-        id: l.id,
-        name: l.name,
-        disabled: false,
-        reason: null,
-      }));
+      return candidates.map((l) => {
+        // Ruling S2 reaches the SOURCE too: Aggregate measures this layer's
+        // bounds while writing to the vector target, so a degree-based family
+        // table is refused here — `toolEligibility` never sees it.
+        const reason = citySourceReason(inputs, l.id, toolId);
+        return {
+          id: l.id,
+          name: l.name,
+          disabled: reason !== null,
+          reason,
+        };
+      });
     }
     return [];
-  }, [tool.sourceKind, toolId, vectorCandidates, candidates]);
+  }, [tool.sourceKind, toolId, vectorCandidates, candidates, inputs]);
   const storedSourceValid =
     base.sourceLayerId !== null &&
     sourceOptions.some((o) => o.id === base.sourceLayerId);

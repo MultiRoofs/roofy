@@ -35,6 +35,7 @@ import {
   type FamilySource,
 } from "../../insights/familyViews";
 import { getLayerTable } from "../../insights/layerTables";
+import { familySourceCrs } from "../cityparquet/familySourceCrs";
 import { reopenStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
 import { useStreamStore } from "../streaming/streamStore";
@@ -470,11 +471,6 @@ export function useActiveFamily(layerId: string | null): string | null {
 // The family's view
 // ---------------------------------------------------------------------------
 
-/** The CRS a streamed CityParquet family's own `bbox` column is in (ruling
- *  R-G). Unknown for now — task 6 makes the coordinate story coherent; the
- *  tools that need metric bounds refuse the layer either way. */
-const UNKNOWN_SOURCE_CRS = null;
-
 /**
  * Make sure `family`'s table exists, and record what happened on the family.
  *
@@ -510,11 +506,18 @@ export async function ensureActiveFamilyView(
   if (entry.table[family] === "creating") return;
   const generation = entry.generation;
   useFamilyStore.getState().setFamilyTableState(layerId, family, "creating");
+  // THE FILE's own CRS, never the stream's (ruling S2). The view reads the file,
+  // so its `bbox` is in the file's coordinates — degrees for PLATEAU — while the
+  // stream header and the layer's metadata both carry the PROJECTED target the
+  // scene is drawn in. Recording that one would claim metres for a table
+  // measured in degrees, which is precisely what the metric-bounds refusal
+  // exists to prevent. Cached per source, and `null` when the file does not say.
+  const sourceCrs = await familySourceCrs(found.source);
   const outcome = await ensureFamilyView({
     layerId,
     family,
     source: found.source,
-    sourceCrs: UNKNOWN_SOURCE_CRS,
+    sourceCrs,
   });
   // The layer may have gone, or its families been republished, while the view
   // was being built; `setFamilyTableState` is a no-op for a missing layer, but a

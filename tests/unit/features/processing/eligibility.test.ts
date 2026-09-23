@@ -16,6 +16,8 @@ const base: EligibilityContext = {
   hasCityLayer: true,
   vectorPreparation: "none",
   extensionState: { spatial: "loaded", three_d: "loaded" },
+  activeTableCrs: null,
+  activeTableCrsMetric: null,
 };
 
 describe("toolEligibility", () => {
@@ -170,6 +172,8 @@ describe("toolEligibility", () => {
         hasCityLayer: true,
         vectorPreparation: "none",
         extensionState: { spatial: "unloaded", three_d: "unloaded" },
+        activeTableCrs: null,
+        activeTableCrsMetric: null,
       }),
     ).toEqual({ ok: true });
   });
@@ -187,6 +191,8 @@ describe("toolEligibility", () => {
         hasCityLayer: true,
         vectorPreparation: "none",
         extensionState: { spatial: "unloaded", three_d: "unloaded" },
+        activeTableCrs: null,
+        activeTableCrsMetric: null,
       }),
     ).toEqual({ ok: false, reason: "Needs a city model layer" });
   });
@@ -273,5 +279,68 @@ describe("toolEligibility", () => {
         vectorPreparation: "ready",
       }),
     ).toEqual({ ok: true });
+  });
+});
+
+/**
+ * Ruling S2: the three tools that measure in metres refuse a table whose own
+ * bounds are not metre-based — a streamed CityParquet family's `bbox` is the
+ * FILE's, degrees for PLATEAU, and measuring those as metres is silently wrong.
+ */
+describe("metric bounds (ruling S2)", () => {
+  const degrees = {
+    ...base,
+    activeTableCrs: "EPSG:6697",
+    activeTableCrsMetric: false,
+  };
+
+  it("refuses join-by-location on a degree-based table, naming the CRS", () => {
+    expect(toolEligibility(toolById("join-by-location"), degrees)).toEqual({
+      ok: false,
+      reason:
+        "This layer's table measures EPSG:6697, which is not metre-based; temporary, until CityParquet coordinates are reworked",
+    });
+  });
+
+  it("refuses distance-to-nearest and aggregate-per-area the same way", () => {
+    expect(toolEligibility(toolById("distance-to-nearest"), degrees).ok).toBe(
+      false,
+    );
+    expect(
+      toolEligibility(toolById("aggregate-per-area"), {
+        ...degrees,
+        targetKind: "vector",
+        vectorPreparation: "ready",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("accepts the same tool on a metre-based table", () => {
+    expect(
+      toolEligibility(toolById("join-by-location"), {
+        ...base,
+        activeTableCrs: "EPSG:7415",
+        activeTableCrsMetric: true,
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("makes no claim when no CRS is recorded — every other layer in the app", () => {
+    expect(toolEligibility(toolById("join-by-location"), base)).toEqual({
+      ok: true,
+    });
+  });
+
+  it("leaves the tools that need no metric bounds alone", () => {
+    // Roof metrics and the 3D measurements read geometry the scene already
+    // placed in metres; the refusal is about the TABLE's bbox columns.
+    for (const id of [
+      "roof-metrics",
+      "height-from-extent",
+      "measure-solids",
+      "validate-solids",
+    ] as const) {
+      expect(toolEligibility(toolById(id), degrees)).toEqual({ ok: true });
+    }
   });
 });

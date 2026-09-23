@@ -24,7 +24,13 @@ import {
   type LayerFamilyState,
 } from "../../features/layers/familyStore";
 import type { ActiveLayer } from "../../features/workspace/activeLayer";
-import type { EligibilityContext } from "../../features/processing/eligibility";
+import {
+  metricBoundsRefusal,
+  type EligibilityContext,
+} from "../../features/processing/eligibility";
+import { toolById } from "../../features/processing/toolRegistry";
+import type { ToolId } from "../../features/processing/types";
+import { isMetricCrs, parseEpsgCode } from "@cityjson/navara-core";
 
 /** Everything {@link eligibilityContextFor} reads, subscribed once. */
 export interface EligibilityInputs {
@@ -76,6 +82,43 @@ export function tableEntryFor(
   ];
 }
 
+/**
+ * Whether `crs` — a table's recorded `sourceCrs` (R-G) — is metre-based.
+ *
+ * `null` in, `null` out: NO CLAIM, which is every table in the app but a
+ * CityParquet family view. The answer needs proj4's registry, so it is resolved
+ * here rather than in the pure `toolEligibility`, and through navara-core's own
+ * gate (`isMetricCrs`) so the toolbox and the loader refuse the same units.
+ */
+export function metricSourceCrs(crs: string | null): boolean | null {
+  if (crs === null) return null;
+  const epsg = parseEpsgCode(crs);
+  // A CRS spelt in a way nothing can parse is not a claim that it is metric.
+  if (epsg === null) return false;
+  return isMetricCrs(epsg);
+}
+
+/**
+ * Why `layerId` cannot be a CITY SOURCE for `toolId`, or `null`.
+ *
+ * Aggregate buildings per area writes to a vector layer and READS a city one, so
+ * `toolEligibility` — which only ever sees the target — never looks at the layer
+ * whose bounds the run actually measures. Ruling S2 has to reach that row too,
+ * and through the same function, so the two cannot drift.
+ */
+export function citySourceReason(
+  inputs: Pick<EligibilityInputs, "tables" | "families">,
+  layerId: string,
+  toolId: ToolId,
+): string | null {
+  const entry = tableEntryFor(inputs, layerId);
+  const crs = entry?.state === "ready" ? (entry.info.sourceCrs ?? null) : null;
+  return metricBoundsRefusal(toolById(toolId), {
+    activeTableCrs: crs,
+    activeTableCrsMetric: metricSourceCrs(crs),
+  });
+}
+
 export function eligibilityContextFor(
   target: ActiveLayer | null,
   inputs: EligibilityInputs,
@@ -94,6 +137,9 @@ export function eligibilityContextFor(
     target?.kind === "geo" && target.layer.kind === "geojson"
       ? target.layer.config
       : null;
+  // Ruling S2: the CRS the ACTIVE table measures in. Only a file-backed family
+  // view records one, so this is `null` — no claim — for every other layer.
+  const activeTableCrs = ready?.sourceCrs ?? null;
   return {
     targetKind: target ? layerKindOf(target) : "none",
     sourceEncoding:
@@ -109,6 +155,8 @@ export function eligibilityContextFor(
       spatial: extState("spatial"),
       three_d: extState("three_d"),
     },
+    activeTableCrs,
+    activeTableCrsMetric: metricSourceCrs(activeTableCrs),
   };
 }
 

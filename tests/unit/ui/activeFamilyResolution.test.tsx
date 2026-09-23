@@ -43,7 +43,7 @@ vi.mock("../../../src/insights/duckdb", () => ({
 
 const { useLayerQuery } = await import("../../../src/ui/table/useLayerQuery");
 const { useLayerCounts } = await import("../../../src/ui/table/useLayerCounts");
-const { eligibilityContextFor } =
+const { citySourceReason, eligibilityContextFor } =
   await import("../../../src/ui/processing/useEligibilityContext");
 const { useLayerTableStore, layerTableKey } =
   await import("../../../src/insights/layerTables");
@@ -252,5 +252,78 @@ describe("eligibilityContextFor", () => {
     });
     const ctx = eligibilityContextFor({ kind: "city", layer: plain }, inputs());
     expect(ctx.tableState).toBe("ready");
+  });
+
+  /** Ruling S2: the active family's own CRS, and whether it is metre-based. */
+  it("reports the ACTIVE family's CRS as non-metric for a PLATEAU package", () => {
+    const id = seedTwoFamilyLayer();
+    const layer = useLayerStore.getState().layers.find((l) => l.id === id)!;
+    useLayerTableStore.setState((s) => ({
+      tables: {
+        ...s.tables,
+        [layerTableKey(id, "bridge")]: {
+          state: "ready",
+          info: table("family_bridge", {
+            fileBacked: true,
+            familyKey: "bridge",
+            sourceCrs: "EPSG:6697",
+          }),
+        },
+      },
+    }));
+    const ctx = eligibilityContextFor({ kind: "city", layer }, inputs());
+    expect(ctx.activeTableCrs).toBe("EPSG:6697");
+    expect(ctx.activeTableCrsMetric).toBe(false);
+  });
+
+  it("reports a metre-based family CRS as metric", () => {
+    const id = seedTwoFamilyLayer();
+    const layer = useLayerStore.getState().layers.find((l) => l.id === id)!;
+    useLayerTableStore.setState((s) => ({
+      tables: {
+        ...s.tables,
+        [layerTableKey(id, "bridge")]: {
+          state: "ready",
+          info: table("family_bridge", {
+            fileBacked: true,
+            familyKey: "bridge",
+            sourceCrs: "EPSG:7415",
+          }),
+        },
+      },
+    }));
+    const ctx = eligibilityContextFor({ kind: "city", layer }, inputs());
+    expect(ctx.activeTableCrsMetric).toBe(true);
+  });
+
+  it("makes NO claim for a table that records no CRS", () => {
+    const id = seedTwoFamilyLayer();
+    const layer = useLayerStore.getState().layers.find((l) => l.id === id)!;
+    const ctx = eligibilityContextFor({ kind: "city", layer }, inputs());
+    expect(ctx.activeTableCrs).toBeNull();
+    expect(ctx.activeTableCrsMetric).toBeNull();
+  });
+
+  it("gives Aggregate's CITY SOURCE rows the same refusal (its target is the vector layer)", () => {
+    // `toolEligibility` only ever sees the TARGET, so a degree-based city layer
+    // chosen as Aggregate's source would otherwise slip through.
+    const id = seedTwoFamilyLayer();
+    useLayerTableStore.setState((s) => ({
+      tables: {
+        ...s.tables,
+        [layerTableKey(id, "bridge")]: {
+          state: "ready",
+          info: table("family_bridge", {
+            fileBacked: true,
+            familyKey: "bridge",
+            sourceCrs: "EPSG:6697",
+          }),
+        },
+      },
+    }));
+    expect(citySourceReason(inputs(), id, "aggregate-per-area")).toMatch(
+      /not metre-based/,
+    );
+    expect(citySourceReason(inputs(), id, "roof-metrics")).toBeNull();
   });
 });

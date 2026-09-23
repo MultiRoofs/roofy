@@ -35,6 +35,15 @@ vi.mock("../../../../src/insights/familyViews", () => ({
   dropFamilyViews: (layerId: string) => dropFamilyViews(layerId),
 }));
 
+/** The file's own CRS (ruling S2) — a footer read in the real thing, so it is
+ *  faked here for the same reason DuckDB is. */
+const familySourceCrs = vi.fn(
+  async (_source: EnsureInput["source"]): Promise<string | null> => "EPSG:6697",
+);
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: (source: EnsureInput["source"]) => familySourceCrs(source),
+}));
+
 import {
   buildLayerFamilies,
   ensureActiveFamilyView,
@@ -176,6 +185,8 @@ beforeEach(() => {
   ensureFamilyView.mockResolvedValue({ ok: true });
   dropFamilyView.mockClear();
   dropFamilyViews.mockClear();
+  familySourceCrs.mockClear();
+  familySourceCrs.mockResolvedValue("EPSG:6697");
 });
 
 describe("family keys and labels (R-A′)", () => {
@@ -294,6 +305,28 @@ describe("default families (R-D)", () => {
     await vi.waitFor(() =>
       expect(useFamilyStore.getState().layers.L1!.table.building).toBe("ready"),
     );
+  });
+
+  it("records the FILE's own CRS on the view, not the stream's projected one", async () => {
+    // Ruling S2: the view's `bbox` is the file's, so the CRS the refusal reads
+    // has to be the file's too — the stream header's is the UTM target.
+    seedLayer("L1", familiesOf({ key: "building", href: "building.parquet" }));
+    await vi.waitFor(() => expect(ensureFamilyView).toHaveBeenCalledTimes(1));
+    expect(familySourceCrs).toHaveBeenCalledWith({
+      url: "https://data.example/building.parquet",
+    });
+    expect(ensureFamilyView.mock.calls[0]?.[0]).toMatchObject({
+      sourceCrs: "EPSG:6697",
+    });
+  });
+
+  it("publishes the view with no CRS claim when the file does not say", async () => {
+    familySourceCrs.mockResolvedValueOnce(null);
+    seedLayer("L1", familiesOf({ key: "building", href: "building.parquet" }));
+    await vi.waitFor(() => expect(ensureFamilyView).toHaveBeenCalledTimes(1));
+    expect(ensureFamilyView.mock.calls[0]?.[0]).toMatchObject({
+      sourceCrs: null,
+    });
   });
 
   it("has no families for a layer nothing registered", () => {
