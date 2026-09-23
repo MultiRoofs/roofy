@@ -14,7 +14,10 @@ import {
 import { WorkspacesPage } from "../ui/workspaces/WorkspacesPage";
 import { captureTablePresentation } from "../features/query/tablePresentation";
 import { useQueryStore } from "../features/query/queryStore";
-import { getActiveTableKey } from "../features/layers/familyStore";
+import {
+  familiesSnapshotOf,
+  getActiveTableKey,
+} from "../features/layers/familyStore";
 import { type TablePresentation } from "../features/query/tablePresentation";
 import {
   normalizeAttributeOrders,
@@ -34,6 +37,7 @@ import {
 import type {
   CityModelReference,
   GeographicCamera,
+  LayerFamiliesSnapshot,
   ProjectStateStore,
   RawLayerSnapshot,
   SnapshotSummary,
@@ -228,6 +232,21 @@ function streamSourceSnapshot(
  *  (not auto-dismissing) prompt, distinct from the transient `toast`, so
  *  the user can re-select the file rather than the layer silently vanishing. */
 /** A snapshot's `appearance` field, or `undefined` for anything malformed. */
+/**
+ * `{ families }` for a layer that has object families, `{}` for every other one
+ * (ruling S4).
+ *
+ * A spread rather than an always-present field, the convention every optional
+ * snapshot field here follows: absent means the R-D default, so a layer with one
+ * table writes nothing.
+ */
+function familiesField(layerId: string): {
+  families?: LayerFamiliesSnapshot;
+} {
+  const families = familiesSnapshotOf(layerId);
+  return families === undefined ? {} : { families };
+}
+
 function readAppearanceTheme(raw: unknown): AppearanceTheme | null | undefined {
   if (raw === null) return null;
   if (typeof raw !== "object") return undefined;
@@ -1045,6 +1064,9 @@ export function App({
           useQueryStore.getState().queries[getActiveTableKey(l.id)],
         ),
         appearance: l.selectedAppearance,
+        // Ruling S4: which object families were open, and which one the table
+        // panel was showing. Absent for every layer that has none.
+        ...familiesField(l.id),
         ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
       })),
       // Stripped of anything that cannot survive a reload — an inline GeoJSON
@@ -1289,6 +1311,8 @@ export function App({
                   attributeOrders,
                   tablePresentation,
                   selectedAppearance: appearance,
+                  // Validated against the families this open resolves (S4).
+                  families: sl.families,
                 },
                 { resolveStreamPlugin, holdEngine },
               );
@@ -1495,6 +1519,8 @@ export function App({
           tablePresentation: captureTablePresentation(
             useQueryStore.getState().queries[getActiveTableKey(l.id)],
           ),
+          // A shared link opens the same families on the other side (S4).
+          ...familiesField(l.id),
         })),
       cam: cameraState,
       dt: datetime.toISOString(),
@@ -1590,6 +1616,7 @@ export function App({
                 colorBy,
                 singleColor,
                 unmatchedColor,
+                families: sl.families,
               },
               { resolveStreamPlugin, holdEngine },
             );

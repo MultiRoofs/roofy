@@ -18,6 +18,7 @@ import { addCityLayer, type AddCityLayerInput } from "../layers/addCityLayer";
 import { ensureModelCrsLoadable } from "../layers/ensureCrs";
 import {
   buildLayerFamilies,
+  restoredFamilyChoice,
   streamSourceOf,
   useFamilyStore,
 } from "../layers/familyStore";
@@ -38,7 +39,22 @@ import { decideCityParquetMode, type CityParquetMode } from "./streamDecision";
 export type CityParquetLayerSettings = Omit<
   AddCityLayerInput,
   "model" | "modelRef" | "duckdb"
->;
+> & {
+  /**
+   * A restored workspace's or share link's family choice (ruling S4): which
+   * object families were open, and which one the table panel was showing.
+   *
+   * Absent on a fresh add, which is what the R-D default is for. The keys are
+   * validated against the families this open actually resolved
+   * (`restoredFamilyChoice`), because the source may have been repackaged since.
+   * Ignored on the static path: a below-threshold package is one merged layer
+   * with one table, and this milestone is streamed-only.
+   */
+  readonly families?: {
+    readonly enabled: ReadonlyArray<string>;
+    readonly active: string | null;
+  };
+};
 
 export interface CityParquetLayerDeps {
   /** The live stream plugin, resolved only when the source streams. */
@@ -67,7 +83,15 @@ function openStream(
     // (ruling S3).
     const id = crypto.randomUUID();
     const families = buildLayerFamilies(mode.families);
-    useFamilyStore.getState().setFamilies(id, families);
+    // A restored choice, validated against what this package actually has — an
+    // unknown key is dropped, and a choice that survives as nothing at all reads
+    // as `undefined`, which is the R-D default rather than a layer with no
+    // stream (ruling S4).
+    const restored = restoredFamilyChoice(families, settings.families);
+    useFamilyStore.getState().setFamilies(id, families, restored.enabled);
+    if (restored.active !== null) {
+      useFamilyStore.getState().setActiveFamily(id, restored.active);
+    }
     const opened = useFamilyStore.getState().layers[id]?.opened ?? [];
     // ONLY the enabled families' files — Building alone for a PLATEAU package
     // (R-D). The rest are available, and each still gets a table on demand.

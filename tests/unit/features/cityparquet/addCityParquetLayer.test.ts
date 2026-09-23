@@ -44,6 +44,9 @@ vi.mock("../../../../src/insights/layerTables", () => ({
   // (re)builds one — never its own `table` state, which an engine death leaves
   // behind. Nothing is registered in this suite, so: none.
   getLayerTable: vi.fn(() => null),
+  // The key a family's table AND its query state are both kept under (R-C′).
+  layerTableKey: (layerId: string, family: string | null) =>
+    family === null ? layerId : `${layerId}::${family}`,
 }));
 // The file's own CRS is a ranged footer read (ruling S2); faked, so no case
 // here reaches for the network.
@@ -148,6 +151,43 @@ describe("addCityParquetLayerFromUrl — object families", () => {
     // The families were registered BEFORE the row landed, so the table
     // lifecycle never built this layer a bare resident table (ruling S3).
     expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("reopens a RESTORED choice of families, and returns to the saved family", async () => {
+    // Ruling S4: a restored workspace opens exactly what the user had open, and
+    // its table panel comes back on the family they were reading.
+    mocks.decide.mockResolvedValue(twoFamilyStream());
+    const plugin = fakePlugin();
+    const layerId = await addCityParquetLayerFromUrl(
+      URL_,
+      {
+        name: "yokohama-shi",
+        families: { enabled: ["bridge"], active: "bridge" },
+      },
+      { resolveStreamPlugin: async () => plugin },
+    );
+    expect(plugin.openStream.mock.calls[0]![0]).toMatchObject({
+      source: { url: `${URL_}bridge.parquet` },
+    });
+    const entry = useFamilyStore.getState().layers[layerId]!;
+    expect([...entry.enabled]).toEqual(["bridge"]);
+    expect(entry.active).toBe("bridge");
+  });
+
+  it("falls back to the default when a restored choice names families the package lost", async () => {
+    mocks.decide.mockResolvedValue(twoFamilyStream());
+    const plugin = fakePlugin();
+    const layerId = await addCityParquetLayerFromUrl(
+      URL_,
+      {
+        name: "yokohama-shi",
+        families: { enabled: ["tunnel"], active: "tunnel" },
+      },
+      { resolveStreamPlugin: async () => plugin },
+    );
+    const entry = useFamilyStore.getState().layers[layerId]!;
+    expect([...entry.enabled]).toEqual(["building"]);
+    expect(entry.active).toBe("building");
   });
 
   it("records the opened family's row count from the header, by ORDER", async () => {

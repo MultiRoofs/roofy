@@ -1,15 +1,16 @@
 /**
- * The one version step a saved workspace can take: v3 -> v4.
+ * The version steps a saved workspace can take: v3 or v4 -> v5.
  *
  * Kept out of `restoreSnapshot` so the decision "can this document be read at
  * all?" is a pure function of the document — testable without touching a
  * store, and reusable by anything else that has to answer the question before
  * committing to a restore.
  *
- * There is exactly one step because v4 is exactly one additive field
- * ({@link ProjectSnapshot.activeLayer}): a v3 document already IS a v4
- * document with that field absent, and absent already means "the first layer
- * in unified order". v1/v2 are a different matter and stay unsupported — see
+ * Every step is a version bump and nothing else, because every version since v3
+ * has added optional fields whose absence already means the right thing: v4's
+ * `activeLayer` absent means "the first layer in unified order", and v5's
+ * per-layer `families` absent means the R-D default (Building alone). v1/v2 are a
+ * different matter and stay unsupported — see
  * {@link UnsupportedSnapshotVersionError}.
  */
 
@@ -26,8 +27,8 @@ export type MigrationOutcome =
     }
   | { readonly ok: false; readonly error: UnsupportedSnapshotVersionError };
 
-/** v4 passes through; v3 becomes v4 with `activeLayer` omitted (the first
- *  layer); anything else is unsupported. */
+/** v5 passes through; v4 and v3 become v5 with the additive fields absent (the
+ *  first layer, and the default families); anything else is unsupported. */
 export function migrateSnapshot(raw: ProjectSnapshot): MigrationOutcome {
   const version = raw?.version;
   if (version === SNAPSHOT_VERSION) {
@@ -36,13 +37,13 @@ export function migrateSnapshot(raw: ProjectSnapshot): MigrationOutcome {
     // `migratedFrom` alone.
     return { ok: true, snapshot: raw, migratedFrom: null };
   }
-  if (version === "3") {
+  if (version === "3" || version === "4") {
     // Copied rather than mutated — the caller's document may be the one the
     // snapshot list is still rendering from.
     return {
       ok: true,
       snapshot: { ...raw, version: SNAPSHOT_VERSION },
-      migratedFrom: "3",
+      migratedFrom: version,
     };
   }
   return {

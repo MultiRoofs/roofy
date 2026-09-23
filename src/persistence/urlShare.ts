@@ -20,7 +20,11 @@ import type { Rule } from "../features/rules/types";
 import { normalizeSolarTimeZone } from "../features/solar/solarTimeZone";
 import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
-import type { GeographicCamera } from "./types";
+import {
+  normalizeFamiliesSnapshot,
+  type GeographicCamera,
+  type LayerFamiliesSnapshot,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,6 +60,17 @@ export interface ShareableLayerState {
   readonly selectedLods?: readonly string[];
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
+  /**
+   * The object families this layer had open, and the one its table showed
+   * (ruling S4).
+   *
+   * OPTIONAL, on the same terms as `colorBy` above, so the hash schema stays
+   * v3: a link minted before it carries none, and absent means the R-D default —
+   * which is what such a link opened. Validated by {@link readShareHash}, and
+   * validated AGAIN against the package's real families on the other side, since
+   * a shared source can be repackaged.
+   */
+  readonly families?: LayerFamiliesSnapshot;
 }
 
 /**
@@ -242,6 +257,7 @@ export function readShareHash(hash: string): ShareHashResult {
               tablePresentation: normalizeTablePresentation(
                 l.tablePresentation,
               ),
+              families: normalizeFamiliesSnapshot(l.families),
             }
           : l,
       )

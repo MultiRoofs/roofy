@@ -16,7 +16,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { captureSnapshot } from "../../../src/persistence/captureSnapshot";
 import { restoreSnapshot } from "../../../src/persistence/restoreSnapshot";
-import { UnsupportedSnapshotVersionError } from "../../../src/persistence/types";
+import {
+  SNAPSHOT_VERSION,
+  UnsupportedSnapshotVersionError,
+} from "../../../src/persistence/types";
 import type { GeographicCamera } from "../../../src/persistence/types";
 import type { GeographicCameraState } from "../../../src/scene/geographicCamera";
 import { useSelectionStore } from "../../../src/features/selection/selectionStore";
@@ -81,7 +84,7 @@ describe("captureSnapshot", () => {
       pickMode: "surface",
     });
 
-    expect(snapshot.version).toBe("4");
+    expect(snapshot.version).toBe(SNAPSHOT_VERSION);
     expect(snapshot.label).toBe("Test");
     expect(snapshot.layers).toHaveLength(1);
     expect(snapshot.layers![0]!.name).toBe("delft");

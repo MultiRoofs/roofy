@@ -62,6 +62,47 @@ export type StreamSourceSnapshot =
   | { readonly kind: "url"; readonly url: string }
   | { readonly kind: "file"; readonly fileName: string };
 
+/**
+ * Which object families a streamed CityParquet layer had open, and which one its
+ * table panel was showing (ruling S4, snapshot v5).
+ *
+ * The KEYS the family store uses (`LayerFamily.key`, disambiguated), which are
+ * the manifest's own asset keys for every package seen so far. They are not
+ * trusted on the way back in: a repackaged source may no longer have them, so the
+ * restore validates them against the families it actually resolved and falls back
+ * to the R-D default rather than opening nothing.
+ */
+export interface LayerFamiliesSnapshot {
+  readonly enabled: ReadonlyArray<string>;
+  /** The family the table panel was on, or `null` for "whichever opens". */
+  readonly active: string | null;
+}
+
+/**
+ * A saved family choice, validated — or `undefined` when there is nothing
+ * usable in it.
+ *
+ * Validated rather than cast for the reason every other normaliser here is: this
+ * value comes from localStorage or a URL hash, so a hand-edited document must
+ * read as "no choice" (the default) and never as a set of keys that are not
+ * strings.
+ */
+export function normalizeFamiliesSnapshot(
+  value: unknown,
+): LayerFamiliesSnapshot | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const raw = value as { enabled?: unknown; active?: unknown };
+  if (!Array.isArray(raw.enabled)) return undefined;
+  const enabled = raw.enabled.filter(
+    (key): key is string => typeof key === "string" && key !== "",
+  );
+  if (enabled.length !== raw.enabled.length) return undefined;
+  if (enabled.length === 0) return undefined;
+  const active =
+    typeof raw.active === "string" && raw.active !== "" ? raw.active : null;
+  return { enabled, active };
+}
+
 export interface LayerSnapshot {
   readonly name: string;
   readonly modelRef: CityModelReference;
@@ -112,6 +153,14 @@ export interface LayerSnapshot {
   readonly appearance?: AppearanceTheme | null;
   /** Present only for a streaming layer. */
   readonly stream?: StreamSourceSnapshot;
+  /**
+   * v5: the object families this layer had open and the one its table showed.
+   *
+   * Present only for a streamed CityParquet package. Absent means the R-D
+   * default — Building alone, or every family when the package has no building
+   * table — which is what every build before v5 did.
+   */
+  readonly families?: LayerFamiliesSnapshot;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +182,7 @@ export interface RawLayerSnapshot {
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
   readonly stream?: StreamSourceSnapshot;
+  readonly families?: LayerFamiliesSnapshot;
 }
 
 export interface RawLayersDocument {
@@ -142,6 +192,9 @@ export interface RawLayersDocument {
 
 export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
   readonly selectedLods?: readonly string[];
+  /** Validated by `normalizeLayers`; `undefined` when the document said nothing
+   *  usable, which restores at the R-D default. */
+  readonly families?: LayerFamiliesSnapshot;
   readonly lodMode: "auto" | "manual";
   readonly hiddenTypes: readonly string[];
   readonly attributeOrders?: AttributeOrders;
@@ -182,6 +235,7 @@ export function normalizeLayers(
     const hiddenTypes = l.hiddenTypes ?? [];
     const attributeOrders = normalizeAttributeOrders(l.attributeOrders);
     const tablePresentation = normalizeTablePresentation(l.tablePresentation);
+    const families = normalizeFamiliesSnapshot(l.families);
     // The same validator the share hash and the store use, so one document
     // cannot restore differently depending on which door it came through.
     const colorBy = normalizeColorBy({
@@ -199,6 +253,7 @@ export function normalizeLayers(
           hiddenTypes,
           attributeOrders,
           tablePresentation,
+          families,
           ...colorBy,
           unavailable: true,
         }
@@ -209,6 +264,7 @@ export function normalizeLayers(
           hiddenTypes,
           attributeOrders,
           tablePresentation,
+          families,
           ...colorBy,
         };
   });
@@ -466,12 +522,17 @@ export function normalizeSceneTheme(theme: SceneTheme | undefined): SceneTheme {
  * document with that one field absent, which is why `migrateSnapshot` carries
  * v3 forward rather than rejecting it — and why v1/v2 still cannot be carried
  * forward at all: their cameras are unconvertible, not merely incomplete.
+ *
+ * v5 (additive): {@link LayerSnapshot.families} — the object families a streamed
+ * CityParquet layer had open, and the one its table showed. A v3 or v4 document
+ * is a v5 document with that field absent on every layer, and absent means the
+ * R-D default, which is the only thing those builds could do.
  */
-export const SNAPSHOT_VERSION = "4";
+export const SNAPSHOT_VERSION = "5";
 
 export interface ProjectSnapshot {
-  /** Always {@link SNAPSHOT_VERSION} when written. On restore, `"3"` is
-   *  carried forward by `migrateSnapshot`; anything else is rejected. */
+  /** Always {@link SNAPSHOT_VERSION} when written. On restore, `"3"` and `"4"`
+   *  are carried forward by `migrateSnapshot`; anything else is rejected. */
   readonly version: string;
   readonly savedAt: string; // ISO 8601
   readonly label: string;

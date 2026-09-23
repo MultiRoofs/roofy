@@ -292,6 +292,60 @@ export function familyOffersBuildings(family: LayerFamily): boolean {
   return family.rawKey.toLowerCase() === BUILDING_KEY;
 }
 
+/**
+ * A layer's family choice, for a workspace snapshot or a share link (ruling S4)
+ * — or `undefined` for a layer that has none, which writes nothing.
+ *
+ * The DESIRED set (`enabled`), not what happens to be open: a save taken while a
+ * reopen is in flight, or just after one failed, should restore what the user
+ * asked for rather than the state the failure left behind.
+ */
+export function familiesSnapshotOf(layerId: string):
+  | {
+      readonly enabled: ReadonlyArray<string>;
+      readonly active: string | null;
+    }
+  | undefined {
+  const entry = useFamilyStore.getState().layers[layerId];
+  if (entry === undefined || entry.families.length === 0) return undefined;
+  return { enabled: [...entry.enabled], active: entry.active };
+}
+
+/**
+ * What a restored choice means for the families this open actually resolved
+ * (ruling S4).
+ *
+ * The saved keys are NOT trusted: a package can be repackaged between the save
+ * and the restore, so a key that no longer exists is dropped — and if nothing
+ * survives, `enabled` is `undefined`, which means "the R-D default". Restoring an
+ * empty set would open a layer with no stream at all, which `openStream` cannot
+ * even express.
+ *
+ * `active: null` means "whichever family opens first", the same thing a fresh
+ * open means by it.
+ */
+export function restoredFamilyChoice(
+  families: ReadonlyArray<LayerFamily>,
+  saved:
+    | {
+        readonly enabled: ReadonlyArray<string>;
+        readonly active: string | null;
+      }
+    | undefined,
+): {
+  readonly enabled: string[] | undefined;
+  readonly active: string | null;
+} {
+  if (saved === undefined) return { enabled: undefined, active: null };
+  const keys = new Set(families.map((f) => f.key));
+  const enabled = saved.enabled.filter((key) => keys.has(key));
+  return {
+    enabled: enabled.length === 0 ? undefined : enabled,
+    active:
+      saved.active !== null && keys.has(saved.active) ? saved.active : null,
+  };
+}
+
 /** The stream source for a list of families, in their own order. The shape the
  *  worker was verified against: ONE file is `{url}`/`{blob}`, several are
  *  `{urls}`/`{blobs}`. */
