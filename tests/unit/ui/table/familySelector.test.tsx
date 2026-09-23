@@ -266,6 +266,17 @@ describe("the table panel's family selector", () => {
     expect(screen.getByRole("button", { name: "Load table" })).toBeTruthy();
   });
 
+  it("never calls a family's table partial — it reads the whole file", async () => {
+    // "currently loaded" is true of a FlatCityBuf layer's resident table and
+    // false of a family view (ruling R-B′), which is the whole point of the
+    // milestone. "Table only" stays: map filtering is off for every stream.
+    seed({ bridgeReady: true });
+    panel();
+    await screen.findByLabelText("Object family");
+    await waitFor(() => expect(screen.getByText(/Table only/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain("currently loaded");
+  });
+
   it("shows no family selector for a layer with one table", async () => {
     useLayerStore.setState({
       layers: [

@@ -14,6 +14,7 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { Rule } from "../../../../src/features/rules/types";
+import { useQueryStore } from "../../../../src/features/query/queryStore";
 import { useFamilyStore } from "../../../../src/features/layers/familyStore";
 
 const mocks = vi.hoisted(() => ({
@@ -188,6 +189,31 @@ describe("addCityParquetLayerFromUrl — object families", () => {
     const entry = useFamilyStore.getState().layers[layerId]!;
     expect([...entry.enabled]).toEqual(["building"]);
     expect(entry.active).toBe("building");
+  });
+
+  it("restores the table presentation onto the ACTIVE family's key", async () => {
+    // The query state moved to `${layerId}::${family}` (R-C′), and
+    // `layerStore.addLayer` restores a presentation under the BARE key — which no
+    // reader of a family layer looks at. This is the one place that knows both.
+    mocks.decide.mockResolvedValue(twoFamilyStream());
+    const plugin = fakePlugin();
+    const layerId = await addCityParquetLayerFromUrl(
+      URL_,
+      {
+        name: "yokohama-shi",
+        tablePresentation: {
+          columns: null,
+          sort: null,
+          view: "raw",
+          pageSize: 100,
+          drawerTab: "records",
+        },
+      },
+      { resolveStreamPlugin: async () => plugin },
+    );
+    expect(
+      useQueryStore.getState().queries[`${layerId}::building`]?.pageSize,
+    ).toBe(100);
   });
 
   it("records the opened family's row count from the header, by ORDER", async () => {

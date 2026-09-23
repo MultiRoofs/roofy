@@ -488,8 +488,13 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
  * Here rather than in the panel because the panel is not the only reader: the
  * counts hook, the filter chip and an export all read the same query state, and
  * a default applied in one of them would be a different default in the others.
+ *
+ * Exported because a RESTORED presentation is written after the family is
+ * active, and a saved (or hand-edited) "buildings" reading has to be corrected
+ * the same way — an empty grid with no switch to leave it by is the worst of
+ * both.
  */
-function seedFamilyView(layerId: string, family: string): void {
+export function seedFamilyView(layerId: string, family: string): void {
   const entry = useFamilyStore.getState().layers[layerId];
   const found = entry?.families.find((f) => f.key === family);
   if (!found || familyOffersBuildings(found)) return;

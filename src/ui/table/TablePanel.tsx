@@ -101,6 +101,11 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   // families keeps both readings, exactly as before.
   const offersBuildings =
     activeFamilyEntry === null || familyOffersBuildings(activeFamilyEntry);
+  // A FAMILY's table is a view over the FILE (ruling R-B′): it answers for rows
+  // the camera never delivered, so nothing here may call it partial. Only a
+  // FlatCityBuf layer's table is built from the resident set.
+  const residentOnly =
+    activeLayer?.isStreaming === true && familyEntry === undefined;
   const query = useQueryStore((s) =>
     queryKey === null ? null : layerQuery(s, queryKey),
   );
@@ -354,7 +359,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                 ? "?"
                 : formatCount(layerCounts.selected)}{" "}
               {query?.view === "raw" ? "objects" : "buildings"}
-              {activeLayer?.isStreaming ? " · currently loaded" : ""}
+              {residentOnly ? " · currently loaded" : ""}
             </span>
           )}
         </span>
@@ -363,12 +368,18 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
           className="table-sync-label"
           title={
             activeLayer?.isStreaming
-              ? STREAMING_FILTER_REASON
+              ? familyEntry === undefined
+                ? STREAMING_FILTER_REASON
+                : `${STREAMING_FILTER_REASON}; the table itself covers the whole family`
               : "Filters update the map and table together"
           }
         >
+          {/* "Table only" is true of every stream — map filtering is off for
+              them — but "currently loaded" is only true of a resident table. */}
           {activeLayer?.isStreaming
-            ? "Table only · currently loaded"
+            ? residentOnly
+              ? "Table only · currently loaded"
+              : "Table only"
             : "Map + table"}
         </span>
         <div

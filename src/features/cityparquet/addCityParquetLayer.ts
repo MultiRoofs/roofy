@@ -18,10 +18,13 @@ import { addCityLayer, type AddCityLayerInput } from "../layers/addCityLayer";
 import { ensureModelCrsLoadable } from "../layers/ensureCrs";
 import {
   buildLayerFamilies,
+  getActiveTableKey,
   restoredFamilyChoice,
+  seedFamilyView,
   streamSourceOf,
   useFamilyStore,
 } from "../layers/familyStore";
+import { useQueryStore } from "../query/queryStore";
 import { dropFamilyViews } from "../../insights/familyViews";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
@@ -116,6 +119,23 @@ function openStream(
         tablePresentation: settings.tablePresentation,
         selectedAppearance: settings.selectedAppearance,
       });
+      // The table presentation, ONTO THE ACTIVE FAMILY's key. `addLayer` restored
+      // it under the bare layer id, which is the one key no reader of a family
+      // layer looks at (R-C′) — and this is the only place that knows both the
+      // saved value and which family ended up active.
+      const active = useFamilyStore.getState().layers[layerId]?.active ?? null;
+      if (settings.tablePresentation !== undefined) {
+        useQueryStore
+          .getState()
+          .restorePresentation(
+            getActiveTableKey(layerId),
+            settings.tablePresentation,
+          );
+        // A saved "buildings" reading for a family that holds no Buildings would
+        // open an empty grid with no switch to leave it by, so the seed runs
+        // again over what was just restored.
+        if (active !== null) seedFamilyView(layerId, active);
+      }
       // The header's per-table counts, paired with the families the stream was
       // opened with STRICTLY BY ORDER: `tables[i].name` is a label the reader
       // chose, never an identity.
