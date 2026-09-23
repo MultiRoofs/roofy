@@ -40,9 +40,21 @@ import {
 import { getStreamPlugin } from "../../features/streaming/streamPlugin";
 import { useShellStore } from "../shell/shellStore";
 
-/** What a family's row says about its geometry. `rowCount` is the family's own
- *  size from the stream header — `null` until it has been opened once. */
-function geometryText(
+/**
+ * What a family's row says about its geometry.
+ *
+ * `rowCount` is the family's own size from the stream header — the objects in
+ * the FILE, `null` until the family has been opened once. It is NOT what the
+ * camera has delivered, so it is not "loaded": on the real Yokohama package that
+ * read "884,106 loaded" beside some 4,500 resident objects. The loaded reading
+ * belongs to the status bar ("N of M loaded objects") and to the details note
+ * above; this row states what opening the family gives access to.
+ *
+ * The resident count is deliberately not offered PER FAMILY: the resident model
+ * is one set for the layer and its objects carry no family, so any number here
+ * would be the whole layer's wearing one family's label.
+ */
+export function geometryText(
   state: FamilyGeometryState | undefined,
   rowCount: number | null,
 ): string {
@@ -50,8 +62,10 @@ function geometryText(
   if (state === "failed") return "Failed";
   if (state !== "open") return "Not opened";
   // An OPEN family whose header never stated a count is still open; saying
-  // "0 loaded" would be a number nobody measured.
-  return rowCount === null ? "Opened" : `${formatCount(rowCount)} loaded`;
+  // "0 objects" would be a number nobody measured.
+  return rowCount === null
+    ? "Opened"
+    : `Opened · ${formatCount(rowCount)} objects`;
 }
 
 /**
