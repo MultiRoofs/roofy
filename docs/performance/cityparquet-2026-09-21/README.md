@@ -274,6 +274,83 @@ by a per-triangle census of the live meshes' flat face normals, which reads
 roofs up / grounds down at LoD 2 and **99.94 % agreement on one direction**
 across 16,058 horizontal LoD 0 footprint faces.
 
+## Task 4 (on-demand attributes): measured 2026-09-23, not built
+
+The handoff's task 4 — "on-demand attributes for clicked objects", behind a
+gate of "two separate benchmarks on the real Yokohama file"
+(`docs/plans/2026-09-22-cityparquet-bounded-loading.md`, § "Roadmap for
+tasks 4–6") — was measured on 2026-09-23. **The gate refused the build.** A
+streamed CityParquet layer therefore keeps reading its attribute columns WITH
+its geometry, and `docs/plans/2026-09-22-cityparquet-on-demand-attributes.md`
+records the decision in full. This section is the evidence.
+
+**Method.** The per-column figures come from each file's Parquet footer — the
+sum of `total_compressed_size` over every row group, per top-level column —
+classified exactly as the reader classifies them (`tableReader.ts`:
+`IDENTITY_COLUMNS` = `id, feature_id, object_type, parents, children, bbox`;
+geometry = the `geometry`/`geometry_properties`/`material`/`texture` family;
+attributes = the rest). The read figures come from the package's own vendored
+hyparquet (`navara-cityparquet/src/vendor/hyparquet`) — the same primitive
+`readRows` calls the streaming reader makes — driven through a counting
+`AsyncBuffer` over real ranged HTTP, so they count the requests the proposed
+transport would have paid. The package's built `dist/` is stale (it reports
+`epsg: 32654` and carries no `tables` field), so the vendored reader was used
+directly rather than the package entry point. The scripts lived in the
+session's scratchpad and were not committed; this paragraph is enough to
+reproduce them.
+
+**Yokohama** (`…/plateau/yokohama-shi/building.parquet`, 319.35 MB, 884,106
+rows, 14 row groups, 37 columns):
+
+| kind      | compressed  |      share |
+| --------- | ----------- | ---------: |
+| geometry  | 262.55 MB   |    82.32 % |
+| identity  | 55.59 MB    |    17.43 % |
+| attribute | **0.79 MB** | **0.25 %** |
+
+Attribute share of a full projection, per bake rung: rung 0 **0.62 %**, rung 1
+0.27 %, rung 2 0.25 %, rungs 3–4 0.25 %. `measuredHeight` alone is 0.74 MB —
+94 % of the attribute bytes; the other six footer attributes total 13.8 KB
+across 884,106 rows. The footer declares `measuredHeight`, `creationDate`,
+`class`, `function`, `yearOfConstruction`, `height`, `averageHeight`.
+
+**Nishitokyo** (29.29 MB, 84,862 rows): identity 5.27 MB, attributes
+**0.29 MB** — rung 0 **2.35 %**, rung 1 1.02 %, rungs 2–4 **0.99 %**.
+
+**The click-path read the plan specified** (Yokohama, `id` plus the seven
+footer attributes, `useOffsetIndex: true`):
+
+| read                                     | ranged bytes | HTTP requests | warm ms | decoded |
+| ---------------------------------------- | -----------: | ------------: | ------: | ------: |
+| 1 row (`rowStart 500000, rowEnd 500001`) |      416,154 |            23 | 468–510 |   183 B |
+| 1 row, another row group (100,000)       |      411,641 |            23 | 468–713 |   183 B |
+| **2000 rows** (500,000–502,000)          |  **416,154** |        **23** |     662 |  355 KB |
+
+**One row costs exactly what two thousand rows cost.** Offset indexes and
+PAGES are the granularity, not rows. The cold first call was 3,554 ms; the
+table above is warm. Decoded attributes are 182 B per row, with a mean of
+**1.00** non-null attribute value per row over 2,000 sampled rows (only
+`measuredHeight`) — because `readAttributes` (`decodeTable.ts`) skips null
+cells, so a record holds exactly one attribute key on this data: six of
+Yokohama's seven declared columns are all-null.
+
+**The conclusion, stated for what it is: an on-demand per-object attribute
+fetch was REFUSED BY MEASUREMENT, not deferred.** The plan's own gate (Task 1
+Step 3) named 5 % of a fetch's bytes as the threshold below which "deferral
+buys little"; both real datasets are under it at every rung, and the record
+heap difference is nil because a null cell never becomes a key. Per click the
+proposed transport would have spent 0.40 MB over 23 range requests — about
+what reading those attributes for two thousand objects costs — to deliver
+182 B containing one useful number. The finding is structural rather than a
+PLATEAU artefact: a **wider** attribute table makes the per-row read worse,
+because each extra column adds another offset-index fetch plus another whole
+page per click.
+
+The one case a per-object lookup would genuinely pay is a different feature
+and a correctness bug rather than a performance task: a restored selection of
+a NON-resident streamed object never resolves. It is recorded under "Open
+follow-up" in `docs/roadmap.md`.
+
 ## Findings
 
 The full Yokohama building table exhausts a 4 GiB V8 heap **inside `readCityParquetTable`**, before WKB decoding, CRS normalization, mesh building, or DuckDB ingestion. The isolated process reports `Allocation failed - JavaScript heap out of memory` (preserved in `yokohama-full-reader-stderr.txt`); its last completed stage is the file read. This establishes a reader memory failure independently of Navara and the GPU. It strongly supports, but does not directly prove, the cause of the earlier browser tab loss.

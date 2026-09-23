@@ -770,6 +770,34 @@ Carried to M4 — things a user can notice today:
   1024 at `innerWidth` 1000), clipping the right edge of the right panel with
   the panel collapsed too. Pre-existing and unrelated to the toolbox.
 
+## Open follow-ups
+
+Named here because they belong to no milestone above and would otherwise live
+only in a plan nobody re-reads.
+
+### A restored selection of a non-resident streamed object never resolves
+
+A share link or a saved workspace that names an object of a STREAMED layer
+which is not resident — its cell has not been fetched, because the restored
+camera does not cover it — leaves `useResolvedBuilding` at `loading: true`
+indefinitely. Nothing ever completes it: residency arrives only when the
+camera visits that cell, so the inspector shows a spinner for a selection the
+workspace itself recorded. **This is a correctness bug, not a performance
+task.**
+
+It is also the one place a per-object lookup has positive value, and the fix
+is small because the machinery already exists: each object family publishes a
+DuckDB VIEW over its own file (`src/insights/familyViews.ts`), so
+`SELECT … FROM <family view> WHERE id = ?` answers for any row of the file,
+resident or not — provided the view is ready when the selection restores.
+
+Found by the task-4 measurement of 2026-09-23, which refused the on-demand
+attribute fetch it was gating (`docs/plans/2026-09-22-cityparquet-on-demand-attributes.md`).
+Deliberately NOT implemented there: resolving a non-resident object is a
+different feature from avoiding an attribute read, and it belongs in a plan of
+its own — "resolve a non-resident selection from its family view" — never as a
+revival of the deferred-attribute idea, which the measurement closed.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions

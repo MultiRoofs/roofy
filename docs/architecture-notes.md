@@ -874,6 +874,29 @@ The planner, settle gate, resident budgets, picking and inspector are shared.
   row group decodes only its pages (1 000 rows: 2.47 MB vs 21.1 MB without).
   Yokohama: 24.5 MB read (7 % of the file) and ~40 MB retained to open
   884 106 rows.
+- **Attributes travel WITH the geometry, and that was measured rather than
+  assumed (2026-09-23).** Deferring the footer's attribute columns out of the
+  fetch, to be read per object on click, saves nothing worth a second
+  transport: those columns are **0.79 MB of Yokohama's 318.93 MB** compressed
+  — **0.25 %** of what a fetch reads, **0.62 %** at rung 0 where the geometry
+  is cheapest — and **0.99 %** on Nishitokyo (**2.35 %** at rung 0). Nor is
+  there heap to reclaim: `readAttributes`
+  (`navara-cityparquet/src/decodeTable.ts`) skips null cells, so a resident
+  record carries only attributes it can show — exactly **one key** on the real
+  PLATEAU data, where six of Yokohama's seven declared columns are all-null.
+  And the proposed transport is strictly worse than what ships: a ONE-row
+  attribute read (`rowStart = row, rowEnd = row + 1, useOffsetIndex: true`)
+  costs **0.40 MB over 23 range requests, ~470–710 ms warm — identical to a
+  2000-row read of the same columns**, because offset indexes and PAGES are
+  the granularity, not rows; a WIDER attribute table makes the per-object read
+  worse still, one more offset-index fetch and one more whole page per column.
+  So an on-demand per-object attribute fetch was **refused by measurement, not
+  deferred**. Method, tables and the two files to re-run it against:
+  `docs/plans/2026-09-22-cityparquet-on-demand-attributes.md` and "Task 4" in
+  `docs/performance/cityparquet-2026-09-21/README.md`. The one place a
+  per-object lookup would genuinely pay is a correctness bug rather than a
+  performance task — a restored selection of a NON-resident object never
+  resolves — and it is recorded in `docs/roadmap.md`, not here.
 - **Two row bounds, and a byte bound.** The probe answers `readCost` (rows the
   query would read, gap rows included) against the planner's
   `VIEWPORT_FEATURE_BUDGET` (20 000). A fetch queries the UNION of its
