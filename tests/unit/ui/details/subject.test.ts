@@ -270,6 +270,32 @@ describe("buildingSummary with no sloped roof", () => {
         ?.value,
     ).toBe("Flat");
   });
+
+  it("shows no main orientation when every roof is under the 1-degree gate", () => {
+    // The band between core's 0.1 degree convention and this panel's own
+    // 1 degree flat threshold: the surface HAS an azimuth, but
+    // `computeAverageAzimuth` excludes it and answers 0 — which is due north.
+    const parent = object({ id: "parent" });
+    const building: ResolvedBuilding = {
+      object: parent,
+      parts: [],
+      roofSurfaces: [
+        {
+          owner: parent,
+          metrics: metrics({
+            areaSqM: 100,
+            inclinationDeg: 0.5,
+            azimuthDeg: 90,
+          }),
+        },
+      ],
+      loading: false,
+    };
+    expect(
+      buildingSummary(building).find((r) => r.label === "Main orientation")
+        ?.value,
+    ).toBe("Flat");
+  });
 });
 
 describe("geoSummary", () => {

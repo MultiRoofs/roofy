@@ -19,7 +19,10 @@ import type {
   Selection,
 } from "../../domain/selection/types";
 import type { RoofMetrics } from "@cityjson/navara-core";
-import { computeAverageAzimuth } from "../../domain/roofMetrics/aggregate";
+import {
+  computeAverageAzimuth,
+  FLAT_THRESHOLD_DEG,
+} from "../../domain/roofMetrics/aggregate";
 
 export type Subject =
   | {
@@ -226,9 +229,13 @@ export function buildingSummary(
       ? inclinations.reduce((a, b) => a + b, 0) / inclinations.length
       : 0;
   // `computeAverageAzimuth` returns 0 both for due north and for "nothing to
-  // average", so the row asks the surfaces themselves whether any of them has
-  // an aspect at all.
-  const anySloped = metrics.some((m) => m.azimuthDeg !== null);
+  // average", so the row asks the surfaces themselves whether any of them
+  // contributes. The condition MIRRORS that function's own gate — core answers
+  // null below 0.1 degrees, but this panel has always called anything under 1
+  // degree flat, and a roof in between would otherwise read "N (0°)".
+  const anySloped = metrics.some(
+    (m) => m.azimuthDeg !== null && m.inclinationDeg >= FLAT_THRESHOLD_DEG,
+  );
   const azimuth = anySloped ? computeAverageAzimuth(metrics) : null;
 
   const rows: SummaryRow[] = [

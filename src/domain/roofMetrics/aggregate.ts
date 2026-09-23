@@ -4,8 +4,10 @@
 
 import type { RoofMetrics } from "@cityjson/navara-core";
 
-/** Inclination threshold below which a surface is considered flat (degrees). */
-const FLAT_THRESHOLD_DEG = 1;
+/** Inclination threshold below which a surface is considered flat (degrees).
+ *  Exported because a caller that has to tell "no aspect" from "due north" —
+ *  `computeAverageAzimuth` answers 0 for both — must mirror this gate exactly. */
+export const FLAT_THRESHOLD_DEG = 1;
 
 /** Compute the area-weighted circular mean of azimuth angles.
  *  Flat surfaces (inclination < 1°, or with a null azimuth) are excluded since
