@@ -275,6 +275,16 @@ interface UnavailableLayer {
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
   readonly appearance: AppearanceTheme | null | undefined;
+  /**
+   * The saved CityParquet family choice (ruling S4), carried for the same reason
+   * everything above it is: re-selecting the file must not silently reopen the
+   * package at the Building default. Absent for every layer that has no
+   * families, which is every other layer in the app.
+   */
+  readonly families?: {
+    readonly enabled: ReadonlyArray<string>;
+    readonly active: string | null;
+  };
 }
 
 interface AppProps {
@@ -1266,6 +1276,9 @@ export function App({
                 attributeOrders,
                 tablePresentation,
                 appearance,
+                // Validated against the families the re-link's own open resolves
+                // (S4), exactly as the URL arm below does with the same field.
+                families: sl.families,
               });
               continue;
             }
@@ -1809,6 +1822,7 @@ export function App({
                     attributeOrders: entry.attributeOrders,
                     tablePresentation: entry.tablePresentation,
                     selectedAppearance: entry.appearance,
+                    families: entry.families,
                   }
                 : undefined,
             ),

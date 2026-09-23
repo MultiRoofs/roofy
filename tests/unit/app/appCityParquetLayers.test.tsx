@@ -200,6 +200,31 @@ vi.mock(
   }),
 );
 
+/** The SETTINGS every picked-files add was given, so a re-link can be asked
+ *  what it carried. Only the capture is added; the real loader still runs. */
+const fromFilesSettings: unknown[] = [];
+vi.mock(
+  "../../../src/features/cityparquet/addCityParquetLayer",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../src/features/cityparquet/addCityParquetLayer")
+      >();
+    return {
+      ...actual,
+      addCityParquetLayerFromFiles: (
+        files: ReadonlyArray<File>,
+        name: string,
+        settings: Parameters<typeof actual.addCityParquetLayerFromFiles>[2],
+        deps: Parameters<typeof actual.addCityParquetLayerFromFiles>[3],
+      ) => {
+        fromFilesSettings.push(settings);
+        return actual.addCityParquetLayerFromFiles(files, name, settings, deps);
+      },
+    };
+  },
+);
+
 /**
  * The static-or-stream DECISION is faked, static and immediate: these cases
  * pin the static rebuild, and the real decision would size a `gs://` source
@@ -302,6 +327,7 @@ beforeEach(() => {
   useLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
   enqueued.length = 0;
+  fromFilesSettings.length = 0;
   location.hash = "";
 });
 
@@ -351,6 +377,41 @@ describe("App snapshot restore — CityParquet layers", () => {
     expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
     expect(layer.hiddenTypes).toEqual(["Building"]);
+  });
+
+  it("carries the saved family choice onto a LOCAL package's re-link", async () => {
+    // A local source cannot be reopened from a snapshot — the browser gives no
+    // path — so the layer comes back as a placeholder the user re-links. That
+    // placeholder used to carry every saved setting but the families, so
+    // re-selecting the file reopened the package at the Building default and the
+    // saved choice was lost with no way to notice.
+    render(
+      <App
+        persistenceStore={storeWith(
+          snapshotWith([
+            {
+              name: "yokohama",
+              modelRef: { type: "file", fileName: "building.parquet" },
+              rules: [],
+              rulesEnabled: true,
+              visible: true,
+              families: { enabled: ["bridge"], active: "bridge" },
+            },
+          ] as never),
+        )}
+      />,
+    );
+    await clickRestore();
+
+    const input = await screen.findByTestId("relink-input");
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "building.parquet")] },
+    });
+
+    await waitFor(() => expect(fromFilesSettings).toHaveLength(1));
+    expect(fromFilesSettings[0]).toMatchObject({
+      families: { enabled: ["bridge"], active: "bridge" },
+    });
   });
 
   it("counts a failing CityParquet layer and still restores its siblings", async () => {

@@ -1134,8 +1134,11 @@ Known limits, deliberately left:
   than pointing at that one. Only about the WRITE TARGET: Aggregate writes to a
   vector layer's feature properties, which have no schema to alter, and its city
   SOURCE being a view costs it nothing.
-- The re-link placeholder for a saved local package carries no family choice, so
-  re-selecting the folder reopens at the Building default.
+- The re-link placeholder for a saved local package DOES carry the family choice
+  (`UnavailableLayer.families` → `LayerOverrides.families` → the picked-files
+  open), but the row's re-link takes ONE `File`: re-linking a multi-table package
+  that way opens a one-table package, and the saved keys that name its other
+  tables are dropped by `restoredFamilyChoice` as usual.
 
 Evidence: the spike above, and the real-package browser validation
 (`families-browser-validation-yokohama.{json,png}`, "Object families" in

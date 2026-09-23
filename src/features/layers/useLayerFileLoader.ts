@@ -70,6 +70,22 @@ export interface LayerOverrides {
   /** Applied at creation; kept only if the file carries that theme. */
   readonly selectedAppearance?: AppearanceTheme | null;
   /**
+   * A restored CityParquet package's object-family choice (ruling S4): which
+   * families were open, and which one the table panel was showing.
+   *
+   * It rides here so a RE-LINK carries it. A local package cannot be reopened
+   * from a snapshot — the browser gives no path — so the layer comes back as a
+   * placeholder whose re-link goes through this hook, and without the choice the
+   * package reopens at the Building default with nothing to say the saved one
+   * was dropped. The keys are validated against the families the open actually
+   * resolves (`restoredFamilyChoice`), so a repackaged source falls back to that
+   * default rather than to no stream at all.
+   */
+  readonly families?: {
+    readonly enabled: ReadonlyArray<string>;
+    readonly active: string | null;
+  };
+  /**
    * What this source really IS, overriding what its name suggests.
    *
    * The Add Layer dialog detects a format from the name, SHOWS it, and lets
@@ -382,6 +398,9 @@ export function useLayerFileLoader(
                 attributeOrders: overrides?.attributeOrders,
                 tablePresentation: overrides?.tablePresentation,
                 selectedAppearance: overrides?.selectedAppearance,
+                // A one-table package has one family, and a re-link still
+                // restores the choice that was saved for it.
+                families: overrides?.families,
               },
               cityParquetDeps(),
             );
@@ -474,6 +493,9 @@ export function useLayerFileLoader(
               attributeOrders: overrides?.attributeOrders,
               tablePresentation: overrides?.tablePresentation,
               selectedAppearance: overrides?.selectedAppearance,
+              // Ruling S4, on the picked-folder door: a restored workspace's
+              // family choice reaches the open that resolves the families.
+              families: overrides?.families,
             },
             cityParquetDeps(),
           );
