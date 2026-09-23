@@ -104,6 +104,7 @@ Each of these has a story in `docs/architecture-notes.md`; the rule here is the 
 - Geo-layer picking uses the engine's `featureClick` event only; `featureHover`/`featureEnter`/`featureLeave` stay unsubscribed (a GPU pick per frame). A city hit always wins over a geo hit.
 - Every programmatic camera move returns the engine's `flyTo` promise into `withSettleSuppressed`, so the streaming settle gate holds for the whole flight.
 - Streaming commits trigger on `moveend`, never `idle` or a render-loop timer. The 30 s commit timeout is a liveness bound; do not reintroduce a performance deadline.
+- A streamed geographic source's bucket frame (`makeLocalMetricFrame`) is an INDEX space — boxes, cells, footprints — and must never place a vertex; render geometry and metrics live in the owning CELL's ENU frame. The two descriptors look alike, so check `kind`, never truthiness.
 - Keep the maplibre worker pin (`setWorkerUrl` in `StacItemMap.tsx`) on any maplibre upgrade, and re-verify footprints in a real browser.
 - Do not "fix" building bases to touch the terrain skin: the geoid path is correct, the terrain data is coarse.
 - Test files import from `"vitest"`, never `"vite-plus/test"`.

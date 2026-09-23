@@ -129,6 +129,101 @@ screenshot.
 - The bbox column is in the file's CRS (EPSG:6697, degrees), which is why the
   three metric tools refuse these layers until performance task 6.
 
+## Direct geographic → ENU (task 6) — 2026-09-23
+
+A streamed EPSG:6697 table stops being reprojected twice. Its rows are indexed
+in a closed-form BUCKET frame (arithmetic, no proj4) and its rings stay
+lon/lat/h until the worker converts them straight into the owning CELL's ENU
+frame, before triangulation. Design, and the three coordinate spaces that keeps
+apart, in `docs/architecture-notes.md` ("Three coordinate spaces for a streamed
+geographic source"). The static path is UNCHANGED and still normalises to UTM.
+
+**Conditions.** Node 24 on the Linux host, `NODE_OPTIONS="--max-old-space-size=4096
+--expose-gc"`, the 334,860,819-byte `plateau/yokohama-shi/building.parquet` as a
+local lazy `Blob`. BEFORE = `stream-node-yokohama.jsonl` (2026-09-22, one run).
+AFTER = `stream-node-yokohama-after-task6.jsonl`, THREE runs concatenated, taken
+under a load average near 30 caused by a foreign job on the same host — hence
+the spread, which is why the range is published beside the median. Both sides
+ran with `--expose-gc`; these figures must NOT be compared with the original
+M4 Max baseline further down this file.
+
+| Stage (local Blob, Node)               |                   Before |              After (3 runs) |                Median |
+| -------------------------------------- | -----------------------: | --------------------------: | --------------------: |
+| `open` (footer + 884,106-row index)    |                 8,417 ms |    6,069 / 6,289 / 6,573 ms |  **6,289 ms** (−25 %) |
+| `pan-open` (re-open for the pan phase) |                 6,682 ms |    3,355 / 4,121 / 4,375 ms |  **4,121 ms** (−38 %) |
+| 1 km read, every LoD (worst case)      |                 2,524 ms |    1,766 / 2,054 / 2,612 ms |  **2,054 ms** (−19 %) |
+| 1 km read at LoD 2                     |                 2,190 ms |    1,299 / 1,525 / 1,581 ms |  **1,525 ms** (−30 %) |
+| 10 × 1 km pan steps through the worker |                36,270 ms | 25,332 / 26,148 / 29,386 ms | **26,148 ms** (−28 %) |
+| Bytes read: open / 1 km / LoD 2        | 24.49 / 12.83 / 12.35 MB |                   identical |                     — |
+
+Over HTTP against the published URL (`AUDIT_HTTP=1`, same code, same 100/327/247
+ranged requests and the same bytes): `open` 16,296 → 9,638 ms, 1 km read at
+every LoD 6,135 → 4,684 ms, at LoD 2 4,820 → 3,885 ms, the pan phase
+53,569 → 40,030 ms.
+
+The header now reports `epsg: null` with a frame descriptor
+(`{kind: "local-metric", lngDeg: 139.5947, latDeg: 35.4529}`) and an extent in
+bucket metres (±11.75 km × ±15.50 km) where it used to report EPSG:32654 and
+UTM eastings/northings.
+
+**Retention is unchanged, and an earlier reading of it was an artefact.** An
+intermediate measurement recorded `retainedDeltaMB` at `open` jumping 41.8 →
+436.4 MB. That run was made WITHOUT `--expose-gc`, so the harness's `gc()` was a
+no-op and the figure was live garbage, not the index: a deliberate no-gc control
+run on the same code reads 244.3 MB. With `--expose-gc` the three runs read
+**34.9 / 44.9 / 49.6 MB** against the before-run's 41.8 MB — the same packed
+`Float64Array` index, as expected. `peakHeapMB` at `open` likewise moved with
+the runs (before 612.6; after 411.7 / 435.3 / 608.7) rather than in one
+direction. No retention claim is made beyond "unchanged".
+
+**Browser smoke** (`geographic-enu-browser-smoke-yokohama.{json,png}`, and
+`…-unselected.png` for the like-for-like frame). Chrome 147 headless with
+SwiftShader over the Vite dev server, `develop` 4b79580, the real Yokohama table
+streamed by share link at the pre-task-6 screenshot's camera
+(139.622 E, 35.4625 N, 900 m, pitch −65).
+
+- **Same place.** Against `stream-browser-smoke-yokohama.png` (2026-09-22,
+  before the milestone): identical street grid, the same diagonal railway
+  corridor, the same circular building at lower right, the same water at the
+  right edge, the roofs on the same footprints. **21 resident cells in both.**
+- **The geoid still applies.** Roof polygons coincide with their aerial-imagery
+  footprints to a pixel or two. At this camera a 37 m vertical error — the
+  EGM2008 undulation here — would displace a roof about 37·cos(65°) ≈ 16 m
+  ≈ 9 px from its own footprint, and nothing of the sort is visible.
+- **Picking and the inspector work.** The first pick hit a building and the
+  Details panel read roof area 3,689.7 m², height 36.7 m, LoD 2, bounding box
+  2675.7, 1744.4, 0.0 → 2752.1, 1833.6, 38.5 (bucket metres, as the header's
+  extent now is). The fetch-bbox overlay names the frame: "Local metric frame ·
+  139.5947°E, 35.4529°N, 2,292 m × 1,029 m".
+- **No console errors** — the same two pre-existing warnings as the reference
+  run (duplicate three.js, no Google Maps key).
+- **Counts differ slightly, by design.** 4,508 objects / 12,568 roof surfaces,
+  where the reference loaded 4,450 / 12,756. Two different transforms need not
+  select identical rows for one axis-aligned box; the milestone's tests assert
+  conservative COVERAGE, not equality.
+- **Caveat, host not code.** The first commit landed in 28.9 s, just inside the
+  plugin's 30 s `COMMIT_FETCH_TIMEOUT_MS` liveness bound. Repeat runs at LOWER
+  altitudes (600 m/−50°, 350 m/−40°), where the LoD ladder asks for heavier
+  geometry, expired that bound on every attempt on this host under load. The
+  Node HTTP figures above show the read path is faster than before, so this is
+  the bound meeting a loaded software-GL host, not a regression — but a
+  repeat on a quiet machine is worth doing before reading anything else into it.
+
+Reproduce:
+
+```sh
+# Node, local Blob (the committed AFTER log):
+NODE_OPTIONS="--max-old-space-size=4096 --expose-gc" \
+  AUDIT_LOG=docs/performance/cityparquet-2026-09-21/stream-node-yokohama-after-task6.jsonl \
+  npx vitest run --config scripts/performance/vitest.config.ts \
+  scripts/performance/cityparquet-stream.test.ts
+
+# Over the published URL:
+AUDIT_HTTP=1 NODE_OPTIONS="--max-old-space-size=4096 --expose-gc" \
+  npx vitest run --config scripts/performance/vitest.config.ts \
+  scripts/performance/cityparquet-stream.test.ts
+```
+
 ## Findings
 
 The full Yokohama building table exhausts a 4 GiB V8 heap **inside `readCityParquetTable`**, before WKB decoding, CRS normalization, mesh building, or DuckDB ingestion. The isolated process reports `Allocation failed - JavaScript heap out of memory` (preserved in `yokohama-full-reader-stderr.txt`); its last completed stage is the file read. This establishes a reader memory failure independently of Navara and the GPU. It strongly supports, but does not directly prove, the cause of the earlier browser tab loss.

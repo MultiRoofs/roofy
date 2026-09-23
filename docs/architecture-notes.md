@@ -927,8 +927,9 @@ The planner, settle gate, resident budgets, picking and inspector are shared.
   the layer counts it as loaded.
 - **Geographic sources: one seam.** `geographicToProjected.ts` maps EPSG:6697
   to ONE fixed UTM zone per open (the source extent's centre; Yokohama
-  EPSG:32654) for the index and every batch. It is the only place that knows;
-  performance task 6 (direct geographic → ENU) replaces it.
+  EPSG:32654) for the index and every batch. It is the only place that knows.
+  Performance task 6 replaced it ON THE STREAMED PATH ("Three coordinate
+  spaces" below); the STATIC path still runs through it.
 - **Static or stream is decided once, by size, for every door.**
   `src/features/cityparquet/streamDecision.ts`: object tables over
   `CITYPARQUET_STREAM_THRESHOLD_BYTES` (128 MiB) stream. The size comes from
@@ -1143,3 +1144,145 @@ Known limits, deliberately left:
 Evidence: the spike above, and the real-package browser validation
 (`families-browser-validation-yokohama.{json,png}`, "Object families" in
 `docs/performance/cityparquet-2026-09-21/README.md`).
+
+## Three coordinate spaces for a streamed geographic source (2026-09-23)
+
+A streamed PLATEAU table (EPSG:6697) used to be reprojected TWICE: lon/lat →
+UTM with proj4 when a row was read, then UTM → lon/lat → ECEF → ENU with proj4
+again when the cell was baked. Both passes are gone. Longitude/latitude/height
+is already geodetic, so a vertex reaches its render frame by arithmetic alone,
+and the index never leaves metres. Yokohama's stream open dropped from 8.4 s to
+about 6.2 s in Node (9.6 s from 16.3 s over HTTP) with the bytes read
+unchanged; the reads were already decode-bound.
+
+The price of removing the projection is that "metres" now means three
+different things, so they are NAMED and kept apart. Mixing two of them is the
+one way to get this wrong, and it fails silently in every case.
+
+1.  **Bucket space — an INDEX, never geometry.** One closed-form local metric
+    transform about the dataset centre (`navara-core/src/geo/localMetricFrame.ts`):
+
+        x = (λ − λ0) · π/180 · N(φ0) · cos φ0
+        y = (φ − φ0) · π/180 · M(φ0)
+
+    with `N` the WGS84 prime-vertical and `M` the meridional radius of curvature
+    at the centre latitude `φ0`; the inverse is the algebraic inverse. The
+    family index, the tile grid, the camera footprint (`toSourceXY`), cell
+    centres (`toLngLat`), `StreamHeader.extent` and every
+    `ResidentObjectRecord.bbox` speak it, and they all call the SAME function —
+    all it has to be is invertible and identical for every user, which holds for
+    any consistent linear map.
+
+    **It is not ENU.** Its y = 0 is a parallel, not a geodesic, and it ignores
+    the tangent plane's fall-away: 15 km east of the origin it disagrees with
+    true ENU by 12.6 m horizontally and 17.6 m vertically, and 15 km out on the
+    diagonal by 28.2 m (pinned in `localMetricFrame.test.ts`). Across one stream
+    cell it is about 20 mm at 400 m and 3 mm at 100 m. Irrelevant for a box
+    query, fatal for a vertex.
+
+2.  **Render space — each CELL's own ENU frame.** `geodeticRingsToEnu`
+    (`navara-core/src/geo/sourceToEnu.ts`) converts a family's rings
+    lon/lat/h → ECEF → the owning cell's ENU frame BEFORE triangulation, so
+    normals and edge creases are computed where they are drawn. No proj4 runs in
+    the read or the bake (a spy pins zero factory calls over a four-cell fetch).
+    Ownership is decided FIRST, in bucket space, from the family's geographic
+    bbox; only then are its rings converted.
+
+3.  **Analysis — the same per-cell ENU frame.** Area, slope, azimuth and volume
+    are frame-independent scalars at cell size, so the render frame doubles as
+    the metric frame for that cell's records. Two cells measure the same
+    building to 6e-14 m² and 0.0006°.
+
+`surfaceData` rings therefore come back in the owning cell's metres and carry a
+`CellEnuFrameDescriptor` naming that origin. Two differently tagged frames
+travel on the protocol and both read `{lngDeg, latDeg, …}`:
+`kind: "local-metric"` is the dataset's bucket index, `kind: "enu"` is one
+cell's render frame. `streamRegistry.georeference` checks `kind` rather than
+truthiness, because reading one as the other places the layer by the wrong
+scale instead of visibly failing.
+
+### Why only the STREAMED path converts
+
+`computeInclination` reads the z axis as up and `computeAzimuth` reads x/y as
+east/north (`navara-core/src/roofMetrics/metrics.ts`), so an ENU frame that
+spans a whole dataset TILTS against local vertical. At 15 km from its origin
+"up" has dropped about 17.7 m and a roof's apparent inclination has shifted
+about 0.135° — enough to move elevations, roof classifications and rule colours
+with nothing reporting it. A stream CELL is 50–400 m (`BASE_CELL_M = 100`,
+`makeGrid`'s level-2 cell is 400 m on the 6697 fixture), where the same errors
+are about 3 mm and 0.002°.
+
+That is the whole reason the static path keeps UTM. Converting it properly
+needs metrics anchored per OBJECT rather than per model, which is a core change
+to the `roofMetrics`/footprint/volume call sites and a milestone of its own.
+
+### The geoid, and the one sentence never to write
+
+The vertical datum is untouched. The plugin resolves the EGM2008 undulation `N`
+before it sends `open`, so the worker never performs a network request and
+every cell — including a LoD rebuild — is baked at the right height from the
+first fetch. The arithmetic is: **h = z + N**, fed to `geodeticToEnu` against a
+frame whose origin already sits at `N` (`makeEnuFrame(lng, lat, N)`). That is
+bit for bit the height arithmetic the old `projectPositionsToEnu` performed,
+which is why no separate `raisePositionsInEnu` call exists on this path.
+
+The consequence for a consumer: a ring's local z is ALREADY ≈ the file's own z.
+Rebuild `makeEnuFrame(frame.lngDeg, frame.latDeg, frame.heightM)` from the
+descriptor and read z directly. **Never subtract `heightM`** — that is the
+double application, and it sinks the whole layer by an undulation (37 m at
+Yokohama). If a streamed layer ever gains an in-place `setHeightOffset`,
+`raisePositionsInEnu` becomes the right tool again, in `streamLayer`/
+`cellMeshes`, not in the bake.
+
+### Changed numbers, not better ones
+
+Leaving UTM changes what some measurements MEAN. State them as changed:
+
+- **Areas and distances** lose UTM's scale factor — ≈ 0.99979868 at
+  139.6°E/35.5°N, about 2.01 m per 10 km and 0.040 % of an area.
+- **Azimuths** lose its ≈ 0.813° grid convergence: "north" is now true north,
+  not grid north.
+- **Normals** are computed in ENU instead of being left in UTM space with that
+  convergence unremoved.
+
+One can argue each of these is the more correct number. The point of recording
+them here is that a value read before this milestone and a value read after it
+are not the same value, and a comparison across the boundary is not a
+regression.
+
+- **Winding.** `geodeticRingsToEnu` re-boxes each object's bbox from the
+  CONVERTED rings, because `buildCityMeshArrays` → `orientExteriorRing`
+  orients an exterior ring against the object's bbox CENTRE (a bbox left in
+  another space flips roughly half of an object's surfaces). That box is
+  therefore TIGHT around the rings actually PRESENT, where the old path handed
+  the heuristic the file's own row box: under a LoD filter the two centres can
+  differ, so a borderline surface can wind the other way. Invisible with the
+  city's double-sided material — and real for anything reading the normal
+  G-buffer.
+- **Coverage, not equality.** Two different transforms need not select
+  identical rows for the same axis-aligned box. The tests assert CONSERVATIVE
+  coverage (every object the UTM index returned for a view is still returned),
+  and the browser smoke shows it: the same camera loads 4,508 objects /
+  12,568 roof surfaces where it used to load 4,450 / 12,756.
+
+### Deferred, with reasons
+
+- **The static path keeps UTM normalisation.** Same prerequisite as above
+  (per-object metric anchoring in core). Until then a static 6697 layer pays
+  the ~1.5–2.4 s normalisation and the ~2.2–3.5 s render projection it pays
+  today.
+- **Projected sources (RD New, UTM CityJSON/CityParquet, FlatCityBuf) keep
+  proj4.** Normalising them to ENU at load would save every rebuild's
+  projection pass, and needs the same prerequisite.
+- **Geographic table tools.** A family table still holds geographic bboxes, so
+  join-by-location, distance-to-nearest and aggregate-per-area stay refused.
+  Making them work means a frame-aware spatial path in SQL.
+- **`useObjectSurfaces` has no consumer.** The surfaces path carries its cell
+  frame correctly, but nothing renders it; whoever wires the Surfaces tab or
+  solar scoring to a streamed layer must read `frame` before treating a ring as
+  a position.
+
+Evidence: "Direct geographic → ENU (task 6)" in
+`docs/performance/cityparquet-2026-09-21/README.md` —
+`stream-node-yokohama-after-task6.jsonl` and the browser smoke
+`geographic-enu-browser-smoke-yokohama.{json,png}`.
