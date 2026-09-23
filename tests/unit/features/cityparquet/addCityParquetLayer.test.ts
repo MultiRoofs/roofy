@@ -40,6 +40,10 @@ vi.mock("../../../../src/insights/layerTables", () => ({
   enqueueLayerTable: mocks.enqueue,
   nextTableName: vi.fn(() => "layer_99"),
   adoptLayerTable: vi.fn(),
+  // The family store asks the REGISTRY whether a view really exists before it
+  // (re)builds one — never its own `table` state, which an engine death leaves
+  // behind. Nothing is registered in this suite, so: none.
+  getLayerTable: vi.fn(() => null),
 }));
 vi.mock("../../../../src/insights/familyViews", () => ({
   ensureFamilyView: mocks.ensureFamilyView,

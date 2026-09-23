@@ -37,6 +37,7 @@ vi.mock("../../../../src/insights/familyViews", () => ({
 
 import {
   buildLayerFamilies,
+  ensureActiveFamilyView,
   resetFamilyStoreForTest,
   defaultEnabledKeys,
   familyKeyFromName,
@@ -49,6 +50,10 @@ import {
   type LayerFamily,
 } from "../../../../src/features/layers/familyStore";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
+import {
+  adoptLayerTable,
+  resetLayerTablesForTest,
+} from "../../../../src/insights/layerTables";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -161,6 +166,7 @@ function seedLayer(layerId: string, families: ReadonlyArray<LayerFamily>) {
 }
 
 beforeEach(() => {
+  resetLayerTablesForTest();
   // The per-layer reopen QUEUES and the farewell generations are module state:
   // a case that left a chain behind would serialise the next one behind it.
   resetFamilyStoreForTest();
@@ -244,6 +250,24 @@ describe("default families (R-D)", () => {
     );
   });
 
+  it("finds Building whatever case the key or the file name is in", () => {
+    // A writer who spelt the asset key `Building` — or shipped
+    // `Building.parquet` with no manifest key — must not silently open the whole
+    // package.
+    expect(
+      defaultEnabledKeys(
+        familiesOf(
+          { key: "Building", href: "Building.parquet" },
+          { key: "Bridge", href: "Bridge.parquet" },
+        ),
+      ),
+    ).toEqual(["Building"]);
+    // The LABEL keeps the writer's own casing; only the default's test folds it.
+    expect(
+      familiesOf({ key: "Building", href: "Building.parquet" })[0]!.label,
+    ).toBe("Building");
+  });
+
   it("is what `setFamilies` seeds, with the first enabled family active", () => {
     const families = familiesOf(
       { key: "bridge", href: "bridge.parquet" },
@@ -275,6 +299,55 @@ describe("default families (R-D)", () => {
   it("has no families for a layer nothing registered", () => {
     expect(hasFamilies("nope")).toBe(false);
     expect(getActiveFamily("nope")).toBeNull();
+  });
+});
+
+describe("the family view's own state is not the authority", () => {
+  /** A live family view in the table registry, as `familyViews` adopts one. */
+  function adoptView(layerId: string, family: string): void {
+    adoptLayerTable(layerId, {
+      table: `view_${family}`,
+      sourceName: `family_${family}.parquet`,
+      source: null,
+      reader: null,
+      extension: null,
+      sourceBytes: null,
+      columns: [],
+      lods: [],
+      sourceFeatureIds: null,
+      rowCount: 1,
+      fileBacked: true,
+      familyKey: family,
+      sourceCrs: null,
+    });
+  }
+
+  it("skips the ensure only while the REGISTRY really holds the view", async () => {
+    seedLayer("L1", familiesOf({ key: "building", href: "building.parquet" }));
+    await vi.waitFor(() =>
+      expect(useFamilyStore.getState().layers.L1!.table.building).toBe("ready"),
+    );
+    adoptView("L1", "building");
+    ensureFamilyView.mockClear();
+    // The view exists, so a second ask costs nothing.
+    await ensureActiveFamilyView("L1", "building");
+    expect(ensureFamilyView).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds the view after an engine death condemned it", async () => {
+    seedLayer("L1", familiesOf({ key: "building", href: "building.parquet" }));
+    await vi.waitFor(() =>
+      expect(useFamilyStore.getState().layers.L1!.table.building).toBe("ready"),
+    );
+    // The death clears the registry and condemns the store entry
+    // (`layerTables.invalidateTablesOnEngineDeath`); the family's OWN state still
+    // reads `ready`, and gating on that would leave the layer table-less for the
+    // session — S3 took the bare resident table that used to cover this away.
+    resetLayerTablesForTest();
+    ensureFamilyView.mockClear();
+    await ensureActiveFamilyView("L1", "building");
+    expect(ensureFamilyView).toHaveBeenCalledTimes(1);
+    expect(useFamilyStore.getState().layers.L1!.table.building).toBe("ready");
   });
 });
 
@@ -544,6 +617,49 @@ describe("enabling a family reopens the stream (R-E′)", () => {
     expect(useStreamStore.getState().streams.L1).toBeDefined();
     expect(useFamilyStore.getState().layers.L1!.opened).toEqual(["building"]);
     expect(useFamilyStore.getState().layers.L1!.reopen.state).toBe("idle");
+  });
+
+  it("keeps a Retry alive across TWO consecutive failures", async () => {
+    seedLayer(
+      "L1",
+      familiesOf(
+        { key: "building", href: "building.parquet" },
+        { key: "bridge", href: "bridge.parquet" },
+      ),
+    );
+    let fail = true;
+    const plugin = fakePlugin(() => {
+      if (fail) throw new Error("the server blipped");
+      return Promise.resolve(fakeHandle().handle);
+    });
+    await setFamilyEnabled({
+      plugin: plugin.plugin,
+      layerId: "L1",
+      family: "bridge",
+      enabled: true,
+    });
+    // A SECOND failure must not roll back to the empty `opened` the first one
+    // left: that would empty the desired set, and the third attempt would find
+    // no families to open at all — an inert Retry for the rest of the session.
+    const second = await retryFamilyReopen({
+      plugin: plugin.plugin,
+      layerId: "L1",
+    });
+    expect(second.ok).toBe(false);
+    const failed = useFamilyStore.getState().layers.L1!;
+    expect([...failed.enabled]).toEqual(["building"]);
+    expect(failed.reopen.state).toBe("failed");
+    expect(failed.geometry.building).toBe("failed");
+
+    fail = false;
+    const third = await retryFamilyReopen({
+      plugin: plugin.plugin,
+      layerId: "L1",
+    });
+    expect(third.ok).toBe(true);
+    expect(useFamilyStore.getState().layers.L1!.opened).toEqual(["building"]);
+    expect(useFamilyStore.getState().layers.L1!.reopen.state).toBe("idle");
+    expect(useStreamStore.getState().streams.L1).toBeDefined();
   });
 
   it("retries a failed reopen with a HIGHER handle generation", async () => {

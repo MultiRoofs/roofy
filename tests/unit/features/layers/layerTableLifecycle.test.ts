@@ -20,9 +20,20 @@ vi.mock("../../../../src/insights/layerTables", async (importOriginal) => {
     dropLayerTable: vi.fn(async (layerId: string) => {
       dropped.push(layerId);
     }),
+    // The recovery seam `retryEngine` calls after a successful boot. Captured,
+    // so a case can run it without booting a real DuckDB.
+    onEngineRetry: (cb: () => void) => {
+      engineRetryHooks.push(cb);
+      return () => {
+        const at = engineRetryHooks.indexOf(cb);
+        if (at >= 0) engineRetryHooks.splice(at, 1);
+      };
+    },
   };
 });
 
+/** `(layerId, family)` pairs `ensureFamilyView` was asked to (re)build. */
+const ensured: string[] = [];
 /** Layers `dropFamilyViews` was asked to forget. The lifecycle's removal door:
  *  it drops every family's view AND the file registrations behind them, which
  *  `dropLayerTable` alone cannot do. */
@@ -34,9 +45,17 @@ vi.mock("../../../../src/insights/familyViews", () => ({
   }),
   // The family store ensures the ACTIVE family's view as a layer opens (ruling
   // S3); no DuckDB here, so it simply succeeds.
-  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  ensureFamilyView: vi.fn(
+    async (input: { layerId: string; family: string }) => {
+      ensured.push(`${input.layerId}::${input.family}`);
+      return { ok: true } as const;
+    },
+  ),
   dropFamilyView: vi.fn(async () => {}),
 }));
+
+/** The callbacks the lifecycle registered with `retryEngine`'s recovery seam. */
+const engineRetryHooks: Array<() => void> = [];
 
 const clearMapFilter = vi.fn();
 const forgetMapFilter = vi.fn();
@@ -113,6 +132,8 @@ beforeEach(() => {
   enqueued.length = 0;
   dropped.length = 0;
   droppedFamilies.length = 0;
+  ensured.length = 0;
+  engineRetryHooks.length = 0;
   buildOutcome = { ok: true };
   clearMapFilter.mockReset();
   forgetMapFilter.mockReset();
@@ -478,6 +499,32 @@ describe("a layer with object families gets no bare resident table", () => {
     enqueued.length = 0;
     useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
     expect(enqueued).toEqual(["S"]);
+  });
+
+  it("keeps `refreshStreamingTable` off it even before a view lands", async () => {
+    // The Export dialog's forced rebuild is the one door left that could build
+    // the bare table ruling S3 forbids — `hasFileBackedTable` is still false in
+    // the window between the row landing and the first view.
+    withFamilies("S");
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    enqueued.length = 0;
+    await expect(refreshStreamingTable("S")).resolves.toEqual({ ok: true });
+    expect(enqueued).toEqual([]);
+  });
+
+  it("re-ensures every family layer's ACTIVE view after an engine retry", async () => {
+    withFamilies("S");
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    // Let the layer's FIRST ensure settle: a family still `creating` is left
+    // alone, which is the one state that is genuinely not worth re-asking.
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    ensured.length = 0;
+    // The engine died and came back: the registry was cleared, and a family's
+    // view is not a parked source `retryEngine` can replay on its own.
+    expect(engineRetryHooks).toHaveLength(1);
+    for (const hook of engineRetryHooks) hook();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(ensured).toEqual(["S::building"]);
   });
 });
 

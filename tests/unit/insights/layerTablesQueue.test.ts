@@ -109,6 +109,7 @@ const {
   dropLayerTable,
   enqueueLayerTable,
   getLayerTable,
+  onEngineRetry,
   resetLayerTablesForTest,
   retryEngine,
   runOnTableQueue,
@@ -207,6 +208,32 @@ describe("dropLayerTable", () => {
     await retryEngine();
     expect(getLayerTable("L1")).toBeNull();
     expect(useLayerTableStore.getState().tables.L1).toBeUndefined();
+  });
+
+  it("runs the recovery hooks a feature registered, after a successful boot", async () => {
+    // The door a CityParquet family's VIEW comes back through: it is not a
+    // parked `pendingSources` entry (DuckDB reads its file itself), and since
+    // ruling S3 took the bare resident table away it has no other revival path.
+    const ran: string[] = [];
+    const off = onEngineRetry(() => ran.push("families"));
+    try {
+      engineReady = true;
+      await retryEngine();
+      expect(ran).toEqual(["families"]);
+
+      // An engine that did not come up runs nothing: there is no database to
+      // rebuild a view in.
+      engineReady = false;
+      ran.length = 0;
+      await retryEngine();
+      expect(ran).toEqual([]);
+    } finally {
+      off();
+    }
+    engineReady = true;
+    ran.length = 0;
+    await retryEngine();
+    expect(ran).toEqual([]);
   });
 
   it("WAITS for an in-flight create rather than racing it", async () => {

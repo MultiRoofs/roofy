@@ -34,6 +34,7 @@ import {
   ensureFamilyView,
   type FamilySource,
 } from "../../insights/familyViews";
+import { getLayerTable } from "../../insights/layerTables";
 import { reopenStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
 import { useStreamStore } from "../streaming/streamStore";
@@ -246,7 +247,8 @@ export function buildLayerFamilies(
   });
 }
 
-/** The family key a Building default looks for, after extension stripping. */
+/** The family key a Building default looks for, after extension stripping and
+ *  case folding. */
 const BUILDING_KEY = "building";
 
 /**
@@ -260,7 +262,13 @@ const BUILDING_KEY = "building";
 export function defaultEnabledKeys(
   families: ReadonlyArray<LayerFamily>,
 ): string[] {
-  const buildings = families.filter((f) => f.rawKey === BUILDING_KEY);
+  // CASE-FOLDED: a writer who spelt the asset key `Building`, or shipped
+  // `Building.parquet` with no manifest key, means the same family — and an
+  // exact-match test would silently open the WHOLE package instead of one table.
+  // Only this test folds; the label keeps the writer's own casing.
+  const buildings = families.filter(
+    (f) => f.rawKey.toLowerCase() === BUILDING_KEY,
+  );
   return (buildings.length > 0 ? buildings : families).map((f) => f.key);
 }
 
@@ -470,9 +478,19 @@ const UNKNOWN_SOURCE_CRS = null;
 /**
  * Make sure `family`'s table exists, and record what happened on the family.
  *
- * Idempotent: `ensureFamilyView` replaces a view in place, and a family already
- * `ready` or `creating` is left alone — a table button pressed twice must not
- * queue two DESCRIBEs behind the one FIFO every table build shares.
+ * Idempotent: `ensureFamilyView` replaces a view in place, and a family whose
+ * view is already there — or already being built — is left alone, so a table
+ * button pressed twice does not queue two DESCRIBEs behind the one FIFO every
+ * table build shares.
+ *
+ * THE REGISTRY IS THE AUTHORITY on "already there", never this store's own
+ * `table` state. An engine death condemns every view
+ * (`layerTables.invalidateTablesOnEngineDeath`) without telling the family
+ * store, whose entry goes on reading `ready` — and since ruling S3 took the bare
+ * resident table away, gating on that would leave a streamed CityParquet layer
+ * with NO table at all for the rest of the session, through a Retry and
+ * everything after it. `creating` is still read from here, because it is the only
+ * record of a build in flight.
  */
 export async function ensureActiveFamilyView(
   layerId: string,
@@ -481,8 +499,15 @@ export async function ensureActiveFamilyView(
   const entry = useFamilyStore.getState().layers[layerId];
   const found = entry?.families.find((f) => f.key === family);
   if (!entry || !found) return;
-  const state = entry.table[family];
-  if (state === "ready" || state === "creating") return;
+  if (getLayerTable(layerId, family)?.fileBacked === true) {
+    // The view really is there. Say so, in case a death-and-revival left this
+    // store's own record behind.
+    if (entry.table[family] !== "ready") {
+      useFamilyStore.getState().setFamilyTableState(layerId, family, "ready");
+    }
+    return;
+  }
+  if (entry.table[family] === "creating") return;
   const generation = entry.generation;
   useFamilyStore.getState().setFamilyTableState(layerId, family, "creating");
   const outcome = await ensureFamilyView({
@@ -666,7 +691,15 @@ async function runReopen(
     // the UI never claims a family is on that the user never asked for and Retry
     // has a coherent set to reopen. Those families read `failed` rather than
     // `closed`: nothing is drawing them, and that is not the user's doing.
-    const rolledBack = entry.opened;
+    //
+    // WHEN NOTHING WAS OPEN — a SECOND consecutive failure, over a flaky server —
+    // the rollback target is the DESIRED set instead. Rolling back to the empty
+    // `opened` the first failure left would empty `enabled` too, and the next
+    // attempt would find no families to open at all: `runReopen` bails with "that
+    // layer has no object families", writing no state, so Retry is inert for the
+    // rest of the session and closing a family answers "at least one has to stay
+    // open" while nothing is open.
+    const rolledBack = entry.opened.length > 0 ? entry.opened : wanted;
     useFamilyStore.setState((s) =>
       patchLayer(s, layerId, (current) => ({
         ...current,

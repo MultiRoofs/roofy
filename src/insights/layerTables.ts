@@ -1229,6 +1229,44 @@ export async function retryEngine(): Promise<void> {
       }
     }),
   );
+
+  // Everything this module cannot park. A CityParquet family's table is a VIEW
+  // over a file DuckDB reads itself, so there are no bytes to replay and no
+  // `pendingSources` entry for it — and since ruling S3 a streamed CityParquet
+  // layer has no bare resident table to fall back on either, so without this the
+  // engine's death would leave it table-less for the life of the page. Run LAST,
+  // after the parked rebuilds, so a recovery that enqueues its own work queues
+  // behind them rather than ahead.
+  // The set itself: a hook that unregisters ITSELF mid-iteration is safe (a
+  // deleted, not-yet-visited entry is simply skipped), and nothing registers a
+  // hook from inside one — registration happens once, when App installs the
+  // lifecycle.
+  for (const hook of engineRetryHooks) {
+    try {
+      hook();
+    } catch (error) {
+      // One feature's recovery must not abandon the others', and the engine is
+      // up either way — which is the part the caller acted on.
+      console.warn("A DuckDB engine-retry recovery hook failed.", error);
+    }
+  }
+}
+
+/**
+ * The recoveries `retryEngine` runs once the engine is back.
+ *
+ * A FEATURE-facing seam, because this module may not import `features/`: the
+ * family store knows which layers have object families and which of their views
+ * to rebuild, and nothing here can know that. Registered by
+ * `installLayerTableLifecycle`, which App already installs and tears down once.
+ */
+const engineRetryHooks = new Set<() => void>();
+
+/** Register a recovery for {@link retryEngine} to run after a successful boot;
+ *  the returned function unregisters it. */
+export function onEngineRetry(hook: () => void): () => void {
+  engineRetryHooks.add(hook);
+  return () => engineRetryHooks.delete(hook);
 }
 
 /**

@@ -25,12 +25,18 @@ import { useProcessingStore } from "../processing/processingStore";
 import {
   enqueueLayerTable,
   hasFileBackedTable,
+  onEngineRetry,
   useLayerTableStore,
   type LayerTableOutcome,
   type LayerTableSource,
 } from "../../insights/layerTables";
 import { dropFamilyViews } from "../../insights/familyViews";
-import { hasFamilies, useFamilyStore } from "./familyStore";
+import {
+  ensureActiveFamilyView,
+  getActiveFamily,
+  hasFamilies,
+  useFamilyStore,
+} from "./familyStore";
 import { useLayerStore } from "./layerStore";
 
 /**
@@ -89,7 +95,12 @@ export async function refreshStreamingTable(
   // current, and it is. THE choke point for this rule, so the Export dialog's
   // forced rebuild — on open and on every commit while it is up — is correct by
   // construction rather than by remembering to check.
-  if (hasFileBackedTable(layerId)) return { ok: true };
+  //
+  // `hasFamilies` as well, and not only as belt and braces: between the layer's
+  // row landing and its first view there is a window in which a family layer has
+  // NO file-backed table yet, and this is the one remaining door that could build
+  // it the bare resident table ruling S3 forbids.
+  if (hasFileBackedTable(layerId) || hasFamilies(layerId)) return { ok: true };
   return await enqueueLayerTable(layerId, residentTableSource(layerId));
 }
 
@@ -345,6 +356,26 @@ export function installLayerTableLifecycle(): () => void {
   // not `activeTab`/`panelCollapsed`: a run's scope is frozen from the stores
   // whatever tab is showing, and the drafts a collapsed toolbox holds are still
   // read against these tables.
+  /**
+   * The engine came back: rebuild every family layer's ACTIVE view.
+   *
+   * `retryEngine` replays the SOURCES it parked, and a family's table is not one
+   * of them — DuckDB reads the Parquet itself, so there are no bytes to park.
+   * Since ruling S3 these layers also have no bare resident table to fall back
+   * on, so without this an engine death would leave a streamed CityParquet layer
+   * with no table at all, through the Retry and everything after it.
+   *
+   * Only the ACTIVE family, deliberately: the others are `absent` until something
+   * asks for them, which is the same contract a fresh layer opens under.
+   */
+  const unsubscribeEngineRetry = onEngineRetry(() => {
+    for (const layer of useLayerStore.getState().layers) {
+      const family = getActiveFamily(layer.id);
+      if (family === null) continue;
+      void ensureActiveFamilyView(layer.id, family);
+    }
+  });
+
   let toolboxWasOpen = useProcessingStore.getState().open;
   const unsubscribeProcessing = useProcessingStore.subscribe((state) => {
     if (state.open === toolboxWasOpen) return;
@@ -360,5 +391,6 @@ export function installLayerTableLifecycle(): () => void {
     unsubscribeStreams();
     unsubscribePanel();
     unsubscribeProcessing();
+    unsubscribeEngineRetry();
   };
 }

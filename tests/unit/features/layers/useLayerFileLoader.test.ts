@@ -58,6 +58,11 @@ vi.mock("../../../../src/insights/layerTables", () => ({
   nextTableName: vi.fn(() => "layer_99"),
   adoptLayerTable: vi.fn(),
   hasFileBackedTable: vi.fn(() => false),
+  // The family store asks the REGISTRY whether a view really exists before it
+  // (re)builds one — never its own `table` state, which an engine death leaves
+  // behind. Nothing is registered in this suite, so: none.
+  getLayerTable: vi.fn(() => null),
+  onEngineRetry: vi.fn(() => () => {}),
   layerTableKey: (layerId: string, family: string | null) =>
     family === null ? layerId : `${layerId}::${family}`,
 }));
