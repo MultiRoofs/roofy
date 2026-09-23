@@ -828,6 +828,42 @@ describe("enabling a family reopens the stream (R-E′)", () => {
     }
   });
 
+  it("reconciles the geometry state when a toggle BACK leaves nothing to do", async () => {
+    // Bridge off and straight on again, both before the queue's first job runs.
+    // The desired set then equals what is open, so neither job reopens anything
+    // — and the geometry state the toggles wrote ("closed", then "opening") is
+    // left standing, so a family that never stopped rendering reads as
+    // "Opening…" for the rest of the session.
+    const families = familiesOf(
+      { key: "building", href: "building.parquet" },
+      { key: "bridge", href: "bridge.parquet" },
+    );
+    seedLayer("L1", families);
+    useFamilyStore
+      .getState()
+      .setFamilies("L1", families, ["building", "bridge"]);
+    const plugin = fakePlugin(async () => fakeHandle().handle);
+
+    const off = setFamilyEnabled({
+      plugin: plugin.plugin,
+      layerId: "L1",
+      family: "bridge",
+      enabled: false,
+    });
+    const on = setFamilyEnabled({
+      plugin: plugin.plugin,
+      layerId: "L1",
+      family: "bridge",
+      enabled: true,
+    });
+    await Promise.all([off, on]);
+
+    expect(plugin.openStream).not.toHaveBeenCalled();
+    const entry = useFamilyStore.getState().layers.L1!;
+    expect(entry.opened).toEqual(["building", "bridge"]);
+    expect(entry.geometry).toEqual({ building: "open", bridge: "open" });
+  });
+
   it("disposes a completion for a layer that was removed while it was open", async () => {
     seedLayer(
       "L1",

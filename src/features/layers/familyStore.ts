@@ -849,10 +849,23 @@ async function runReopen(
     // A FAILURE cannot reach here: it sets `opened` to `[]`, so a desired set
     // that matches what is open really is open. Still worth clearing a stale
     // reopen state — a `reopening` left by a superseded job, say.
-    if (entry.reopen.state !== "idle") {
+    //
+    // AND the per-family geometry, which the TOGGLE wrote before this job was
+    // enqueued: "closed" for the family it closed, "opening" for the one it
+    // opened. A toggle BACK (off, then on again before the queue's turn) makes
+    // both jobs no-ops, and the last write standing then claims a family is
+    // opening that never stopped rendering — with nothing left to correct it.
+    // `opened` is the authority here, and it is reached only when the desired
+    // set already equals it.
+    const reconciled = geometryFor(entry.families, entry.opened);
+    const settled = entry.families.every(
+      (family) => entry.geometry[family.key] === reconciled[family.key],
+    );
+    if (entry.reopen.state !== "idle" || !settled) {
       useFamilyStore.setState((s) =>
         patchLayer(s, layerId, (current) => ({
           ...current,
+          geometry: geometryFor(current.families, current.opened),
           reopen: { state: "idle" },
         })),
       );
