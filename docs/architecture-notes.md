@@ -1127,7 +1127,8 @@ Known limits, deliberately left:
   layer is removed.
 - A processing run cannot ALTER a view, and nothing refuses one yet: "Add
   columns to this layer" for Height from extent on a family layer fails at the
-  `ALTER TABLE`. The New-layer destination works.
+  `ALTER TABLE`. The New-layer destination is fine: it copies the view with
+  `CREATE TABLE … AS SELECT` and alters that copy.
 - The re-link placeholder for a saved local package carries no family choice, so
   re-selecting the folder reopens at the Building default.
 
