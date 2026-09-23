@@ -209,6 +209,20 @@ import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Selection } from "../../../src/domain/selection/types";
+import { cameraForBounds } from "../../../src/scene/geographicCamera";
+import type { GeodeticBounds } from "@cityjson/navara-cityjson";
+
+/** What the fake handle answers `geodeticBoundsOf` with: a small box over
+ *  Yokohama, heights ALREADY raised by the layer's offset — which is what the
+ *  real method returns. */
+const STUB_BOUNDS: GeodeticBounds = {
+  west: 139.6,
+  south: 35.46,
+  east: 139.601,
+  north: 35.461,
+  minHeight: 12,
+  maxHeight: 24,
+};
 import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
 import { normalizeColorBy } from "../../../src/features/rules/colorBy";
@@ -223,6 +237,7 @@ const REGION: QueryRegion = {
   layerId: "S1",
   bbox: [85000, 445000, 87000, 446500],
   epsg: 7415,
+  frame: null,
   span: 2000,
   heightM: 43.2,
   ring: [
@@ -308,6 +323,12 @@ function makeFakeStreamHandle(
     triangles?: number;
     pick?: Selection | null;
     queryRegion?: QueryRegion | null;
+    resident?: {
+      objects: Record<
+        string,
+        { id: string; bbox: number[]; children: string[] }
+      >;
+    };
   } = {},
 ) {
   const commitListeners = new Set<(version: number) => void>();
@@ -338,6 +359,13 @@ function makeFakeStreamHandle(
       minHeight: 0,
       maxHeight: 30,
     })),
+    /** The real handle's index-space -> geodetic converter, which is the ONLY
+     *  thing that knows what a streamed bbox means (a metric EPSG for a
+     *  projected source, bucket metres for a geographic one). */
+    geodeticBoundsOf: vi.fn((_bbox: readonly number[]) => STUB_BOUNDS),
+    /** What is resident right now. Zoom-to-selection reads the records' bboxes
+     *  from here, because a stream's `layer.model` is a stub. */
+    getResidentModel: vi.fn(() => options.resident ?? { objects: {} }),
     triangleCount: vi.fn(() => handle.triangles),
     /** The vertical-datum offset its cells were placed with — what the cursor
      *  readout subtracts to report the source file's own z. */
@@ -886,6 +914,75 @@ describe("NavaraViewport streaming wiring", () => {
     act(() => ref.current!.fitAll());
     expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
     expect(flyTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("frames a selected object of a streaming layer through the HANDLE, not the layer's CRS", async () => {
+    // A resident record's bbox is in the layer's INDEX space, which for a
+    // geographic (EPSG:6697) stream is bucket metres — not degrees, and not the
+    // CRS `layer.model.metadata.referenceSystem` names. Reprojecting it through
+    // that CRS read metres as degrees; worse, proj4 has no definition for 6697,
+    // so zoom-to-selection was a SILENT no-op for exactly the layers this
+    // milestone is about. The handle owns the transform, so it answers.
+    const streamHandle = makeFakeStreamHandle({
+      triangles: 10,
+      resident: {
+        objects: {
+          b1: { id: "b1", bbox: [120, -80, 0, 160, -40, 18], children: [] },
+        },
+      },
+    });
+    registerStreamingLayer("S1", streamHandle, {
+      // A geographic source's provenance CRS, as `openStreamingLayer` copies it
+      // out of the stream header.
+      model: {
+        ...makeModel(),
+        metadata: {
+          referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/6697",
+        },
+      } as unknown as CityModel,
+    });
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+    flyTo.mockClear();
+
+    act(() => ref.current!.fitObjects("S1", ["b1"]));
+
+    expect(streamHandle.geodeticBoundsOf).toHaveBeenCalledWith([
+      120, -80, 0, 160, -40, 18,
+    ]);
+    // Framed off exactly the bounds the handle reported — Yokohama, not a
+    // point 120 m east of the null island a 6697 reprojection would have found.
+    expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(flyTo).toHaveBeenCalledWith(cameraForBounds(STUB_BOUNDS));
+  });
+
+  it("does not double-count the geoid offset when framing a selected object", async () => {
+    // `geodeticBoundsOf` already raises its heights by the layer's offset — the
+    // bounds it returns are where the geometry is DRAWN. Adding the offset
+    // again on top put the camera a geoid undulation too high (43 m over Delft,
+    // 37 m over Yokohama) for every zoom-to-selection.
+    const expected = cameraForBounds(STUB_BOUNDS);
+    const streamHandle = makeFakeStreamHandle({
+      triangles: 10,
+      resident: {
+        objects: {
+          b1: { id: "b1", bbox: [120, -80, 0, 160, -40, 18], children: [] },
+        },
+      },
+    });
+    registerStreamingLayer("S1", streamHandle);
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+    flyTo.mockClear();
+
+    act(() => ref.current!.fitObjects("S1", ["b1"]));
+
+    // Exactly the framing of the bounds the handle reported — the stub's
+    // `heightOffset()` of 43.2 is nowhere in it.
+    const target = flyTo.mock.calls[0]![0] as { height: number };
+    expect(target.height).toBeCloseTo(expected.height, 9);
   });
 
   it("fits a newly opened streaming layer once, and does not re-fit on an unrelated change", async () => {

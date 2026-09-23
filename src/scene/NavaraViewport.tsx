@@ -2371,26 +2371,40 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         if (!view || !layer) return;
         // A stream only retains cells near the camera. A missing selection must
         // stay unavailable; falling back to its header would be a whole-layer fit.
-        const model = layer.isStreaming
-          ? useStreamStore
-              .getState()
-              .streams[layerId]?.handle.getResidentModel()
+        const streamHandle = layer.isStreaming
+          ? useStreamStore.getState().streams[layerId]?.handle
+          : undefined;
+        const model = streamHandle
+          ? streamHandle.getResidentModel()
           : layer.model;
         if (!model) return;
         const bbox: BBox3 | null = selectedObjectBounds(model, objectIds);
-        const epsg = epsgForLayer(layer.model.metadata.referenceSystem);
-        if (!bbox || epsg === null) return;
-        const rawBounds = geodeticBoundsFromBBox(bbox, epsg);
-        const heightOffset =
-          liveRef.current.get(layerId)?.handle.heightOffset?.() ??
-          streamsRef.current.get(layerId)?.heightOffset?.() ??
-          0;
-        const bounds: GeodeticBounds = {
-          ...rawBounds,
-          minHeight: rawBounds.minHeight + heightOffset,
-          maxHeight: rawBounds.maxHeight + heightOffset,
-        };
-        withSettleSuppressed(() => view.flyTo(framedForMode(bounds)));
+        if (!bbox) return;
+        // WHO KNOWS WHAT THAT BOX MEANS. A streamed record's bbox is in the
+        // layer's INDEX space, which is bucket metres for a geographic
+        // (EPSG:6697) source — not the CRS its `referenceSystem` names, and not
+        // degrees. Only the handle holds that transform, and it applies the
+        // layer's vertical offset on the way out, so nothing is added here. A
+        // static layer's objects really are in its source CRS, so that branch
+        // reprojects as it always has.
+        let bounds: GeodeticBounds | null = null;
+        if (streamHandle) {
+          bounds = streamHandle.geodeticBoundsOf(bbox);
+        } else {
+          const epsg = epsgForLayer(layer.model.metadata.referenceSystem);
+          if (epsg === null) return;
+          const raw = geodeticBoundsFromBBox(bbox, epsg);
+          const heightOffset =
+            liveRef.current.get(layerId)?.handle.heightOffset?.() ?? 0;
+          bounds = {
+            ...raw,
+            minHeight: raw.minHeight + heightOffset,
+            maxHeight: raw.maxHeight + heightOffset,
+          };
+        }
+        if (!bounds) return;
+        const framed = bounds;
+        withSettleSuppressed(() => view.flyTo(framedForMode(framed)));
       },
       [framedForMode, layers, withSettleSuppressed],
     );

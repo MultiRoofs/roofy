@@ -124,6 +124,9 @@ function seedStream(
     featureCount?: number;
     cellCount?: number;
     objectsCount?: number;
+    /** A GEOGRAPHIC source's header: no metric EPSG, a bucket frame instead. */
+    frame?: { kind: "local-metric"; lngDeg: number; latDeg: number };
+    extent?: readonly number[];
   },
 ): void {
   useStreamStore.setState((s) => ({
@@ -144,9 +147,9 @@ function seedStream(
           ...(over.objectsCount !== undefined
             ? { objectsCount: over.objectsCount }
             : {}),
-          extent: undefined,
+          extent: over.extent,
           referenceSystem: undefined,
-          epsg: 28992,
+          ...(over.frame ? { frame: over.frame, epsg: null } : { epsg: 28992 }),
         },
         status: "idle",
         message: null,
@@ -310,6 +313,46 @@ describe("DetailsSection — a streaming layer", () => {
     seedStream("L", { types: ["Building", "Bridge"] });
     render(<DetailsSection item={city({ isStreaming: true })} />);
     expect(screen.getByText("Building, Bridge")).toBeTruthy();
+  });
+
+  it("names the SOURCE CRS and says the stream indexes in a local frame", () => {
+    // A geographic stream's own coordinates really are EPSG:6697 — that is the
+    // honest answer to "what CRS is this layer?" — but its extent and its
+    // record bboxes are bucket metres about the dataset centre, so the row has
+    // to say the second half too or the extent below reads as degrees.
+    seedStream("L", {
+      frame: { kind: "local-metric", lngDeg: 139.6, latDeg: 35.46 },
+      extent: [-1200, -900, 0, 1200, 900, 48],
+    });
+    render(
+      <DetailsSection
+        item={city({
+          isStreaming: true,
+          model: {
+            ...cityLayer().model,
+            metadata: {
+              referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/6697",
+            },
+            bbox: [-1200, -900, 0, 1200, 900, 48],
+          } as never,
+        })}
+      />,
+    );
+    expect(
+      screen.getByText("EPSG:6697 \u00b7 indexed in a local metric frame"),
+    ).toBeTruthy();
+    // And the extent is labelled as the metres it is, never under the EPSG.
+    expect(
+      screen.getByText(
+        "-1,200, -900 \u2192 1,200, 900 (local metric frame, metres)",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("still names a projected stream's CRS plainly", () => {
+    seedStream("L", {});
+    render(<DetailsSection item={city({ isStreaming: true })} />);
+    expect(screen.getByText("EPSG:7415")).toBeTruthy();
   });
 });
 

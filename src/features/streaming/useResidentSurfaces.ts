@@ -15,14 +15,33 @@
  * only reach for this hook (with a non-null handle) for streaming layers.
  */
 import { useEffect, useRef, useState } from "react";
-import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
+import type {
+  CellEnuFrameDescriptor,
+  FcbStreamLayerHandle,
+} from "@cityjson/navara-flatcitybuf";
 import type { Surface } from "../../domain/citymodel/types";
 import { useStreamStore } from "./streamStore";
 
 export type SurfacesFetchState =
   | { readonly status: "empty" }
   | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly surfaces: ReadonlyArray<Surface> }
+  | {
+      readonly status: "ready";
+      readonly surfaces: ReadonlyArray<Surface>;
+      /**
+       * The ENU frame {@link surfaces}' ring coordinates are metres in, or
+       * `null` for the layer's source CRS.
+       *
+       * Not a property of the layer: since the geographic-to-ENU milestone a
+       * GEOGRAPHIC stream is baked per cell, so an object's rings are the
+       * owning CELL's local metres and which cell that is, is the worker's
+       * business. Area, slope and azimuth are frame-independent and need none
+       * of this (a level cell frame in fact measures them better than a
+       * projection, which carries a scale factor and a grid convergence);
+       * anything that PLACES a ring does.
+       */
+      readonly frame: CellEnuFrameDescriptor | null;
+    }
   | { readonly status: "error"; readonly message: string };
 
 /**
@@ -75,9 +94,9 @@ export function useObjectSurfaces(
     // in any cached cell, so every failure arrives on the one path below.
     handle
       .fetchSurfaces(objectId)
-      .then((surfaces) => {
+      .then(({ surfaces, frame }) => {
         if (cancelled) return; // objectId/handle changed or unmounted — stale
-        setState({ status: "ready", surfaces });
+        setState({ status: "ready", surfaces, frame });
       })
       .catch((err: unknown) => {
         // A layer removed mid-request terminates its WorkerClient, which

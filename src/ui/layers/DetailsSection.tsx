@@ -53,6 +53,11 @@ const SOURCE_MAX = 44;
 const STREAMING_LOD_LABEL =
   "Streaming level of detail (applies to every streaming layer)";
 
+/** What a bucket-indexed stream's extent is measured in, where the EPSG would
+ *  otherwise go. Not the origin's coordinates: those belong to the fetch-box
+ *  diagnostic, which is where a user compares numbers against a query. */
+const LOCAL_FRAME_UNITS = "local metric frame, metres";
+
 export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   const layerId = item.layer.id;
 
@@ -65,6 +70,11 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   const streamThemes = useStreamStore(
     (s) => s.streams[layerId]?.appearanceThemes,
   );
+  // Whether the stream indexes in a local metric ("bucket") frame instead of a
+  // metric CRS. The field, not the whole descriptor: the two numbers in it never
+  // change for an open stream, and a `?.` field selector keeps this a stable
+  // `undefined` for a static layer.
+  const streamFrame = useStreamStore((s) => s.streams[layerId]?.header.frame);
   // The OPENED families' rows are the honest denominator for a package (the same
   // rule the status bar uses), and their presence is also what tells a
   // file-backed family table from a FlatCityBuf layer's resident one. Subscribed
@@ -113,10 +123,27 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
           label="Format"
           value={encodingLabel(model.sourceEncoding)}
         />
-        <DefinitionRow label="CRS" value={crs ?? "Not stated"} />
+        {/* TWO FACTS, not one. `crs` is the source's own CRS — the honest
+            answer to "what CRS is this layer?" — but a geographic stream's
+            extent and record bboxes are metres about its dataset centre, not
+            coordinates in that CRS. Printing only the EPSG would label the
+            extent below in degrees it is not measured in. */}
+        <DefinitionRow
+          label="CRS"
+          value={
+            crs === null
+              ? "Not stated"
+              : streamFrame
+                ? `${crs} · indexed in a local metric frame`
+                : crs
+          }
+        />
         <DefinitionRow
           label="Extent"
-          value={extentLine(model.bbox, crs) ?? "Not stated"}
+          value={
+            extentLine(model.bbox, streamFrame ? LOCAL_FRAME_UNITS : crs) ??
+            "Not stated"
+          }
         />
       </dl>
 

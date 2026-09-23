@@ -20,6 +20,7 @@ const REGION: QueryRegion = {
   layerId: "delft.fcb",
   bbox: [84000, 445000, 86500, 446500],
   epsg: 7415,
+  frame: null,
   span: 2500,
   heightM: 43.2,
   ring: [
@@ -118,9 +119,34 @@ describe("queryBoxReadout", () => {
     });
   });
 
-  it("says so out loud when the CRS is unknown", () => {
-    // A bbox with no CRS is a number pair that means nothing; a blank would
-    // read as "same as above".
+  it("names the local metric frame a geographic layer's bbox is measured in", () => {
+    // A geographic stream indexes in bucket metres about its dataset centre,
+    // so there IS no EPSG and "CRS unknown" would be a lie about a space we
+    // know exactly. The origin is what makes those metres mean something.
+    expect(
+      queryBoxReadout({
+        ...REGION,
+        epsg: null,
+        frame: { kind: "local-metric", lngDeg: 139.6, latDeg: 35.46 },
+      }).crs,
+    ).toBe("Local metric frame · 139.6000\u00b0E, 35.4600\u00b0N");
+  });
+
+  it("puts a southern/western origin on the right side of the equator and meridian", () => {
+    expect(
+      queryBoxReadout({
+        ...REGION,
+        epsg: null,
+        frame: { kind: "local-metric", lngDeg: -43.2, latDeg: -22.9 },
+      }).crs,
+    ).toBe("Local metric frame · 43.2000\u00b0W, 22.9000\u00b0S");
+  });
+
+  it("says so out loud when the CRS really is unknown", () => {
+    // Neither an EPSG nor a frame: a bbox with no space at all is a number
+    // pair that means nothing, and a blank would read as "same as above".
+    // `openStream`'s gate refuses such a layer, so this is the readout being
+    // honest rather than a reachable path.
     expect(queryBoxReadout({ ...REGION, epsg: null }).crs).toBe("CRS unknown");
   });
 });

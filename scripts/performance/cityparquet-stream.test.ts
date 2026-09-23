@@ -36,6 +36,13 @@ import fs from "node:fs";
 import { performance } from "node:perf_hooks";
 import proj4 from "proj4";
 import { ensureProjDef } from "@cityjson/navara-core";
+// By source path, like every other plugin-internal import in this file: this
+// script is outside `tsconfig.app.json`'s `include`, so the barrel resolves to
+// the package's BUILT types here, and these two landed after the last build.
+import {
+  localMetricFrameFromDescriptor,
+  type LocalMetricFrameDescriptor,
+} from "../../packages/cityjson-navara-plugins/packages/navara-core/src/geo/localMetricFrame";
 import {
   asyncBufferFromBlob,
   asyncBufferFromHttp,
@@ -93,6 +100,35 @@ const log =
   `/tmp/cityparquet-stream-${http ? "http" : "node"}.jsonl`;
 
 type Box = [number, number, number, number];
+
+/**
+ * WGS84 degrees -> the stream's index space, whichever of the two it is.
+ *
+ * A projected source names a metric EPSG and proj4 does the work; a GEOGRAPHIC
+ * one (PLATEAU's EPSG:6697) names no EPSG and carries a bucket frame instead,
+ * where the same conversion is two multiplications. Built once — proj4's
+ * three-argument call re-parses both CRS definitions on every invocation.
+ */
+function indexPlacer(header: {
+  epsg: number | null;
+  frame: LocalMetricFrameDescriptor | null;
+}): (p: readonly [number, number]) => readonly [number, number] {
+  const { epsg } = header;
+  if (epsg !== null) {
+    ensureProjDef(epsg);
+    const toXY = proj4("WGS84", `EPSG:${epsg}`) as {
+      forward(c: [number, number]): [number, number];
+    };
+    return (p) => toXY.forward([p[0], p[1]]);
+  }
+  if (!header.frame) {
+    throw new Error(
+      "This stream reports neither a metric EPSG nor a bucket frame, so its index space has no definition to place a query point in.",
+    );
+  }
+  const frame = localMetricFrameFromDescriptor(header.frame);
+  return (p) => frame.toMetric(p[0], p[1]);
+}
 /** A worker request before `send` numbers it. */
 type Outgoing = WorkerRequest extends infer R
   ? R extends WorkerRequest
@@ -233,16 +269,21 @@ it.skipIf(!present)(
         indexedRows: stream.index.rowCount,
         invalidBBoxRows: h.invalidBBoxRows,
         epsg: h.epsg,
+        // The bucket frame the index is in when there is no EPSG — without it
+        // a run's `box` numbers below have no stated origin.
+        frame: h.frame,
         lods: h.lods,
         extent: h.extent.map((v) => Math.round(v)),
       });
 
-      ensureProjDef(h.epsg);
-      const toXY = proj4("WGS84", `EPSG:${h.epsg}`) as {
-        forward(c: [number, number]): [number, number];
-      };
-      const [sx, sy] = toXY.forward(STATION);
-      const [kx, ky] = toXY.forward(KANNAI);
+      // Yokohama's two query points, placed in whatever INDEX SPACE the stream
+      // reports — that is the space `index.query` and the tile grid speak, and
+      // since the geographic-to-ENU milestone a 6697 source has no EPSG at all:
+      // it indexes in bucket metres about its own frame. Reaching for
+      // `EPSG:null` here is what broke this script.
+      const toIndexXY = indexPlacer(h);
+      const [sx, sy] = toIndexXY(STATION);
+      const [kx, ky] = toIndexXY(KANNAI);
       const box = (x: number, y: number): Box => [
         x - HALF_BOX_M,
         y - HALF_BOX_M,

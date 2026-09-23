@@ -19,6 +19,7 @@ function region(layerId: string, minX = 84000): QueryRegion {
     layerId,
     bbox: [minX, 445000, minX + 2500, 446500],
     epsg: 7415,
+    frame: null,
     span: 2500,
     heightM: 43.2,
     ring: [

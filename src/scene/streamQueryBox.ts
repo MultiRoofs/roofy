@@ -123,10 +123,25 @@ export function addQueryBox(
   }
 }
 
-/** One bbox side, as the readout shows it. Metres, because the CRS gate admits
- *  metric CRSs only — so no unit is guessed. */
+/** One bbox side, as the readout shows it. Metres, because a stream's index
+ *  space is metric either way — the CRS gate admits metric CRSs only, and a
+ *  bucket frame is metres by construction — so no unit is guessed. */
 function axis(min: number, max: number): string {
   return `${min.toFixed(1)} → ${max.toFixed(1)}`;
+}
+
+/**
+ * The bucket frame's origin, as a readout shows it: `139.6000°E, 35.4600°N`.
+ *
+ * Hemisphere letters rather than signs, because this sits beside two
+ * metre-valued axes and a lone minus in front of a degree figure reads as
+ * another coordinate. Four decimals is about 10 m — enough to recognise WHICH
+ * dataset's frame this is, which is all the number is for.
+ */
+function originLabel(lngDeg: number, latDeg: number): string {
+  const lng = `${Math.abs(lngDeg).toFixed(4)}°${lngDeg < 0 ? "W" : "E"}`;
+  const lat = `${Math.abs(latDeg).toFixed(4)}°${latDeg < 0 ? "S" : "N"}`;
+  return `${lng}, ${lat}`;
 }
 
 /** A whole-metre extent, for the "how big is this?" line. */
@@ -149,9 +164,21 @@ export function queryBoxReadout(region: QueryRegion): QueryBoxReadout {
   const [minX, minY, maxX, maxY] = region.bbox;
   return {
     layerId: region.layerId,
-    // "unknown" rather than a blank: a bbox with no CRS is a number pair that
-    // means nothing, and saying so is the point of a diagnostic.
-    crs: region.epsg === null ? "CRS unknown" : `EPSG:${region.epsg}`,
+    // Three answers, not two. A projected stream names its EPSG; a GEOGRAPHIC
+    // one has no EPSG at all and indexes in bucket metres, so it names the
+    // frame's origin instead — those metres are as well defined as any
+    // projection's, and "CRS unknown" would be a lie about a space we know
+    // exactly. Only a stream with neither (which `openStream` refuses) is
+    // genuinely unknown, and a diagnostic says so rather than leaving a blank
+    // that reads as "same as above".
+    crs: region.frame
+      ? `Local metric frame · ${originLabel(
+          region.frame.lngDeg,
+          region.frame.latDeg,
+        )}`
+      : region.epsg === null
+        ? "CRS unknown"
+        : `EPSG:${region.epsg}`,
     x: axis(minX, maxX),
     y: axis(minY, maxY),
     size: `${metres(maxX - minX)} × ${metres(maxY - minY)}`,
