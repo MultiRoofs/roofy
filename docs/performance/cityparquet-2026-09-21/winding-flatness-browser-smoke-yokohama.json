@@ -1,0 +1,108 @@
+{
+  "what": "Browser smoke after the winding-reference and flatness fixes (submodule b5c27ae orientation-reference floor, 2f62b9e full-row-box seeding, 58e5671 FLAT_INCLINATION_DEG): Yokohama building.parquet streamed by share link, at both the auto rung (LoD 2) and a manually pinned LoD 0",
+  "date": "2026-09-23",
+  "browser": "Chrome 147 headless, SwiftShader (software GL), Linux host, load average ~30 (a foreign job on the same machine)",
+  "build": "Vite dev server (npm run dev --port 5188), develop 16bfef4, submodule a17fee3",
+  "viewport": "1280x685 page; the engine canvas is 1008x527 with the sidebar collapsed, 688x527 with the Details disclosure open",
+  "camera": {
+    "lng": 139.622,
+    "lat": 35.4625,
+    "height": 900,
+    "heading": 0,
+    "pitch": -65,
+    "roll": 0
+  },
+  "source": {
+    "url": "http://127.0.0.1:5189/building.parquet",
+    "note": "A LOCAL MIRROR of https://cityparquet.open3d.city/data/plateau/yokohama-shi/building.parquet, byte-identical (334,860,819 bytes, the file this directory's README names with its SHA-256), served by a 60-line Node range server with CORS and Content-Range. DELIBERATE: three runs against the published URL on 2026-09-23 expired the plugin's 30 s COMMIT_FETCH_TIMEOUT_MS on this host at load average 30 (the pre-fix baseline made it in 28.9 s, i.e. it was already marginal). The mirror changes the transport only; the decision path is identical (sourceClassify sees a single .parquet table either way) and the smoke measures the app, not the CDN.",
+    "settleFromNavigation": "25 s to 'Settled'"
+  },
+  "runs": {
+    "default-sun": {
+      "dt": "2026-06-21T03:00:00.000Z",
+      "png": "winding-flatness-browser-smoke-yokohama.png (like-for-like frame), -picked.png, -lod0.png"
+    },
+    "low-sun": {
+      "dt": "2026-12-21T06:30:00.000Z",
+      "png": "winding-flatness-browser-smoke-yokohama-lowsun.png",
+      "note": "15:30 JST on the winter solstice, chosen to exaggerate the sun's orientation term. The engine reported sunDirection z = -0.3977 in ECEF = sin(-23.4 deg), the solstice declination, so the datetime really reached the atmosphere."
+    }
+  },
+  "item1_samePlace": {
+    "verdict": "SAME PLACE, SAME COUNTS",
+    "finalStatus": "Navara· 1 FPS· 4.5K of 884.1K loaded objects / 21 resident cells · Settled",
+    "objects": 4508,
+    "roofSurfaces": 12568,
+    "residentCells": 21,
+    "baselineComparison": "Against geographic-enu-browser-smoke-yokohama-unselected.png (after task 6) and stream-browser-smoke-yokohama.png (pre-task-6): the same street grid, the same diagonal railway corridor, the same circular building at lower right, the same water at the right edge, the roofs on the same footprints. The task-6 baseline recorded 4,508 objects / 12,568 roof surfaces / 21 resident cells; this run reads 4,508 / 12,568 / 21 — identical, not merely 'in the same range'.",
+    "heapMB": 224,
+    "firstResidentMs": 17967
+  },
+  "item2_roofShading": {
+    "verdict": "RIGHT SIDE UP, at LoD 2 and at LoD 0",
+    "gBufferObserved": true,
+    "howTheGBufferWasReached": "window has no engine handle, so the live ViewInstance was found by walking the React fiber from the canvas's container (a useRef hook whose .current carries globe/camera/atmosphere). view.buffers reports { normal: true, ... }, so the MRT normal attachment IS allocated in the app's effect set. The MRTPassEffectDesc was found by its normalBuffer getter, its WebGLRenderTarget by textures.includes(tex) (textureIndex 1, HalfFloatType), and the whole attachment was read back with renderer.readRenderTargetPixels and decoded with the engine's own unpackVec2ToNormal (octahedral, jcgt.org/published/0003/02/01).",
+    "theCaveatThatMatters": "The normal G-buffer CANNOT by itself discriminate a flipped winding on this material, and the engine's shader source says why: the MRT write is `vec3 finalNormal = origNormal; GBUFFER_WRITE_NORMAL(finalNormal, reflectivity, roughnessFactor)`, and `origNormal = vec3(normal)` is injected at `#include <normal_fragment_maps>` — DOWNSTREAM of three's `#include <normal_fragment_begin>`, where `normal *= faceDirection` already flipped the normal of a back-facing fragment because createCityMaterial is DoubleSide. So a camera-facing fragment always stores a camera-facing normal. The buffer is therefore evidence that the SHADED normal is right side up; the winding itself is measured by the geometry census below.",
+    "gBufferAtLod2": {
+      "attachment": "1008x527, half-float, MRT texture index 1",
+      "cameraFov": 50,
+      "writtenPixels": 531216,
+      "facingTheEyeRay": 531200,
+      "awayFromTheEyeRay": 16,
+      "note": "0.003 % of the frame. The cruder 'facing the camera's Z axis' test flags 18,993 (3.6 %), which is an artefact of that test: away from the frame centre the eye ray is not the camera axis, so an off-axis silhouette reads as back-facing by construction. The eye-ray test is the one that means anything.",
+      "roofPixels": "view-space normals at (900,200), (700,300), (500,400), (1000,450), (600,200), (800,380), (420,300) read (0.000, 0.423, 0.906), (0.009, 0.421, 0.907), (-0.003, 0.410, 0.912), (0.001, 0.433, 0.902), (0.000, 0.423, 0.906), (-0.001, 0.428, 0.904), (0.000, 0.423, 0.906) — every one of them world UP: at pitch -65 the angle between world up and the camera's +Z is 25 deg, and cos(25 deg) = 0.906."
+    },
+    "gBufferAtLod0": {
+      "attachment": "688x527, half-float, MRT texture index 1",
+      "writtenPixels": 362576,
+      "facingTheEyeRay": 362576,
+      "awayFromTheEyeRay": 0,
+      "minViewSpaceNormalZ": 0.6281,
+      "roofPixels": "(0.009, 0.420, 0.907), (0.078, 0.404, 0.912), (0.005, 0.427, 0.904), (0.007, 0.417, 0.909), (0.000, 0.423, 0.906), (0.013, 0.429, 0.903), (0.016, 0.421, 0.907) — world up again, and NOT ONE pixel of the whole attachment faces away."
+    },
+    "geometryCensus": {
+      "what": "The per-triangle FLAT face normals in the live scene graph — the `normal` attribute buildCityMeshArrays writes from the winding decision, which is what feeds vNormal and hence the G-buffer, BEFORE the faceDirection flip. Read from the city meshes (MeshLambertMaterial, vertexColors, DoubleSide) by traversing the engine's scene; each mesh's local +Z was confirmed to be world up (500/500 sampled triangles agree with the normalized world position; |worldPos| = 6,371,051 m).",
+      "lod2_auto": {
+        "cityMeshes": 21,
+        "triangles": 158151,
+        "horizontalUp": 40312,
+        "horizontalDown": 20329,
+        "wallish": 92335,
+        "sloped": 5175,
+        "degenerate": 3,
+        "downFacingAboveHalfHeight": 13,
+        "reading": "Roofs point up, ground surfaces point down, walls are vertical — the CityJSON convention. Of the 20,329 down-facing horizontal faces, all but 13 sit in the bottom tenth of their own mesh's height range (the building bases). The 13 exceptions, in two meshes at 51-68 % of their mesh height, are 0.008 % of the triangles and are the kind of face a real LoD 2 building has (a courtyard floor, the underside of an overhang) — no cluster, no whole roof."
+      },
+      "lod0_pinned": {
+        "cityMeshes": 15,
+        "triangles": 16171,
+        "horizontalUp": 9,
+        "horizontalDown": 16049,
+        "wallish": 19,
+        "sloped": 94,
+        "reading": "THIS IS THE CASE 2f62b9e FIXES, and it passes: 16,049 of 16,058 horizontal faces (99.94 %) agree on one direction. PLATEAU's LoD 0 is a terrain-following FOOTPRINT — a ground polygon — whose outward normal points DOWN, which is the direction 2f62b9e's own commit message names ('a box seeded from orthometric z would sit a whole geoid undulation below the geometry and flip every ground polygon up'). What the tight ring box produced instead, per that commit's measured table, was a MIXTURE ('lo -1, hi +1') — the highest polygon of a multi-polygon footprint inverted. There is no such mixture here. (The 'downFacingAboveHalfHeight' counter is meaningless at this rung: the whole mesh spans 1 cm in z, so its z-relative buckets are noise.)"
+      }
+    },
+    "lowSunRender": "winding-flatness-browser-smoke-yokohama-lowsun.png. Under a 15:30-JST winter sun the roofs read BRIGHT against walls that are bright on the sunward side, dark on the other, and a street-level ground in deep shadow. No roof reads darker than the ground beside it, and there is no inverted crease pattern. Compare the default-sun frame, where a near-overhead sun flattens the term and hides nothing either way."
+  },
+  "item3_pickAndInspector": {
+    "verdict": "WORKS, AND THE FLAT ROW READS 'Flat'",
+    "pixel": [900, 200],
+    "triesBeforeHit": 1,
+    "inspector": "Nishitokyo | Building …1daa0 | bldg_d0db9be5-ce95-4427-bc3d-33061881daa0 | Summary | Roof area 3689.7 m² | Mean roof slope 0.0° | Main orientation Flat | Height 36.7 m | Attributes measuredHeight 36.7 | Geometry LoD 2 | Object type Building | Bounding box 2675.7, 1744.4, 0.0, 2752.1, 1833.6, 38.5",
+    "againstTheLastRun": "Identical object, identical 3,689.7 m² / 36.7 m / LoD 2 / bounding box. The ONE difference is the row this milestone changed: 'Main orientation' reads Flat where the task-6 run read 'N (0°)'.",
+    "atLod0": "The same object picks at LoD 0 and reads Roof area 0.0 m², Mean roof slope 0.0°, Main orientation Flat, LoD 0 — the convention holds at both rungs."
+  },
+  "item4_console": {
+    "verdict": "NO ERRORS",
+    "exceptionsThrown": [],
+    "warnings": [
+      "THREE.WARNING: Multiple instances of Three.js being imported. (pre-existing, in both baselines)",
+      "[googleTiles] VITE_GOOGLE_MAPS_API_KEY not set. Tiles disabled. (pre-existing, in both baselines; this checkout has no .env)",
+      "CityParquet: object '…' has a 'face_semantics' list in 'geometry_lod1_0' with no usable index, so its faces are unlabelled. (+ 'N more geometr(y/ies)' roll-ups)"
+    ],
+    "note": "The face_semantics warnings appear only AFTER the manual LoD switch walks the ladder down through LoD 1, which neither baseline did. They are the reader reporting unlabelled faces in the PLATEAU data, at warning level, with a roll-up — not an error and not new behaviour from these fixes."
+  },
+  "notReproduced": "Three earlier attempts against the published https URL never committed a fetch on this host (30 s timeout; the index opened, the row fetch did not). Not investigated further — the local mirror settles in 25 s and the byte path is the same.",
+  "method": "Raw CDP (Node 24 global WebSocket against a headless Chrome on a private --remote-debugging-port), one whole scenario per Chrome process, share hash v3 minted by hand. NOTE for the next run: Page.navigate from the app's URL to the same URL plus '#share=…' is a SAME-DOCUMENT fragment navigation and the app ignores it — the share link must arrive on a full document load (a distinct query string does it)."
+}

@@ -246,6 +246,34 @@ AUDIT_HTTP=1 NODE_OPTIONS="--max-old-space-size=4096 --expose-gc" \
   scripts/performance/cityparquet-stream.test.ts
 ```
 
+### Follow-up: the winding reference and the flatness convention (2026-09-23)
+
+Two fixes after the milestone review changed what reaches the normal buffer —
+`orientExteriorRing` now refuses an orientation reference weaker than
+`2.5e-4 ×` the bbox diagonal (submodule `b5c27ae`), and `geodeticRingsToEnu`
+seeds each object's ENU box from its FULL geodetic row extent rather than the
+tight box of the surfaces that survived LoD filtering (`2f62b9e`), which is
+what stopped a multi-polygon LoD 0 PLATEAU footprint inverting its highest
+polygon — and a third gave flatness a name (`FLAT_INCLINATION_DEG = 0.1`,
+`58e5671`), so a horizontal roof's Main orientation reads "Flat" instead of
+"N (0°)". None of it is observable from a unit test, so it was smoked:
+`winding-flatness-browser-smoke-yokohama.{json,png}` plus `-picked.png`,
+`-lod0.png` and `-lowsun.png`.
+
+The frame matches both earlier smokes to the object: 4,508 objects, 12,568
+roof surfaces, 21 resident cells. The **normal G-buffer was read back**, not
+inferred — `view.buffers.normal` is `true`, the MRT attachment is texture
+index 1, and at LoD 2 **531,200 of 531,216** written pixels store a normal
+facing the eye ray (16 do not), at LoD 0 **362,576 of 362,576** do, with roof
+pixels reading a view-space normal of (0.00, 0.42, 0.906) — world up, at the
+camera's 25° off-axis angle. The JSON states the caveat that goes with it:
+because the city material is `DoubleSide`, three flips the fragment normal by
+`faceDirection` BEFORE the engine's MRT write, so the buffer shows the shaded
+normal and cannot by itself discriminate a winding; the winding is measured
+by a per-triangle census of the live meshes' flat face normals, which reads
+roofs up / grounds down at LoD 2 and **99.94 % agreement on one direction**
+across 16,058 horizontal LoD 0 footprint faces.
+
 ## Findings
 
 The full Yokohama building table exhausts a 4 GiB V8 heap **inside `readCityParquetTable`**, before WKB decoding, CRS normalization, mesh building, or DuckDB ingestion. The isolated process reports `Allocation failed - JavaScript heap out of memory` (preserved in `yokohama-full-reader-stderr.txt`); its last completed stage is the file read. This establishes a reader memory failure independently of Navara and the GPU. It strongly supports, but does not directly prove, the cause of the earlier browser tab loss.
