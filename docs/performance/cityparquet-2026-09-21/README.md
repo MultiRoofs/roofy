@@ -201,13 +201,35 @@ streamed by share link at the pre-task-6 screenshot's camera
   where the reference loaded 4,450 / 12,756. Two different transforms need not
   select identical rows for one axis-aligned box; the milestone's tests assert
   conservative COVERAGE, not equality.
-- **Caveat, host not code.** The first commit landed in 28.9 s, just inside the
-  plugin's 30 s `COMMIT_FETCH_TIMEOUT_MS` liveness bound. Repeat runs at LOWER
-  altitudes (600 m/−50°, 350 m/−40°), where the LoD ladder asks for heavier
-  geometry, expired that bound on every attempt on this host under load. The
-  Node HTTP figures above show the read path is faster than before, so this is
-  the bound meeting a loaded software-GL host, not a regression — but a
-  repeat on a quiet machine is worth doing before reading anything else into it.
+- **OPEN QUESTION: a commit that times out never recovers, and the pattern is
+  bimodal rather than noisy.** The successful run's first commit landed in
+  28.9 s, just inside the plugin's 30 s `COMMIT_FETCH_TIMEOUT_MS` liveness
+  bound. Tallying every commit observed on this host:
+
+  |                                                                           |                                        landed | expired |
+  | ------------------------------------------------------------------------- | --------------------------------------------: | ------: |
+  | commits that had NOT already seen a timeout                               | **2 of 2** (21.0 s, 28.9 s, reference camera) |       0 |
+  | RETRIES after one expired (forced camera settles, a full fresh 30 s each) |                                   **0 of 20** |      20 |
+
+  Those 20 include 8 at the SAME reference camera the 2 successes used, plus 12
+  at 600 m/−50° and 350 m/−40° where the LoD ladder asks for heavier geometry.
+  Load produces a distribution around a threshold, not 0/20 against 2/2 at one
+  camera, so something is carried over. The Node HTTP figures above show the
+  READ path is 30–40 % faster than before with identical bytes, so this is not
+  a task-6 read regression — but "host, not code" is more than the data
+  supports and is not claimed.
+
+  The suspect is the worker's abort. `streamWorkerCore` looks structurally
+  clean (each `fetch` makes its OWN `AbortController`, `cancel` only aborts the
+  current one, the cell cache is rolled back), but an `AbortSignal` cannot
+  interrupt the SYNCHRONOUS hyparquet decode already running on the worker's
+  one thread: a timed-out commit's work keeps going, the retry's message queues
+  behind it, and every retry therefore starts already behind — a compounding
+  stall rather than plain slowness. Unproven. The path is shared with
+  FlatCityBuf, so it is probably pre-existing; confirming that needs the
+  pre-task-6 tree re-smoked, which this milestone did not do. Worth one run on
+  a quiet machine, and worth asking whether a timed-out commit should schedule
+  its own retry instead of waiting for a camera settle that may never come.
 
 Reproduce:
 

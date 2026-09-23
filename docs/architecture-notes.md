@@ -1145,7 +1145,7 @@ Evidence: the spike above, and the real-package browser validation
 (`families-browser-validation-yokohama.{json,png}`, "Object families" in
 `docs/performance/cityparquet-2026-09-21/README.md`).
 
-## Three coordinate spaces for a streamed geographic source (2026-09-23)
+### Three coordinate spaces for a streamed geographic source (2026-09-23)
 
 A streamed PLATEAU table (EPSG:6697) used to be reprojected TWICE: lon/lat →
 UTM with proj4 when a row was read, then UTM → lon/lat → ECEF → ENU with proj4
@@ -1175,8 +1175,9 @@ one way to get this wrong, and it fails silently in every case.
 
     **It is not ENU.** Its y = 0 is a parallel, not a geodesic, and it ignores
     the tangent plane's fall-away: 15 km east of the origin it disagrees with
-    true ENU by 12.6 m horizontally and 17.6 m vertically, and 15 km out on the
-    diagonal by 28.2 m (pinned in `localMetricFrame.test.ts`). Across one stream
+    true ENU by 12.6 m horizontally and 17.6 m vertically, and at a point 15 km
+    east AND 15 km north (≈ 21 km out, not 15) by 28.2 m horizontally — both
+    pinned in `localMetricFrame.test.ts`. Across one stream
     cell it is about 20 mm at 400 m and 3 mm at 100 m. Irrelevant for a box
     query, fatal for a vertex.
 
@@ -1201,7 +1202,7 @@ cell's render frame. `streamRegistry.georeference` checks `kind` rather than
 truthiness, because reading one as the other places the layer by the wrong
 scale instead of visibly failing.
 
-### Why only the STREAMED path converts
+#### Why only the STREAMED path converts
 
 `computeInclination` reads the z axis as up and `computeAzimuth` reads x/y as
 east/north (`navara-core/src/roofMetrics/metrics.ts`), so an ENU frame that
@@ -1216,7 +1217,7 @@ That is the whole reason the static path keeps UTM. Converting it properly
 needs metrics anchored per OBJECT rather than per model, which is a core change
 to the `roofMetrics`/footprint/volume call sites and a milestone of its own.
 
-### The geoid, and the one sentence never to write
+#### The geoid, and the one sentence never to write
 
 The vertical datum is untouched. The plugin resolves the EGM2008 undulation `N`
 before it sends `open`, so the worker never performs a network request and
@@ -1234,7 +1235,7 @@ Yokohama). If a streamed layer ever gains an in-place `setHeightOffset`,
 `raisePositionsInEnu` becomes the right tool again, in `streamLayer`/
 `cellMeshes`, not in the bake.
 
-### Changed numbers, not better ones
+#### Changed numbers, not better ones
 
 Leaving UTM changes what some measurements MEAN. State them as changed:
 
@@ -1265,7 +1266,7 @@ regression.
   and the browser smoke shows it: the same camera loads 4,508 objects /
   12,568 roof surfaces where it used to load 4,450 / 12,756.
 
-### Deferred, with reasons
+#### Deferred, with reasons
 
 - **The static path keeps UTM normalisation.** Same prerequisite as above
   (per-object metric anchoring in core). Until then a static 6697 layer pays
