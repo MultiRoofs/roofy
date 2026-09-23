@@ -4,11 +4,17 @@
  *
  * `ResidentObjectRecord` (the payload shipped for every resident cell)
  * deliberately excludes `Surface.rings` — see the doc comment on
- * `ResidentObjectRecord` in the plugin's workerProtocol. The two main-thread
- * consumers that need rings (rooftop solar scoring, and the
- * Surfaces tab) act on exactly one selected object at a time, so this hook
+ * `ResidentObjectRecord` in the plugin's workerProtocol. A consumer that
+ * needs rings acts on exactly one selected object at a time, so this hook
  * fetches rings for that one object lazily instead of shipping every object's
  * full geometry on every cell fetch/recolor.
+ *
+ * `useObjectSurfaces` currently has NO production caller — only its own test.
+ * The processing toolbox's streaming branch reads
+ * `ResidentObjectRecord.roofMetrics`, which the worker computed in the
+ * owning cell's level frame, and nothing else asks for rings. This is a
+ * capability kept correct for its first consumer, not a hook in use; whoever
+ * wires one must read `frame` below before treating a ring as a POSITION.
  *
  * Static (non-streaming) layers never use this — `CityObject.surfaces` is
  * already resident and synchronous, so callers keep using it directly and
