@@ -116,6 +116,7 @@ Each of these has a story in `docs/architecture-notes.md`; the rule here is the 
 - `@duckdb/duckdb-wasm` is pinned EXACTLY, never a range and never `latest`: npm `latest` (dev57 / DuckDB 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, both silently.
 - ONE writer of the DuckDB status: `duckdb.ts` owns the value and publishes every transition (`setStatus`). React reads it through `useDuckDBStatus()` (`src/insights/useDuckDBStatus.ts`, a `useSyncExternalStore` over `subscribeDuckDBStatus` + `getDuckDBStatusVersion`) — never into component state, and nothing else publishes.
 - `retryEngine()` is the door to the engine on boot and on Retry — not `initDuckDB()`. It awaits the same memoised boot AND rebuilds the tables that were refused while the engine was still coming up; calling `initDuckDB` directly leaves those layers permanently table-less.
+- A streamed CityParquet family's table is a VIEW over its own file, never rebuilt from residents, and only `familyViews` may drop one: `dropLayerTable` alone releases the registration while the cached VFS name lives on, and the next view reads an empty file with no error anywhere.
 
 ## Project Philosophy
 

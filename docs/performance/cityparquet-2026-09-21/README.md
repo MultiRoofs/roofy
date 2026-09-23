@@ -76,6 +76,59 @@ NODE_OPTIONS="--max-old-space-size=4096 --expose-gc" \
 # network path — its log defaults to stream-http-yokohama.jsonl when named.
 ```
 
+## Object families (task 5) — 2026-09-23
+
+A streamed CityParquet layer now opens only the object families the user asked
+for (Building by default), and each family's DuckDB table is a VIEW over
+`read_parquet` of its own file rather than a copy of the resident rows. Design
+and limits in `docs/architecture-notes.md` ("Object families, each with a table
+over its own file").
+
+**Conditions.** Chrome 147 headless with SwiftShader (software GL) over a Vite
+dev server on the Linux host, `develop` 26be3ac. These figures must NOT be
+compared with the ORIGINAL M4 Max baseline further down this file (Findings,
+Environment and scope, Source sizes, Reproduction); only the relations inside
+this section mean anything.
+
+**The spike that chose a view over a materialised table** (browser, DuckDB-wasm
+1.5.5, the real 884,106-row `plateau/yokohama-shi/building.parquet` over HTTP;
+15 of its 37 columns kept). Log: `duckdb-read-parquet-spike.json`.
+
+| Operation on the 884,106-row table | View over `read_parquet` | Materialised table |
+| ---------------------------------- | -----------------------: | -----------------: |
+| Publish the table                  |                    26 ms |             961 ms |
+| Filtered count (7,809 rows)        |                    34 ms |              10 ms |
+| First 100-row page                 |                   793 ms |              97 ms |
+| A deep page                        |                 1,503 ms |                  — |
+| DuckDB memory held                 |           none (no copy) |             247 MB |
+
+The browser's JS heap read 115 MB in both arms — the view materialises nothing,
+so there is no copy to measure.
+Paging is the view's cost and the whole of it, which is the trade the milestone
+took: a view cannot drift from the file, and the escape hatch (`CREATE TABLE …
+AS SELECT`) is one statement away at those two costs.
+
+**Real-package validation.** The package at
+`https://cityparquet.open3d.city/data/plateau/yokohama-shi/`, loaded in the
+browser; evidence in `families-browser-validation-yokohama.json` and its
+screenshot.
+
+- The families block lists all six available families. Building reads
+  **884,106 loaded**; Bridge, Water Body, City Furniture, Transportation and
+  Vegetation all read **Not opened** — five of the package's six object tables
+  are never streamed.
+- The Table button of the CLOSED Bridge family opened its table with **1,797
+  rows read from the file**, and Bridge geometry stayed closed throughout: the
+  handoff's "attributes without rendering geometry". The grid's columns include
+  `ADDRESS`, `CHILDREN_ROLES` and `OTHER` — `address` is KEPT, which the plan's
+  prose said was dropped.
+- The table panel's family selector lists all six families.
+- The status bar read "4.5K of 884.1K loaded objects" — M is the OPENED
+  families' rows, not the package's. JS heap 189 MB, 21 resident cells, no
+  console errors.
+- The bbox column is in the file's CRS (EPSG:6697, degrees), which is why the
+  three metric tools refuse these layers until performance task 6.
+
 ## Findings
 
 The full Yokohama building table exhausts a 4 GiB V8 heap **inside `readCityParquetTable`**, before WKB decoding, CRS normalization, mesh building, or DuckDB ingestion. The isolated process reports `Allocation failed - JavaScript heap out of memory` (preserved in `yokohama-full-reader-stderr.txt`); its last completed stage is the file read. This establishes a reader memory failure independently of Navara and the GPU. It strongly supports, but does not directly prove, the cause of the earlier browser tab loss.

@@ -946,15 +946,16 @@ The planner, settle gate, resident budgets, picking and inspector are shared.
   the viewport.
 - **Counts.** A streamed layer reads "N of M loaded objects" when the source
   knows M (`header.objectsCount`, CityParquet); FlatCityBuf's header does not,
-  so it keeps the bare resident count.
+  so it keeps the bare resident count. Since object families (below) M is the
+  sum of the OPENED families' rows, not the whole package's.
 
 Known limits, deliberately left:
 
 - No appearance under CityParquet streaming: `readRows` never reads the
   appearance columns and the adapter's `appearance()` is `undefined`.
-- A streamed CityParquet layer's DuckDB table covers RESIDENT rows only, as a
-  FlatCityBuf stream's does. Performance task 5 (per-family tables filled
-  independently of residency) removes the coupling.
+- A FlatCityBuf stream's DuckDB table covers RESIDENT rows only. A streamed
+  CityParquet layer's no longer does: performance task 5 gave each object
+  family a view over its file (below).
 - Relinking a saved local multi-file layer accepts one file.
 - Share-link `selectedLods` are dropped on the stream path (as for `.fcb`); a
   stream's LoDs come from the zoom policy.
@@ -973,3 +974,163 @@ README): Node benchmark `scripts/performance/cityparquet-stream.test.ts`
 smoke `stream-browser-smoke-yokohama.{json,png}` — first resident objects 43 s
 after navigation (engine boot and geoid included, SwiftShader), 4.5 K of
 884.1 K loaded in 21 cells, JS heap 175 MB, no errors.
+
+### Object families, each with a table over its own file (2026-09-23)
+
+A PLATEAU CityParquet package is a set of object tables — building, bridge,
+water_body, transportation, vegetation, city_furniture — and task 3 opened every
+one of them to show a city's buildings. A streamed layer now opens only the
+families the user asked for, and every family has its own queryable table that
+reads STRAIGHT FROM THE FILE. The table panel, filters, statistics and export
+stopped depending on what geometry the camera happened to deliver.
+
+- **Families come from the manifest, and a key is a label while the href is the
+  identity.** `CityParquetManifest.families` is one `{key, href, size}` per
+  object table, in manifest order, pairing one-to-one with `objectTables`
+  (sidecars are never families). The key is the asset key when the manifest gave
+  the table a descriptive one, else the href's base name — in BOTH cases with
+  `.parquet` stripped, because the reference writer keys each table by its own
+  file name, so the raw key would read `building.parquet` and the Building
+  default and every label would have to strip it anyway. A key that only names
+  the asset's role loses to the file name (`GENERIC_ASSET_KEYS`: `data`,
+  `objects`, `cityparquet-objects`, compared case-insensitively). Duplicate keys
+  are NOT deduped: `east/building.parquet` and `west/building.parquet` stay two
+  families, and the app disambiguates the second (`building`, `building#2`) with
+  the href in the label, because the table registry is keyed by the family key
+  and two families sharing one key would collide on one table.
+  `CityParquetStreamHeader.tables[i].name` is a label too — a URL base name, a
+  `File`'s name, else `table-<i>` — so families and header tables are paired
+  strictly BY ARRAY ORDER against the families the stream was opened with
+  (`familyStore.applyStreamTables`), never by matching those names.
+- **A family's table is a DuckDB VIEW over `read_parquet`, not a copy of the
+  rows.** The source is registered once per layer and per source identity — a
+  URL by its text through `registerFileURL` (`DuckDBDataProtocol.HTTP`), a
+  picked `File` by its OBJECT through `registerFileHandle` +
+  `BROWSER_FILEREADER`, both behind `registerParquetUrl` / `registerParquetFile`
+  in `src/insights/duckdb.ts` — under a name this app generates
+  (`family_<n>.parquet`), because that name is interpolated into
+  `read_parquet('…')` as a literal. `src/insights/familyViews.ts` then
+  `DESCRIBE`s the file, keeps the non-dropped columns (`isDroppedColumn`: 15 of
+  the real Yokohama building table's 37; `address`, `children_roles` and `other`
+  are KEPT, and the LoD ladder is read from the DROPPED `geometry_lod*` names)
+  and publishes `CREATE OR REPLACE VIEW <name> AS SELECT <kept> FROM
+read_parquet('<registered>')` through the ordinary `adoptLayerTable`, so the
+  family's table is `ready` in the registry like any other.
+  Measured in the browser on that 884 106-row table
+  (`docs/performance/cityparquet-2026-09-21/duckdb-read-parquet-spike.json`):
+  the view costs 26 ms to publish, a filtered count 34 ms, a 100-row page
+  793 ms, a deep page 1.5 s, and the JS heap reads 115 MB either way.
+  Materialising the same 15 columns instead costs 961 ms and 247 MB of DuckDB
+  memory, and pages in 97 ms. A view was chosen because it cannot DRIFT from the file, needs no JSON
+  encoding, no type map and no whole-set `feature_id` pass (the file has that
+  column), and does not hold the shared table FIFO for minutes. The escape
+  hatch, if paging ever proves too slow, is the same code saying
+  `CREATE TABLE … AS SELECT` — at those two costs.
+  Not chunked `INSERT`s, which the first plan specified: that machinery existed
+  only because this build was believed to have no `registerFileURL`, which the
+  plan review corrected and the spike disproved.
+  One engine fact the view forces: DuckDB 1.5.5 REFUSES `DROP TABLE IF EXISTS`
+  over a view ("Existing object … is of type View"), it does not no-op, so
+  `layerTables.retire` branches to `DROP VIEW` for a file-backed table.
+- **Table keys are `${layerId}::${family}`, and every consumer that OWNS a table
+  freezes the triple.** `layerTableKey(layerId, family)` with `family === null`
+  is the BARE layer id, so every single-table layer keeps the key it had. A
+  layer has ONE active family, which is what the table panel shows and what the
+  readers (`useLayerQuery`, `useLayerCounts`, `StatsTab`, `LayerExport`,
+  `useEligibilityContext`, `useToolForm`) resolve through; query state is keyed
+  per table (`getActiveTableKey`), so each family keeps its own filter, page and
+  reading. The keys are not layer ids: every enumeration site
+  (`mapFilterSync.reconcile`, `runQueue`'s stale watcher) takes the layer id
+  from `parseTableKey`, and the owners — a processing run, an export, the
+  computed columns it writes — freeze `{layerId, familyKey, tableName}` at
+  start, so switching family mid-run cannot retarget the work.
+- **Building alone by default, else the whole package.** `defaultEnabledKeys`
+  enables every family whose raw key case-folds to `building`, and if there is
+  none, every available family — a one-table source is a one-family package and
+  gets it. The fold is deliberate: an exact match would silently open a whole
+  package for a writer who spelt the key `Building`. Only the comparison folds;
+  labels keep the writer's casing. The same test gates the panel's "Buildings"
+  reading (`familyOffersBuildings`), since a bridge table holds no root Building
+  and the reading would answer zero for everything.
+- **Changing the open families is a serialised, transactional reopen.**
+  `reopenStreamingLayer` runs the old entry's disposers, unregisters it, calls
+  `plugin.remove(layerId)` — never `handle.delete()` alone, which leaves the
+  plugin's registry entry and makes the next open fail on the duplicate id —
+  then reopens under the SAME layer id, seeded from the layer row (rules, their
+  enabled flag, visibility, hidden types, the picked appearance), so the camera,
+  selection and tables survive. `familyStore` holds one promise chain per layer
+  and the queued job reads the latest desired set, so two rapid toggles cost one
+  reopen; a completion for a layer removed mid-open loses the generation check
+  and is disposed with `plugin.remove`, never registered. The store keeps
+  `enabled` (what the user wants) apart from `opened` (what the live stream
+  holds) because a failure has to roll one back while saying honestly that
+  nothing is open: on a failure the rollback target is `opened` when something is
+  open and the DESIRED set when nothing is, which is what keeps Retry alive
+  across two consecutive failures. Closing the last open family is refused with
+  an outcome rather than reaching `openStream` with an empty source list.
+- **A file-backed table is never rebuilt from residents.** `layerTableLifecycle`
+  refuses the resident enqueue for a layer that has a file-backed table OR has
+  families at all (`enqueueAt`, `rebuildWanted`, the consumer sweep,
+  `refreshStreamingTable`) — the second half covers the window between a family
+  layer's row landing and its first view, so there is never a frozen resident
+  snapshot for a reader to find. Removal goes through `dropFamilyViews`, which
+  drops the views AND releases their registrations: a dropped VFS name still
+  resolves, to nothing, forever, so the cache must forget it or the next ensure
+  builds a view over an empty file with no error anywhere. An engine death
+  clears the registry and every registration, and the revival is the
+  `onEngineRetry(hook)` seam on `layerTables`: `retryEngine` runs it after a
+  successful boot and `installLayerTableLifecycle` re-ensures every family
+  layer's active view. The seam exists because `insights/` may not import
+  `features/` — only the family store knows which layers have families.
+- **The bbox stays in the FILE's CRS, and the file's own footer says which.**
+  A family's view reads the file directly, so its `bbox` column is in the file's
+  coordinates — degrees for a PLATEAU package. `familySourceCrs` therefore reads
+  the Parquet FOOTER (`readCityParquetSchema(...).footer.epsg`, the same ranged
+  read the stream decision already makes, cached per source): the stream header
+  publishes the PROJECTED UTM target `coordinateTargetFor` picked, so recording
+  it would have claimed metres for a degree table and the refusal below would
+  never have fired on the data it exists for. The three tools that need metric
+  bounds — join by location, distance to nearest, aggregate per area — declare
+  `needsMetricBounds` and `metricBoundsRefusal` refuses such a layer by name,
+  temporarily, until performance task 6 makes the coordinate story coherent;
+  Aggregate writes to a vector layer, so the same sentence is applied to its
+  city SOURCE rows in `useToolForm`. A CRS of `null` is NO CLAIM and refuses
+  nothing, which is every other layer — an unreadable footer must not refuse a
+  tool.
+- **The family choice is persisted.** `LayerSnapshot.families {enabled, active}`
+  (`SNAPSHOT_VERSION` 5; `migrateSnapshot` carries v3 and v4 forward, where an
+  absent field means the Building default) and the same optional field in the
+  share hash, which stays `v: 3` as `colorBy` did. Capture takes the DESIRED set,
+  so a save during a failed reopen restores what the user asked for, and restore
+  validates the keys against the families the open actually resolved: unknown
+  keys are dropped and nothing surviving falls back to the default rather than a
+  layer with no stream.
+
+Known limits, deliberately left:
+
+- **Streamed only.** A package under `CITYPARQUET_STREAM_THRESHOLD_BYTES` still
+  merges every object table into ONE layer with ONE table, and
+  `addCityParquetLayer` ignores a restored family choice on that path. The merge
+  is first-wins on a duplicate id with a single summary warning.
+- Ids are assumed unique across families: the scene cannot disambiguate a
+  duplicate, and nothing checks across the open families.
+- Map filtering stays disabled for every streaming layer (`mapFilterSync` skips
+  `isStreaming`), so the panel still reads "Table only" — but no longer
+  "currently loaded" for a family's view.
+- Only the ACTIVE family's view is ensured. Another enabled family's table stays
+  `absent` until its Table button asks for one; the families block says so
+  rather than implying a table exists.
+- Two families that resolve to the same URL (or the same `File`) share ONE
+  registration, so dropping one releases the VFS name under the other's live
+  view. Only reachable when a manifest lists one href twice.
+- A `CREATE VIEW` failure can leave an orphaned registration cached until the
+  layer is removed.
+- A processing run cannot ALTER a view, and nothing refuses one yet: "Add
+  columns to this layer" for Height from extent on a family layer fails at the
+  `ALTER TABLE`. The New-layer destination works.
+- The re-link placeholder for a saved local package carries no family choice, so
+  re-selecting the folder reopens at the Building default.
+
+Evidence: the spike above, and the real-package browser validation
+(`families-browser-validation-yokohama.{json,png}`, "Object families" in
+`docs/performance/cityparquet-2026-09-21/README.md`).
