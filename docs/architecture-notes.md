@@ -1368,6 +1368,19 @@ regression.
   consistency across a closed shell — which is the follow-up in
   `docs/roadmap.md`.
 
+  What the fix is worth on real data was measured in the browser, not inferred: a
+  per-triangle census of the live meshes over real Yokohama PLATEAU found 16,049
+  of 16,058 horizontal LoD 0 footprint faces — 99.94 % — agreeing on one
+  direction (down, which is what a terrain-following footprint's outward normal
+  does), against the `−1 / +1` mixture the tight box gives the same shape in the
+  unit measurement above. The pre-fix state was NOT re-smoked in the browser, so
+  the before/after comparison there is unit-level; the nine dissenters are
+  untraced and fit the null-box population. Evidence and its caveats (the
+  `DoubleSide` material makes the normal G-buffer unable to discriminate a
+  winding on its own, so the census reads the meshes' own face normals) in
+  `docs/performance/cityparquet-2026-09-21/README.md` and the
+  `winding-flatness-browser-smoke-yokohama.json` beside it.
+
 - **Coverage, not equality.** Two different transforms need not select
   identical rows for the same axis-aligned box. The tests assert CONSERVATIVE
   coverage (every object the UTM index returned for a view is still returned),
