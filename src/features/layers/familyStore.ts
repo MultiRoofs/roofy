@@ -35,6 +35,7 @@ import {
   type FamilySource,
 } from "../../insights/familyViews";
 import { getLayerTable, layerTableKey } from "../../insights/layerTables";
+import { useQueryStore } from "../query/queryStore";
 import { familySourceCrs } from "../cityparquet/familySourceCrs";
 import { reopenStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
@@ -273,6 +274,24 @@ export function defaultEnabledKeys(
   return (buildings.length > 0 ? buildings : families).map((f) => f.key);
 }
 
+/**
+ * Could this family hold ROOT Buildings — the rows the table panel's "Buildings"
+ * reading counts?
+ *
+ * The SAME test the Building default uses (R-D): the raw key, case-folded. A
+ * bridge or water-body table has no root Building in it, so offering that
+ * reading would answer every question with zero — "All 0 buildings" over a table
+ * of 12 000 bridges. The panel therefore browses such a family raw and does not
+ * offer the switch at all.
+ *
+ * It is a statement about the family's KIND, not a query: asking the table would
+ * cost a round trip per family switch and would still be a guess before the view
+ * exists.
+ */
+export function familyOffersBuildings(family: LayerFamily): boolean {
+  return family.rawKey.toLowerCase() === BUILDING_KEY;
+}
+
 /** The stream source for a list of families, in their own order. The shape the
  *  worker was verified against: ONE file is `{url}`/`{blob}`, several are
  *  `{urls}`/`{blobs}`. */
@@ -341,7 +360,10 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
     // Ruling S3: the active family's whole-file answer must exist before any
     // reader could have shown a resident snapshot instead. Fire-and-forget —
     // `ensureFamilyView` never throws and records its own failure.
-    if (active !== null) void ensureActiveFamilyView(layerId, active);
+    if (active !== null) {
+      seedFamilyView(layerId, active);
+      void ensureActiveFamilyView(layerId, active);
+    }
   },
 
   forgetLayer: (layerId) =>
@@ -360,6 +382,7 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
     set((s) =>
       patchLayer(s, layerId, (entry) => ({ ...entry, active: family })),
     );
+    seedFamilyView(layerId, family);
     void ensureActiveFamilyView(layerId, family);
   },
 
@@ -398,6 +421,28 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
       }),
     ),
 }));
+
+/**
+ * Give a family's query state the only reading that can be true of it.
+ *
+ * The table panel defaults to "Buildings", which filters to root Buildings — a
+ * bridge or vegetation table has none, so a family that cannot hold Buildings
+ * would open on an empty grid with a footer claiming zero of everything. Written
+ * ONCE per family (only while the stored reading is not already raw), so
+ * switching away and back keeps the columns the user chose.
+ *
+ * Here rather than in the panel because the panel is not the only reader: the
+ * counts hook, the filter chip and an export all read the same query state, and
+ * a default applied in one of them would be a different default in the others.
+ */
+function seedFamilyView(layerId: string, family: string): void {
+  const entry = useFamilyStore.getState().layers[layerId];
+  const found = entry?.families.find((f) => f.key === family);
+  if (!found || familyOffersBuildings(found)) return;
+  const key = layerTableKey(layerId, family);
+  if (useQueryStore.getState().queries[key]?.view === "raw") return;
+  useQueryStore.getState().setView(key, "raw");
+}
 
 /**
  * The generation a layer that has been FORGOTTEN was last at.
@@ -464,6 +509,25 @@ export function getActiveFamily(layerId: string): string | null {
 export function useActiveFamily(layerId: string | null): string | null {
   return useFamilyStore((s) =>
     layerId === null ? null : activeFamilyOf(s.layers, layerId),
+  );
+}
+
+/**
+ * One family's TABLE state, or `null` when the layer has no families (or that
+ * family is not one of them).
+ *
+ * `null` is what every other layer in the app answers, and it is what tells a
+ * reader "the registry is the whole story here" — a family, by contrast, can have
+ * no table at all until somebody asks for one.
+ */
+export function useFamilyTableState(
+  layerId: string | null,
+  family: string | null,
+): FamilyTableState | null {
+  return useFamilyStore((s) =>
+    layerId === null || family === null
+      ? null
+      : (s.layers[layerId]?.table[family] ?? null),
   );
 }
 

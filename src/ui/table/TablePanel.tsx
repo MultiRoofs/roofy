@@ -40,7 +40,12 @@ import { getResidentModel } from "../../features/streaming/residentModel";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { useLayerCounts } from "./useLayerCounts";
 import { useComputedColumnStore } from "../../insights/computedColumns";
-import { useActiveTableKey } from "../../features/layers/familyStore";
+import {
+  ensureActiveFamilyView,
+  familyOffersBuildings,
+  useActiveTableKey,
+  useFamilyStore,
+} from "../../features/layers/familyStore";
 
 const STREAMING_FILTER_REASON =
   "Map filtering is not available for streaming layers yet";
@@ -83,6 +88,19 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   // column choice belong to the family on screen, not to the layer — two
   // families are two tables with two column lists.
   const queryKey = useActiveTableKey(layerId);
+  // The layer's families, for the selector and for the one question the
+  // "Buildings" reading depends on. `undefined` for every layer that has none.
+  const familyEntry = useFamilyStore((s) =>
+    layerId === null ? undefined : s.layers[layerId],
+  );
+  const activeFamily = familyEntry?.active ?? null;
+  const activeFamilyEntry =
+    familyEntry?.families.find((f) => f.key === activeFamily) ?? null;
+  // A family that cannot hold root Buildings is browsed RAW and is not offered
+  // the switch: the reading would count zero of everything. A layer with no
+  // families keeps both readings, exactly as before.
+  const offersBuildings =
+    activeFamilyEntry === null || familyOffersBuildings(activeFamilyEntry);
   const query = useQueryStore((s) =>
     queryKey === null ? null : layerQuery(s, queryKey),
   );
@@ -451,7 +469,29 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
             role="group"
             aria-label="Record controls"
           >
-            {queryKey !== null && (
+            {familyEntry !== undefined && familyEntry.families.length > 0 && (
+              /* WHICH FAMILY this panel is about. A family's table reads the
+                 FILE, so any of them can be browsed — including one whose
+                 geometry is closed, which is why this is a plain choice and not
+                 a read-out of what is open. */
+              <select
+                className="table-family-select"
+                aria-label="Object family"
+                value={activeFamily ?? ""}
+                onChange={(event) => {
+                  useFamilyStore
+                    .getState()
+                    .setActiveFamily(layerId!, event.target.value);
+                }}
+              >
+                {familyEntry.families.map((family) => (
+                  <option key={family.key} value={family.key}>
+                    {family.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {queryKey !== null && offersBuildings && (
               <button
                 type="button"
                 className="tb-btn table-action-btn"
@@ -556,6 +596,28 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
             <div className="table-message">
               <span className="loading-spinner" />
               <span>Building this layer's table…</span>
+            </div>
+          ) : view.status === "absent" ? (
+            /* A family whose view was never created. Nothing is in flight, so a
+               spinner would never resolve; nothing is wrong with the data
+               either. The user asks for it — the same act as the details
+               panel's table button, and the same one door (`setActiveFamily`
+               ensures the view). */
+            <div className="table-message">
+              <p>
+                {view.message ?? "This family's table has not been loaded yet."}
+              </p>
+              <button
+                type="button"
+                className="tb-btn table-action-btn"
+                onClick={() => {
+                  if (layerId !== null && activeFamily !== null) {
+                    void ensureActiveFamilyView(layerId, activeFamily);
+                  }
+                }}
+              >
+                Load table
+              </button>
             </div>
           ) : view.status === "failed" ? (
             <div className="table-message" role="alert">

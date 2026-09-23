@@ -3748,6 +3748,16 @@ body {
   white-space: nowrap;
 }
 
+/* Which object family the panel is about (a streamed CityParquet package).
+   The compact field height every other control in this row wears; the label is
+   the select's own `aria-label`, because the option text already names the
+   family and a visible "Family:" would repeat it. */
+.table-family-select {
+  min-height: var(--control-height-compact);
+  max-width: 11rem;
+  font-size: 0.65rem;
+}
+
 .table-panel-body {
   flex: 1;
   overflow: auto;
