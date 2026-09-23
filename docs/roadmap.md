@@ -798,6 +798,35 @@ different feature from avoiding an attribute read, and it belongs in a plan of
 its own — "resolve a non-resident selection from its family view" — never as a
 revival of the deferred-attribute idea, which the measurement closed.
 
+### The winding heuristic needs a real inside/outside test, not a bbox centre
+
+`orientExteriorRing` (`navara-core/src/geometry/buildCityMeshArrays.ts`) decides
+a face's orientation with one bit: does the face's centroid sit on the far side
+of the object's bbox CENTRE from where its normal points. That is right only
+while the box puts the face clearly on ONE side of its centre, and four shapes
+fail it — a null `bbox` (a CityParquet child row), a valid but z-degenerate or
+near-flat box (a table whose only geometry is LoD 0 footprints has one
+legitimately), geometry the read kept sitting on the wrong side of a box
+dominated by geometry the read dropped (a roof at 8 m inside a 0..40 m row box
+inverts, at exactly `boxHeight / 2`), and a face that legitimately faces its own
+centroid (an L-shape's inner walls, a courtyard). All four are measured and
+described in `docs/architecture-notes.md`'s Winding bullet, and the first three
+are pinned in `navara-core/tests/geo/geodeticRingsToEnu.test.ts`.
+
+**A real inside/outside test closes all four at once** — a signed-volume test
+over the object's shell, or consistency of orientation across a closed shell
+(propagate from one face whose direction is known, or flip the whole shell if
+its signed volume is negative) — where widening the bbox heuristic closes none
+of them properly. The cost of leaving it is bounded: the city material is
+`DoubleSide`, so what a wrong normal costs is the normal G-buffer, and any
+effect reading it.
+
+Found by the fix-round-2 review of the geographic → ENU milestone
+(2026-09-23), which measured every sub-case. Deliberately NOT fixed there:
+`projectCityObjects` seeds the static path from the same box, so these are the
+heuristic's standing limit rather than that milestone's regression, and a real
+orientation test is a change to every format's bake — its own plan.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions
