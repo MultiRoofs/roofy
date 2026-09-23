@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   geometryText,
   openedSummary,
-} from "../../../../src/ui/layers/LayerFamilies";
+} from "../../../../src/ui/layers/layerFamiliesText";
 import { buildLayerFamilies } from "../../../../src/features/layers/familyStore";
 
 const FAMILIES = buildLayerFamilies([

@@ -400,8 +400,9 @@ describe("DetailsSection — object families", () => {
     expect(group.textContent).toContain("Building");
     expect(group.textContent).toContain("Bridge");
     expect(group.textContent).toContain("Water Body");
-    // The OPEN family reports its size; the others are available, not loaded.
-    expect(group.textContent).toContain("1,204 loaded");
+    // The OPEN family reports the size of its FILE — not what is loaded, which
+    // is the note above's reading and the status bar's.
+    expect(group.textContent).toContain("Opened · 1,204 objects");
     expect(group.textContent).toContain("Not opened");
   });
 
