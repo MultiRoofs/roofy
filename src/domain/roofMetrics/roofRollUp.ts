@@ -20,8 +20,8 @@ export interface RoofSurfaceMetric {
   readonly lod: string | null;
   readonly areaSqM: number;
   readonly inclinationDeg: number;
-  /** `null` when the surface has no aspect — core answers that below 0.1
-   *  degrees of inclination, where the tilt would be the frame's own. */
+  /** `null` when the surface has no aspect — core answers that below its own
+   *  `FLAT_INCLINATION_DEG`, where the tilt would be the frame's own. */
   readonly azimuthDeg: number | null;
 }
 
@@ -35,7 +35,8 @@ export interface RoofRollUp {
   readonly slopeDeg: number | null;
   /** Of the largest non-flat surface; `null` when every surface is flat, or
    *  when that surface itself has no aspect (possible at a threshold under
-   *  0.1 degrees, where a horizontal roof counts as non-flat). */
+   *  core's `FLAT_INCLINATION_DEG`, where a horizontal roof counts as
+   *  non-flat). */
   readonly azimuthDeg: number | null;
   readonly surfaces: number;
 }

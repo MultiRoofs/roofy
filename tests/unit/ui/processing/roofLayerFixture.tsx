@@ -12,7 +12,7 @@ import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceS
 import { useLayerTableStore } from "../../../../src/insights/layerTables";
 
 /** A unit square of `type` at `lod`: area 1, inclination 0, and therefore NO
- *  azimuth (core answers null below 0.1 degrees of tilt). */
+ *  azimuth (core answers null below its own `FLAT_INCLINATION_DEG`). */
 const surface = (type: string, lod: string) => ({
   type,
   rings: [

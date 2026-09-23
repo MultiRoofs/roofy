@@ -231,8 +231,9 @@ export function buildingSummary(
   // `computeAverageAzimuth` returns 0 both for due north and for "nothing to
   // average", so the row asks the surfaces themselves whether any of them
   // contributes. The condition MIRRORS that function's own gate — core answers
-  // null below 0.1 degrees, but this panel has always called anything under 1
-  // degree flat, and a roof in between would otherwise read "N (0°)".
+  // null below its own `FLAT_INCLINATION_DEG`, but this panel has always used
+  // the looser `FLAT_THRESHOLD_DEG`, and a roof in between would otherwise read
+  // "N (0°)".
   const anySloped = metrics.some(
     (m) => m.azimuthDeg !== null && m.inclinationDeg >= FLAT_THRESHOLD_DEG,
   );
@@ -309,9 +310,9 @@ export function formatSurfaceType(type: Surface["type"]): string {
   return type.replace(/([a-z])([A-Z])/g, "$1 $2").replace("Surface", "surface");
 }
 
-/** `null` is "no aspect" — core answers that below 0.1 degrees of inclination,
- *  where a bearing would be the frame's tilt rather than the roof's. It must
- *  not read as "N (0°)". */
+/** `null` is "no aspect" — core answers that below its own
+ *  `FLAT_INCLINATION_DEG` of inclination, where a bearing would be the frame's
+ *  tilt rather than the roof's. It must not read as "N (0°)". */
 function formatAzimuth(deg: number | null): string {
   if (deg === null) return "Flat";
   return `${azimuthToCardinal(deg)} (${deg.toFixed(0)}\u00B0)`;

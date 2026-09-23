@@ -4,9 +4,14 @@
 
 import type { RoofMetrics } from "@cityjson/navara-core";
 
-/** Inclination threshold below which a surface is considered flat (degrees).
- *  Exported because a caller that has to tell "no aspect" from "due north" —
- *  `computeAverageAzimuth` answers 0 for both — must mirror this gate exactly. */
+/** Inclination threshold below which THE APP considers a surface flat
+ *  (degrees). Looser than core's own `FLAT_INCLINATION_DEG`, deliberately: core
+ *  withholds an azimuth only where the bearing would be the frame's tilt, while
+ *  this is a presentation gate on what counts as sloped at all.
+ *
+ *  Exported, and imported rather than respelled, because every caller that has
+ *  to tell "no aspect" from "due north" — `computeAverageAzimuth` answers 0 for
+ *  both — must mirror the SAME gate. */
 export const FLAT_THRESHOLD_DEG = 1;
 
 /** Compute the area-weighted circular mean of azimuth angles.
@@ -24,7 +29,8 @@ export function computeAverageAzimuth(
 
   for (const m of metrics) {
     if (m.inclinationDeg < FLAT_THRESHOLD_DEG) continue;
-    // A surface with no aspect at all (core answers null below 0.1 degrees)
+    // A surface with no aspect at all (core answers null below its own
+    // `FLAT_INCLINATION_DEG`)
     // never contributes: read as 0 it would drag the mean due north.
     if (m.azimuthDeg === null) continue;
     const rad = (m.azimuthDeg * Math.PI) / 180;
