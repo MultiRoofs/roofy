@@ -1124,10 +1124,16 @@ Known limits, deliberately left:
 - Only the ACTIVE family's view is ensured. Another enabled family's table stays
   `absent` until its Table button asks for one; the families block says so
   rather than implying a table exists.
-- A processing run cannot ALTER a view, and nothing refuses one yet: "Add
-  columns to this layer" for Height from extent on a family layer fails at the
-  `ALTER TABLE`. The New-layer destination is fine: it copies the view with
-  `CREATE TABLE … AS SELECT` and alters that copy.
+- **A tool has nowhere to write on a family target, and both destinations say
+  so.** `ALTER TABLE` is refused over a view, so "This layer" is refused for a
+  target whose table is `fileBacked` — `FILE_BACKED_NO_LAYER_COLUMNS` disables
+  the radio in `useToolForm` and fails the run at `execute`'s head, for a draft
+  frozen before a retarget and for `retryRun` replaying one. "New layer" is
+  refused too, by the older streaming rule (`runQueue` takes every streaming city
+  target out), so the copy sentence says plainly that there is no route rather
+  than pointing at that one. Only about the WRITE TARGET: Aggregate writes to a
+  vector layer's feature properties, which have no schema to alter, and its city
+  SOURCE being a view costs it nothing.
 - The re-link placeholder for a saved local package carries no family choice, so
   re-selecting the folder reopens at the Building default.
 

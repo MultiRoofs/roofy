@@ -32,6 +32,9 @@ let tableInfo: {
   sourceBytes: null;
   sourceFeatureIds: null;
   rowCount: number | null;
+  /** A CityParquet family's table is a VIEW over the file — what the head's
+   *  destination guard refuses to write columns into. */
+  fileBacked?: boolean;
 } = freshTable();
 
 function freshTable() {
@@ -882,6 +885,24 @@ describe("submitRun", () => {
     expect(runById(id)?.error).toBe(
       "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
     );
+  });
+
+  it("refuses to add columns to a table that is read from the FILE", async () => {
+    // A CityParquet family's table is a VIEW over its Parquet file, and the
+    // write reaches `ALTER TABLE` — which DuckDB refuses over a view, deep in the
+    // run where the message means nothing. The form disables the destination;
+    // this is the head's copy of the same refusal, for a draft frozen before a
+    // retarget and for `retryRun` replaying one.
+    activeFamily = "building";
+    tableInfo = { ...freshTable(), fileBacked: true };
+    useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe(
+      "This layer's table is read straight from the file, so columns cannot be added to it. A streamed layer cannot take a New layer either, so this tool has nowhere to write its results yet.",
+    );
+    // Nothing was attempted: no ALTER, no transaction to roll back.
+    expect(sql.some((s) => s.includes("ALTER TABLE"))).toBe(false);
   });
 });
 

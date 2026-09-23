@@ -83,6 +83,8 @@ const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { withDestinations } =
   await import("../../features/processing/toolDestinations");
+const { buildLayerFamilies, useFamilyStore, resetFamilyStoreForTest } =
+  await import("../../../../src/features/layers/familyStore");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -131,6 +133,52 @@ function addCityLayer(
           rowCount: 2,
         },
       },
+    },
+  });
+  return id;
+}
+
+/**
+ * A streamed CityParquet layer whose ACTIVE family's table is a VIEW over the
+ * file (ruling R-B′) — the table a run cannot add columns to.
+ *
+ * The family store is written DIRECTLY rather than through `setFamilies`, which
+ * would kick off a view build and a Parquet footer read; what this case needs is
+ * only the family the form resolves the table through.
+ */
+function addFamilyLayer(name = "Yokohama"): string {
+  const id = addCityLayer(name, [column("id")], true);
+  const families = buildLayerFamilies([
+    {
+      key: "building",
+      href: "building.parquet",
+      size: null,
+      source: { url: "https://data.example/building.parquet" },
+    },
+  ]);
+  useFamilyStore.setState({
+    layers: {
+      [id]: {
+        families,
+        enabled: new Set(["building"]),
+        opened: ["building"],
+        active: "building",
+        geometry: { building: "open" },
+        table: { building: "ready" },
+        reopen: { state: "idle" },
+        generation: 1,
+      },
+    },
+  });
+  const tables = useLayerTableStore.getState().tables;
+  const bare = tables[id];
+  useLayerTableStore.setState({
+    tables: {
+      ...tables,
+      [`${id}::building`]:
+        bare?.state === "ready"
+          ? { ...bare, info: { ...bare.info, fileBacked: true } }
+          : bare!,
     },
   });
   return id;
@@ -188,6 +236,7 @@ afterEach(() => {
   useLayerTableStore.setState({ tables: {} });
   useComputedColumnStore.setState({ byLayer: {} });
   useQueryStore.setState({ queries: {} });
+  resetFamilyStoreForTest();
 });
 
 describe("OUTPUT destination", () => {
@@ -349,5 +398,37 @@ describe("OUTPUT destination", () => {
         "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
       ),
     ).toBeTruthy();
+  });
+
+  it("refuses This layer when the target's table is read from the FILE", () => {
+    // A family's table is a VIEW over its Parquet file: the write reaches
+    // `ALTER TABLE`, which DuckDB refuses over a view, and the run failed deep
+    // in the engine with a message that means nothing to the user. Both
+    // destinations are impossible on such a target today, and the sentence says
+    // so rather than pointing at a New layer this streamed layer cannot take.
+    addFamilyLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    expect(thisLayerRadio().disabled).toBe(true);
+    expect(
+      screen.getByText(
+        "This layer's table is read straight from the file, so columns cannot be added to it. A streamed layer cannot take a New layer either, so this tool has nowhere to write its results yet.",
+      ),
+    ).toBeTruthy();
+    // And Run, because the DRAFT still says "layer" — the disabled radio does
+    // not unchoose it.
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    // ONE note: the New-layer sentence would repeat half of what this one says.
+    expect(screen.queryByText(/New layer is not available/)).toBeNull();
+  });
+
+  it("leaves a VECTOR target alone when its city SOURCE is a family view", () => {
+    // §7.6 writes to the geo layer's own properties, which have no schema to
+    // alter — the view is only where the buildings are counted. Refusing here
+    // would take Aggregate away from every streamed CityParquet package.
+    addFamilyLayer("Yokohama");
+    addZones();
+    render(<ToolView toolId="aggregate-per-area" />);
+    expect(thisLayerRadio().disabled).toBe(false);
+    expect(screen.queryByText(/read straight from the file/)).toBeNull();
   });
 });

@@ -85,6 +85,7 @@ import { epsgForLayer } from "../../scene/cursorCrsReadout";
 import { SOURCE_NEEDS_AREAS } from "./crossLayerParams";
 import {
   derivedLayerName,
+  FILE_BACKED_NO_LAYER_COLUMNS,
   prepareDerivedCityLayer,
   prepareDerivedVectorLayer,
   STREAMING_NO_NEW_LAYER,
@@ -1238,6 +1239,24 @@ async function execute(
       patch(id, {
         status: "failed",
         error: STREAMING_NO_NEW_LAYER,
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
+    // And the other destination's refusal, about the WRITE TARGET's table: a
+    // CityParquet family's table is a VIEW over its file, which `ALTER TABLE`
+    // cannot add a column to. The form disables the radio; this is the head's
+    // copy, for a draft frozen before a retarget and for `retryRun` replaying
+    // one. Deliberately NOT about the source: a vector target's own properties
+    // have no schema to alter, whatever its city source's table is.
+    if (
+      request.destination === "layer" &&
+      target.kind === "city" &&
+      target.table.fileBacked === true
+    ) {
+      patch(id, {
+        status: "failed",
+        error: FILE_BACKED_NO_LAYER_COLUMNS,
         elapsedMs: elapsed(),
       });
       return;

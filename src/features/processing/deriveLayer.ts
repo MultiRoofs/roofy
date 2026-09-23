@@ -56,6 +56,26 @@ export const STREAMING_NO_NEW_LAYER =
   "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.";
 
 /**
+ * Why "This layer" is refused when the target's table is a VIEW over a file.
+ *
+ * A CityParquet family's table reads its Parquet file directly (ruling R-B′), so
+ * `writeComputedColumns`' `ALTER TABLE` is refused by DuckDB — deep inside the
+ * run, where the message means nothing to the user. It is a statement about the
+ * WRITE TARGET only: a vector-target tool writes to feature properties, which
+ * have no schema to alter, and its city SOURCE being a view costs it nothing.
+ *
+ * The second sentence is the honest part. Every family table belongs to a
+ * STREAMED layer, whose New-layer destination is refused too
+ * ({@link STREAMING_NO_NEW_LAYER}), so there is no other route to offer — and
+ * pointing at one that is also unavailable would send the user round a loop.
+ *
+ * Said in the same three places as its neighbour above: the radio, the note
+ * under it, the form's `runReason`, and `execute`'s head pre-flight.
+ */
+export const FILE_BACKED_NO_LAYER_COLUMNS =
+  "This layer's table is read straight from the file, so columns cannot be added to it. A streamed layer cannot take a New layer either, so this tool has nowhere to write its results yet.";
+
+/**
  * Spec §6's prefilled name for a tool: "<target> · <tool noun>".
  *
  * The seven the spec spells out are "Delft · solids", "Delft · roof metrics",

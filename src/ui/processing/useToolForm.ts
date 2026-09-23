@@ -39,6 +39,7 @@ import {
 import { toolById } from "../../features/processing/toolRegistry";
 import {
   derivedLayerName,
+  FILE_BACKED_NO_LAYER_COLUMNS,
   nameTaken,
   STREAMING_NO_NEW_LAYER,
 } from "../../features/processing/deriveLayer";
@@ -591,10 +592,19 @@ export function useToolForm(toolId: ToolId) {
   // Only a CITY target can be streaming, and `target` is exactly that layer.
   const newLayerBlocked =
     tool.destinations.includes("new") && target?.isStreaming === true;
+  // The same for "This layer", about the WRITE TARGET's own table: a CityParquet
+  // family's table is a VIEW over its file (R-B′), and the write ends in an
+  // `ALTER TABLE` DuckDB refuses over one. `cityTable` IS the write target's
+  // table here — for a city tool `cityLayer === target` — and for a VECTOR-target
+  // tool it is the SOURCE's, which this must not refuse: §7.6 writes to feature
+  // properties, which have no schema to alter.
+  const layerBlocked = !vectorTargeted && cityTable?.fileBacked === true;
   const destinationReason =
     draft.destination === "new" && newLayerBlocked
       ? STREAMING_NO_NEW_LAYER
-      : null;
+      : draft.destination === "layer" && layerBlocked
+        ? FILE_BACKED_NO_LAYER_COLUMNS
+        : null;
   // §6: the replace warning is SCOPED TO THE COPY for a New-layer run — "2
   // inherited computed columns will be replaced in the new layer". The
   // non-computed collisions are already the prefix error (`sourceCollisions`),
@@ -700,6 +710,9 @@ export function useToolForm(toolId: ToolId) {
     // it (Design decision (f) — a streaming parent has no geometry to copy).
     // Computed above, because `runReason` needs it too.
     newLayerBlocked,
+    // Its twin for the other destination (Design decision (f)'s neighbour): the
+    // target's table is a view over a file, which cannot take new columns.
+    layerBlocked,
     destinationReason,
     prefixError,
     paramsError,
