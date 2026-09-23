@@ -41,6 +41,12 @@ vi.mock("../../../src/insights/duckdb", () => ({
   queryParquetBuffer: vi.fn(async () => null),
 }));
 
+// The file's own CRS is a ranged footer read (ruling S2); faked, so no case
+// here reaches for the network.
+vi.mock("../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
+
 const { useLayerQuery } = await import("../../../src/ui/table/useLayerQuery");
 const { useLayerCounts } = await import("../../../src/ui/table/useLayerCounts");
 const { citySourceReason, eligibilityContextFor } =
@@ -174,6 +180,33 @@ describe("useLayerQuery", () => {
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toBe("family_building"),
     );
+  });
+
+  it("keeps each family's own filter, sort and page (R-C′ keying)", async () => {
+    const id = seedTwoFamilyLayer();
+    // The BRIDGE family is active and sorted; the building family was never
+    // touched. Two families of one layer are two tables with two column lists,
+    // so one query state for both would carry a sort — or a predicate — onto a
+    // table that may not have the column at all.
+    useQueryStore.getState().toggleSort(layerTableKey(id, "bridge"), "id");
+    render(<Probe layerId={id} />);
+    await waitFor(() => expect(runQuery).toHaveBeenCalled());
+    const bridgeSql = runQuery.mock.calls
+      .map((c) => String(c[0] ?? ""))
+      .filter((sql) => sql.includes("family_bridge"))
+      .join("\n");
+    expect(bridgeSql).toContain('ORDER BY "family_bridge"."id"');
+
+    runQuery.mockClear();
+    useFamilyStore.getState().setActiveFamily(id, "building");
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("family_building"),
+    );
+    const buildingSql = runQuery.mock.calls
+      .map((c) => String(c[0] ?? ""))
+      .filter((sql) => sql.includes("family_building"))
+      .join("\n");
+    expect(buildingSql).not.toContain("ORDER BY");
   });
 
   it("keeps the bare key for a layer with no families", async () => {

@@ -1,0 +1,360 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-05T14:49:02.046Z",
+  "title": "Design System: Roofy",
+  "extensions": {
+    "colorMeta": {
+      "meadow-lime": {
+        "role": "primary",
+        "displayName": "Meadow Lime",
+        "canonical": "#a7e32b",
+        "tonalRamp": ["#4a7a0f", "#7cb518", "#a7e32b", "#cdf176", "#edfbc8"],
+        "lightTheme": "#7cb518"
+      },
+      "noon-amber": {
+        "role": "secondary",
+        "displayName": "Noon Amber",
+        "canonical": "#ffc530",
+        "tonalRamp": [
+          "#4d3700",
+          "#805c00",
+          "#b38000",
+          "#e6a500",
+          "#ffbf1a",
+          "#ffcd4d",
+          "#ffe08f",
+          "#fff4d6"
+        ],
+        "lightTheme": "#f0a800"
+      },
+      "terracotta": {
+        "role": "secondary",
+        "displayName": "Terracotta",
+        "canonical": "#f2683c",
+        "tonalRamp": [
+          "#481505",
+          "#782308",
+          "#a7310b",
+          "#d73f0e",
+          "#f15828",
+          "#f47d58",
+          "#f8ae96",
+          "#fce1d9"
+        ],
+        "lightTheme": "#d9481c"
+      },
+      "canal-blue": {
+        "role": "tertiary",
+        "displayName": "Canal Blue",
+        "canonical": "#3b82f6",
+        "tonalRamp": [
+          "#031e49",
+          "#06327a",
+          "#0846ab",
+          "#0a5adb",
+          "#2473f5",
+          "#5492f7",
+          "#94bbfa",
+          "#d8e6fd"
+        ],
+        "lightTheme": "#1e5fd8"
+      },
+      "unassigned-grey": {
+        "role": "neutral",
+        "displayName": "Unassigned Grey",
+        "canonical": "#8b93a3",
+        "tonalRamp": [
+          "#22252b",
+          "#383d47",
+          "#4f5664",
+          "#666e80",
+          "#7f8899",
+          "#9ba2b0",
+          "#c0c5cd",
+          "#e8eaed"
+        ]
+      },
+      "night-root": {
+        "role": "neutral",
+        "displayName": "Night Root",
+        "canonical": "#0b0e13",
+        "tonalRamp": [
+          "#080a0e",
+          "#0b0e13",
+          "#10141c",
+          "#12161e",
+          "#161b24",
+          "#1d222c"
+        ]
+      },
+      "night-panel": {
+        "role": "neutral",
+        "displayName": "Night Panel",
+        "canonical": "#12161e",
+        "tonalRamp": [
+          "#1d2330",
+          "#303a50",
+          "#435270",
+          "#56698f",
+          "#7083a9",
+          "#8f9ebc",
+          "#b9c2d5",
+          "#e6e9f0"
+        ]
+      },
+      "paper-ink": {
+        "role": "neutral",
+        "displayName": "Paper Ink",
+        "canonical": "#f2f4ef",
+        "tonalRamp": ["#5a6270", "#8a93a0", "#a3abb7", "#f2f4ef"]
+      },
+      "paper-root": {
+        "role": "neutral",
+        "displayName": "Paper Root",
+        "canonical": "#f6f7f2",
+        "tonalRamp": [
+          "#e9ebe4",
+          "#edefe7",
+          "#f3f4ee",
+          "#f6f7f2",
+          "#fbfcf8",
+          "#ffffff"
+        ]
+      },
+      "night-ink": {
+        "role": "neutral",
+        "displayName": "Night Ink",
+        "canonical": "#14181e",
+        "tonalRamp": ["#14181e", "#4f5661", "#5c636e", "#8b93a3"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Landing headline only; Outfit 600 at -0.03em."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Landing section titles and modal titles."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel and dialog headings; compressed to 0.88rem/600 inside the shell."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Reading copy; the landing lede."
+      },
+      "small": {
+        "displayName": "Small",
+        "purpose": "Descriptions inside panels and cards."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Every section title inside a panel: mono, uppercase, 0.16em, muted ink."
+      },
+      "data": {
+        "displayName": "Data",
+        "purpose": "Numbers, coordinates, the status bar, attribute values."
+      }
+    },
+    "shadows": [
+      {
+        "name": "menu",
+        "value": "0 8px 32px rgba(0, 0, 0, 0.4)",
+        "purpose": "Dropdown menus and toolbar pop-overs."
+      },
+      {
+        "name": "modal",
+        "value": "0 18px 48px rgb(0 0 0 / 45%)",
+        "purpose": "Dialogs, with the strong hairline and 14px radius."
+      },
+      {
+        "name": "sheet",
+        "value": "0 4px 12px rgba(0, 0, 0, 0.25)",
+        "purpose": "Small floating sheets (solar scrubber); 0.1 alpha on the light theme."
+      },
+      {
+        "name": "glow",
+        "value": "0 0 6px var(--accent)",
+        "purpose": "The one coloured shadow: the live status dot."
+      },
+      {
+        "name": "glass",
+        "value": "backdrop-filter: blur(12px); background: rgba(11, 14, 19, 0.9)",
+        "purpose": "Overlays floating over the 3D viewport; 8px blur at 70% on the camera buttons; white at 92% on the light theme."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state",
+        "value": "background 0.15s, color 0.15s, border-color 0.15s",
+        "purpose": "Every hover and active transition."
+      },
+      {
+        "name": "quick",
+        "value": "transform 0.12s linear",
+        "purpose": "Handles and scrubber thumbs."
+      },
+      {
+        "name": "toast-in",
+        "value": "0.2s ease-out (translate + fade)",
+        "purpose": "Toast entry."
+      },
+      {
+        "name": "pulse-dot",
+        "value": "opacity 1 → 0.4 → 1, looping",
+        "purpose": "Streaming / busy status dot."
+      },
+      {
+        "name": "spin",
+        "value": "360deg loop",
+        "purpose": "Loading spinner."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "none",
+        "purpose": "No prefers-reduced-motion guard exists yet; the motion vocabulary is small enough that adding one is a single rule."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "landing",
+        "value": "640px"
+      },
+      {
+        "name": "min-width",
+        "value": "320px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one filled lime button per view; identical in both themes.",
+      "html": "<button class=\"ds-btn-primary\">Open catalog</button>",
+      "css": ".ds-btn-primary{background:var(--accent-fill,#a7e32b);color:var(--on-accent,#14181e);padding:.5rem 1.25rem;border:none;border-radius:var(--radius,9px);font-family:var(--font-display,\"Outfit Variable\",Outfit,system-ui,sans-serif);font-size:.9rem;font-weight:600;cursor:pointer;transition:background .15s}.ds-btn-primary:hover{background:var(--accent-fill-hover,#cdf176)}.ds-btn-primary:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:2px}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Cancel and secondary actions: transparent with a hairline.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost{padding:.25rem .5rem;border:1px solid var(--border,rgba(255,255,255,.09));border-radius:var(--radius-sm,6px);background:transparent;color:var(--fg-muted,#8a93a0);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.7rem;cursor:pointer;transition:background .15s,color .15s}.ds-btn-ghost:hover{background:var(--bg-raised,#1d222c);color:var(--fg,#f2f4ef)}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:2px}"
+    },
+    {
+      "name": "Toolbar Icon Button",
+      "kind": "button",
+      "refersTo": "button-icon",
+      "description": "2rem square tool; hover raises the tone, active takes the lime wash.",
+      "html": "<span class=\"ds-tb-row\"><button class=\"ds-tb-btn\" aria-label=\"Layers\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 2 2 7l10 5 10-5-10-5z\"/><path d=\"m2 17 10 5 10-5\"/><path d=\"m2 12 10 5 10-5\"/></svg></button><button class=\"ds-tb-btn ds-tb-btn-active\" aria-label=\"Select\" aria-pressed=\"true\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z\"/></svg></button></span>",
+      "css": ".ds-tb-row{display:inline-flex;gap:.25rem;padding:.35rem;background:var(--bg-toolbar,#10141c);border-bottom:1px solid var(--border,rgba(255,255,255,.09))}.ds-tb-btn{display:inline-flex;align-items:center;justify-content:center;width:2rem;height:2rem;border:none;border-radius:var(--radius-sm,6px);background:transparent;color:var(--fg-muted,#8a93a0);cursor:pointer;transition:background .15s,color .15s}.ds-tb-btn svg{width:1rem;height:1rem}.ds-tb-btn:hover{background:var(--bg-raised,#1d222c);color:var(--fg,#f2f4ef)}.ds-tb-btn-active,.ds-tb-btn-active:hover{background:var(--accent-soft,color-mix(in srgb,#a7e32b 13%,transparent));color:var(--accent,#a7e32b)}.ds-tb-btn:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:-1px}"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Field on the input tone with a hairline; focus turns the border lime.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"https://…/delft.fcb\" value=\"\">",
+      "css": ".ds-input{width:16rem;padding:.3rem .4rem;background:var(--bg-input,#161b24);border:1px solid var(--border,rgba(255,255,255,.09));border-radius:var(--radius-sm,6px);color:var(--fg,#f2f4ef);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.72rem}.ds-input::placeholder{color:var(--fg-dim,#5a6270)}.ds-input:focus{outline:none;border-color:var(--accent,#a7e32b)}"
+    },
+    {
+      "name": "Inspector Tabs",
+      "kind": "nav",
+      "refersTo": "tab",
+      "description": "Outfit 500 tabs with a 2px underline that turns lime when active.",
+      "html": "<nav class=\"ds-tabs\"><button class=\"ds-tab ds-tab-active\">Attributes</button><button class=\"ds-tab\">Rules</button><button class=\"ds-tab\">Analysis</button></nav>",
+      "css": ".ds-tabs{display:flex;width:20rem;background:var(--bg-panel,#12161e);border-bottom:1px solid var(--border,rgba(255,255,255,.09))}.ds-tab{flex:1;padding:.5rem .75rem;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;background:transparent;color:var(--fg-muted,#8a93a0);font-family:var(--font-display,\"Outfit Variable\",Outfit,system-ui,sans-serif);font-size:.78rem;font-weight:500;cursor:pointer;transition:color .15s,border-color .15s}.ds-tab:hover{color:var(--fg,#f2f4ef)}.ds-tab-active{color:var(--fg,#f2f4ef);border-bottom-color:var(--accent,#a7e32b)}.ds-tab:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:-2px}"
+    },
+    {
+      "name": "Section Label",
+      "kind": "custom",
+      "refersTo": "label",
+      "description": "The plan-annotation heading used inside every panel.",
+      "html": "<div class=\"ds-label\">Rule target</div>",
+      "css": ".ds-label{font-family:var(--font-mono,\"IBM Plex Mono\",ui-monospace,monospace);font-size:.66rem;font-weight:500;text-transform:uppercase;letter-spacing:var(--tracking-label,.16em);color:var(--fg-muted,#8a93a0)}"
+    },
+    {
+      "name": "Layer Row",
+      "kind": "card",
+      "refersTo": "list-row",
+      "description": "A hairline list row; the active one takes a lime hairline and the lime wash, with the streaming chip.",
+      "html": "<div class=\"ds-rows\"><div class=\"ds-row ds-row-active\"><span class=\"ds-row-name\">delft.fcb</span><span class=\"ds-chip\">streaming</span></div><div class=\"ds-row\"><span class=\"ds-row-name\">two-buildings.city.json</span></div></div>",
+      "css": ".ds-rows{width:15rem;padding:.5rem;background:var(--bg-panel,#12161e)}.ds-row{display:flex;align-items:center;gap:.5rem;padding:.35rem .5rem;border:1px solid var(--border,rgba(255,255,255,.09));border-radius:var(--radius-sm,6px);margin-bottom:.3rem;color:var(--fg,#f2f4ef);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.75rem;cursor:pointer;transition:background .15s,border-color .15s}.ds-row:hover{background:var(--bg-raised,#1d222c)}.ds-row-active{border-color:var(--accent,#a7e32b);background:var(--accent-soft,color-mix(in srgb,#a7e32b 13%,transparent))}.ds-row-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-chip{padding:.05rem .3rem;font-size:.55rem;font-weight:600;letter-spacing:.03em;color:var(--accent,#a7e32b);border:1px solid var(--accent,#a7e32b);border-radius:999px}"
+    },
+    {
+      "name": "Legend Card",
+      "kind": "card",
+      "refersTo": "glass-overlay",
+      "description": "Glass card over the viewport listing the active rules with their rooftop colours.",
+      "html": "<div class=\"ds-legend\"><div class=\"ds-legend-title\">Legend</div><div class=\"ds-legend-row\"><i class=\"ds-sw\" style=\"background:var(--layer-energy,#ffc530)\"></i>South-facing</div><div class=\"ds-legend-row\"><i class=\"ds-sw\" style=\"background:var(--layer-water,#3b82f6)\"></i>Flat roofs</div><div class=\"ds-legend-row\"><i class=\"ds-sw\" style=\"background:var(--layer-unassigned,#8b93a3)\"></i>Unassigned</div></div>",
+      "css": ".ds-legend{display:inline-block;min-width:9rem;padding:.5rem .6rem;background:rgba(11,14,19,.9);backdrop-filter:blur(12px);border:1px solid var(--border-strong,rgba(255,255,255,.16));border-radius:var(--radius,9px);color:var(--fg,#f2f4ef);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.7rem}.ds-legend-title{font-family:var(--font-mono,\"IBM Plex Mono\",ui-monospace,monospace);font-size:.66rem;font-weight:500;text-transform:uppercase;letter-spacing:.16em;color:var(--fg-muted,#8a93a0);margin-bottom:.35rem}.ds-legend-row{display:flex;align-items:center;gap:.4rem;padding:.1rem 0}.ds-sw{width:.7rem;height:.7rem;border-radius:2px;flex-shrink:0}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Planner's Light Table",
+    "overview": "Roofy is a drafting surface for a city. The near-black shell (#0b0e13 root,\n#12161e panels) is the table; the lit, georeferenced 3D model on the globe is\nthe drawing laid on it; the sidebar, inspector and toolbar are instruments set\naround the drawing, never on top of it. Everything the interface does defers to\nthat reading: panels are flat and hairline-bordered, labels are typeset like plan\nannotations in spaced monospace capitals, and colour is reserved for the roofs\nand for the one thing you are touching.\n\nThe tone is friendly, clear and bright. Bright comes from the brand rather than\nfrom the surfaces: Meadow Lime, Noon Amber, Terracotta and Canal Blue are the\nfour rooftop functions (nature, energy, social, water) and they carry warmth\ninto a dark, steady frame. Clear comes from plain copy and from a strict\nhierarchy in which a non-specialist planner can always tell what is data, what\nis a control and what is a state. A full light theme exists for paper and\nprojectors; on it the brand hues darken so borders, icons and text keep their\ncontrast, while the filled lime button stays exactly the same.",
+    "keyCharacteristics": [
+      "Dark by default, light theme as a first-class sibling; the OS preference picks the initial theme.",
+      "One accent, Meadow Lime, used only for the active, the selected and the primary.",
+      "Four rooftop hues that mean something; they are legend colours, not decoration.",
+      "Outfit for names and headings, IBM Plex Sans for reading, IBM Plex Mono for labels and numbers.",
+      "Flat shell with hairlines; glass only where something floats over the 3D view.",
+      "Dense, instrument-like controls in the shell; generous scale only on the landing page."
+    ],
+    "rules": [
+      {
+        "name": "The One Accent Rule",
+        "body": "Meadow Lime is the only colour that means \"interactive\". Amber, terracotta and blue mean energy, social and water first; they may double as warn, danger and loading, but they never mark hover, focus or selection.",
+        "section": "colors"
+      },
+      {
+        "name": "The Selection Reserve Rule",
+        "body": "Lime 500 is the 3D selection colour and Lime 300 the 3D hover colour. No rule preset, legend entry, default geo-layer colour or base surface colour may equal either. Presets pick from the other three hues and the deeper lime.",
+        "section": "colors"
+      },
+      {
+        "name": "The Same Button Rule",
+        "body": "The filled primary button is #a7e32b with #14181e ink in both themes. Only the *tint* uses of lime (icons, borders, text) darken on paper.",
+        "section": "colors"
+      },
+      {
+        "name": "The Annotation Rule",
+        "body": "A heading inside a panel is a mono uppercase label, not a bigger sans. Size never carries hierarchy inside the shell; case, tracking and ink do.",
+        "section": "typography"
+      },
+      {
+        "name": "The Wordmark Rule",
+        "body": "\"Roofy\" is set in Outfit 600 at -0.03em and is never re-cased, re-spaced or wrapped in an uppercase parent. The lockup's mark is 1.15em of its type, pinned to 20px beside 15px type in the toolbar.",
+        "section": "typography"
+      },
+      {
+        "name": "The Three Layers Rule",
+        "body": "Shell is flat and hairlined; anything over the viewport is glass; anything over the window carries a shadow. A component never mixes two of these.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do derive every interactive colour from the brand tokens in `src/app/brand.css`; `app.css` maps them to roles and never restates a hex.",
+      "Do set panel section titles as IBM Plex Mono, 500, uppercase, 0.16em tracking, muted ink.",
+      "Do keep a single filled lime button per view, Outfit 600, dark ink, the same in both themes.",
+      "Do use Lime Wash plus a lime hairline for the active row, tab or tool, and step hover one tone up (panel to raised).",
+      "Do use Night Glass with a 12px blur, edged with the strong hairline, for anything floating over the 3D view.",
+      "Do keep the four rooftop hues in legend order (nature, energy, social, water) wherever they appear together.",
+      "Do use Night Ink Muted (5.8:1) or Night Ink Label for any text that must be read; both themes pass AA on every surface."
+    ],
+    "donts": [
+      "Don't use Night Ink Dim or Paper Ink Dim as the only ink of a readable label; at 3:1 it fails AA for text. The incumbent tabs, scope buttons and table captions do this and are on record as a defect, not a pattern.",
+      "Don't set Noon Amber or Meadow Lime Deep as running text on the light theme; both fall below 3:1 on white.",
+      "Don't give a rule preset, legend entry, default geo colour or base surface the selection lime (#a7e32b) or the hover lime (#cdf176).",
+      "Don't add a shadow to anything inside the shell, or a blur to anything outside the viewport.",
+      "Don't recolour individual planes of the mark, rotate it, add effects, or re-case the wordmark.",
+      "Don't write globe colour or wireframe from the UI; the engine freezes. Only the elevation colormap is a clean setter.",
+      "Don't hide or gate the geoid attribution overlay; it is a licence obligation.",
+      "Don't introduce a font, a hue outside the brand set, or a second accent. Variation happens in hierarchy, density and layout, not identity."
+    ]
+  }
+}

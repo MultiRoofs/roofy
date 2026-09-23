@@ -1,6 +1,7 @@
 import { clearMapFilter } from "../../features/query/mapFilterSync";
 import { useGeoFeatureVisibilityStore } from "../../features/geoLayers/geoFeatureVisibilityStore";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { useShellStore } from "../shell/shellStore";
 import { formatCount } from "../table/tableText";
@@ -9,8 +10,11 @@ import { useLayerCounts } from "../table/useLayerCounts";
 export function FilterChip() {
   const active = useActiveLayer();
   const layerId = active?.layer.id ?? null;
+  // A city layer's filter belongs to its ACTIVE family (R-C′); a geo layer has
+  // no families, so its key is the bare id it always was.
+  const queryKey = useActiveTableKey(layerId);
   const applied = useQueryStore((state) =>
-    layerId === null ? null : layerQuery(state, layerId).applied,
+    queryKey === null ? null : layerQuery(state, queryKey).applied,
   );
   const counts = useLayerCounts(active?.kind === "city" ? layerId : null);
   const visible = useGeoFeatureVisibilityStore((state) =>
@@ -27,7 +31,7 @@ export function FilterChip() {
           : "Filtered"
         : active.kind === "city" && active.layer.isStreaming
           ? `${formatCount(counts.matching)} listed (table only)`
-          : `${formatCount(counts.matching)} matching ${layerQuery(useQueryStore.getState(), active.layer.id).view === "raw" ? "objects" : "buildings"}`;
+          : `${formatCount(counts.matching)} matching ${layerQuery(useQueryStore.getState(), queryKey ?? active.layer.id).view === "raw" ? "objects" : "buildings"}`;
   return (
     <div className="map-filter-chip">
       <span role="status" aria-live="polite">
@@ -47,7 +51,7 @@ export function FilterChip() {
       <button
         type="button"
         onClick={() => {
-          useQueryStore.getState().clearFilter(active.layer.id);
+          useQueryStore.getState().clearFilter(queryKey ?? active.layer.id);
           if (active.kind === "city") clearMapFilter(active.layer.id);
         }}
       >

@@ -91,11 +91,15 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
   // the composite key. `null` — every other layer — is the bare key this hook has
   // always read.
   const family = useActiveFamily(layerId);
+  // ONE key for the table and its query state (R-C′): two families are two
+  // tables with two column lists, so a sort or a predicate belongs to the family
+  // it was written against, not to the layer.
+  const queryKey = layerId === null ? null : layerTableKey(layerId, family);
   const tableState = useLayerTableStore((s) =>
-    layerId === null ? undefined : s.tables[layerTableKey(layerId, family)],
+    queryKey === null ? undefined : s.tables[queryKey],
   );
   const query = useQueryStore((s) =>
-    layerId === null ? null : layerQuery(s, layerId),
+    queryKey === null ? null : layerQuery(s, queryKey),
   );
   const selections = useSelectionStore((s) => s.selections);
   const layer = useLayerStore((s) =>
@@ -115,7 +119,9 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
   const [loading, setLoading] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const generation = useRef(0);
-  /** Which LAYER the rows on screen came from — see the reset in the effect. */
+  /** Which TABLE the rows on screen came from — the layer AND its family (see
+   *  the reset in the effect): switching family changes the columns under the
+   *  rows exactly as switching layer does. */
   const shownLayer = useRef<string | null>(null);
 
   const reload = useCallback(() => setReloadToken((t) => t + 1), []);
@@ -247,8 +253,8 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     // truthful answer to the same question, and it is replaced when the new
     // one lands rather than being withdrawn while nothing is ready to take
     // its place. A page step and a sort keep it for the same reason.
-    if (shownLayer.current !== layerId) {
-      shownLayer.current = layerId;
+    if (shownLayer.current !== queryKey) {
+      shownLayer.current = queryKey;
       setRows(NO_ROWS);
       setTotalRows(null);
       setUnfilteredRows(null);
@@ -312,10 +318,10 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       // page first would flash "no rows" on the way there, so `loading` is left
       // raised and the rows are left alone until the real page lands. An
       // UNKNOWN total clamps nothing: there is no last page to clamp to.
-      if (filtered !== null && layerId !== null) {
+      if (filtered !== null && queryKey !== null) {
         const lastPage = Math.max(0, Math.ceil(filtered / pageSize) - 1);
         if (page > lastPage) {
-          useQueryStore.getState().setPage(layerId, lastPage);
+          useQueryStore.getState().setPage(queryKey, lastPage);
           return;
         }
       }
@@ -339,7 +345,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       setLoading(false);
     })();
   }, [
-    layerId,
+    queryKey,
     table,
     applied,
     sort,

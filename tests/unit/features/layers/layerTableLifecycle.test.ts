@@ -54,6 +54,13 @@ vi.mock("../../../../src/insights/familyViews", () => ({
   dropFamilyView: vi.fn(async () => {}),
 }));
 
+// The file's own CRS is a ranged footer read in the real thing (ruling S2), so
+// it is faked here like every other I/O in this suite — and synchronously
+// resolved, so the ensure is still one microtask away.
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
+
 /** The callbacks the lifecycle registered with `retryEngine`'s recovery seam. */
 const engineRetryHooks: Array<() => void> = [];
 

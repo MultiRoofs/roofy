@@ -58,6 +58,7 @@ import type {
 } from "../../features/layers/useLayerFileLoader";
 import { LayerRow, PlaceholderRow } from "./LayerRow";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { openRunLog } from "../processing/revealTools";
 
@@ -196,10 +197,12 @@ function StoreLayerRow({
       ? false
       : s.runs.some((r) => r.id === derivedFrom.runId),
   );
+  // A city layer's filter lives under its ACTIVE family's key (R-C′).
+  const queryKey = useActiveTableKey(id) ?? id;
   const appliedFilter = useQueryStore((state) =>
     item.kind === "city" ||
     (item.kind === "geo" && item.layer.kind === "geojson")
-      ? layerQuery(state, id).applied
+      ? layerQuery(state, queryKey).applied
       : null,
   );
 

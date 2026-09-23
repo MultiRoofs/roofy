@@ -1,5 +1,6 @@
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { useQueryStore } from "../../features/query/queryStore";
+import { getActiveTableKey } from "../../features/layers/familyStore";
 import { useWorkspaceStore } from "../../features/workspace/workspaceStore";
 /**
  * Session-only UI state for the app shell: the left layer panel, the right
@@ -169,7 +170,9 @@ export const useShellStore = create<ShellStore>((set, get) => ({
   openFilter: () => {
     const layerId = useWorkspaceStore.getState().activeLayerId;
     if (layerId !== null)
-      useQueryStore.getState().setDrawerTab(layerId, "records");
+      useQueryStore
+        .getState()
+        .setDrawerTab(getActiveTableKey(layerId), "records");
     set((state) => ({
       drawerOpen: true,
       filterRequest: state.filterRequest + 1,

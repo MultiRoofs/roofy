@@ -12,6 +12,7 @@
 import { useMemo, useState } from "react";
 import { useSelectionStore } from "../../features/selection/selectionStore";
 import { useQueryStore } from "../../features/query/queryStore";
+import { getActiveTableKey } from "../../features/layers/familyStore";
 import { useShellStore } from "../shell/shellStore";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
@@ -278,7 +279,11 @@ function roofAreasForMulti(
 
 function openRawObject(layerId: string, objectId: string): void {
   // The drawer query is session state: opening Raw never mutates a saved layer.
-  useQueryStore.getState().navigateRawObject(layerId, objectId);
+  // Through the ACTIVE family's key (R-C′), because that is the table the grid
+  // is about to page.
+  useQueryStore
+    .getState()
+    .navigateRawObject(getActiveTableKey(layerId), objectId);
   useShellStore.getState().openDrawer();
   useSelectionStore.getState().select({ kind: "object", layerId, objectId });
 }

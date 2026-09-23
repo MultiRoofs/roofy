@@ -45,6 +45,12 @@ vi.mock("../../../../src/insights/layerTables", () => ({
   // behind. Nothing is registered in this suite, so: none.
   getLayerTable: vi.fn(() => null),
 }));
+// The file's own CRS is a ranged footer read (ruling S2); faked, so no case
+// here reaches for the network.
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
+
 vi.mock("../../../../src/insights/familyViews", () => ({
   ensureFamilyView: mocks.ensureFamilyView,
   dropFamilyView: vi.fn(async () => {}),

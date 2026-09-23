@@ -14,6 +14,7 @@ import {
 import { WorkspacesPage } from "../ui/workspaces/WorkspacesPage";
 import { captureTablePresentation } from "../features/query/tablePresentation";
 import { useQueryStore } from "../features/query/queryStore";
+import { getActiveTableKey } from "../features/layers/familyStore";
 import { type TablePresentation } from "../features/query/tablePresentation";
 import {
   normalizeAttributeOrders,
@@ -1041,7 +1042,7 @@ export function App({
         hiddenTypes: [...l.hiddenTypes],
         attributeOrders: l.attributeOrders,
         tablePresentation: captureTablePresentation(
-          useQueryStore.getState().queries[l.id],
+          useQueryStore.getState().queries[getActiveTableKey(l.id)],
         ),
         appearance: l.selectedAppearance,
         ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
@@ -1492,7 +1493,7 @@ export function App({
           visible: l.visible,
           attributeOrders: l.attributeOrders,
           tablePresentation: captureTablePresentation(
-            useQueryStore.getState().queries[l.id],
+            useQueryStore.getState().queries[getActiveTableKey(l.id)],
           ),
         })),
       cam: cameraState,

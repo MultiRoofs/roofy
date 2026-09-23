@@ -635,7 +635,9 @@ export function submitRun(request: RunRequest): string {
   return queueRun({
     ...request,
     computeLayerId,
-    snapshot: snapshotScopeInputs(computeLayerId),
+    // The FROZEN family's query too: a "matching" scope reads the filter the
+    // panel had applied to the family the run is over (R-C′).
+    snapshot: snapshotScopeInputs(computeLayerId, active?.familyKey ?? null),
     tableName: active?.info.table ?? null,
     familyKey: active?.familyKey ?? null,
   });

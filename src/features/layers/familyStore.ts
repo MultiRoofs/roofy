@@ -34,7 +34,7 @@ import {
   ensureFamilyView,
   type FamilySource,
 } from "../../insights/familyViews";
-import { getLayerTable } from "../../insights/layerTables";
+import { getLayerTable, layerTableKey } from "../../insights/layerTables";
 import { familySourceCrs } from "../cityparquet/familySourceCrs";
 import { reopenStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
@@ -464,6 +464,31 @@ export function getActiveFamily(layerId: string): string | null {
 export function useActiveFamily(layerId: string | null): string | null {
   return useFamilyStore((s) =>
     layerId === null ? null : activeFamilyOf(s.layers, layerId),
+  );
+}
+
+/**
+ * The key a layer's TABLE and its QUERY are both kept under (R-C′):
+ * `${layerId}::${family}` for a CityParquet family, the bare layer id for every
+ * other layer.
+ *
+ * ONE spelling for both registries on purpose. Two families of one layer are two
+ * tables with two column lists, so they need two query states — a sort or a
+ * predicate written against one family's columns is meaningless against the
+ * other's — and a second way of naming "this layer's current table" is how the
+ * grid and the footer come to disagree about which one they are describing.
+ */
+export function getActiveTableKey(layerId: string): string {
+  return layerTableKey(layerId, getActiveFamily(layerId));
+}
+
+/** {@link getActiveTableKey} as a hook. `null` in, `null` out, so a component
+ *  with no active layer needs no placeholder key. */
+export function useActiveTableKey(layerId: string | null): string | null {
+  return useFamilyStore((s) =>
+    layerId === null
+      ? null
+      : layerTableKey(layerId, activeFamilyOf(s.layers, layerId)),
   );
 }
 

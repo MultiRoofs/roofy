@@ -40,6 +40,7 @@ import { getResidentModel } from "../../features/streaming/residentModel";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { useLayerCounts } from "./useLayerCounts";
 import { useComputedColumnStore } from "../../insights/computedColumns";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 
 const STREAMING_FILTER_REASON =
   "Map filtering is not available for streaming layers yet";
@@ -78,8 +79,12 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
 
   const view = useLayerQuery(layerId);
   const layerCounts = useLayerCounts(layerId);
+  // The ACTIVE family's table key (R-C′): this panel's filter, sort, page and
+  // column choice belong to the family on screen, not to the layer — two
+  // families are two tables with two column lists.
+  const queryKey = useActiveTableKey(layerId);
   const query = useQueryStore((s) =>
-    layerId === null ? null : layerQuery(s, layerId),
+    queryKey === null ? null : layerQuery(s, queryKey),
   );
   const sceneSelections = useSelectionStore((s) => s.selections);
   const streamVersion = useStreamStore((state) =>
@@ -187,10 +192,10 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   // identity every render, which is all it takes to defeat `DataGrid`'s memo.
   const handleSort = useCallback(
     (column: string) => {
-      if (layerId !== null)
-        useQueryStore.getState().toggleSort(layerId, column);
+      if (queryKey !== null)
+        useQueryStore.getState().toggleSort(queryKey, column);
     },
-    [layerId],
+    [queryKey],
   );
 
   const derivedKeys = useMemo(
@@ -243,9 +248,9 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
 
   const reorderColumn = useCallback(
     (source: string, target: string) => {
-      if (layerId === null) return;
+      if (queryKey === null) return;
       useQueryStore.getState().setColumns(
-        layerId,
+        queryKey,
         moveColumn(
           visibleColumns.map((column) => column.name),
           source,
@@ -253,7 +258,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         ),
       );
     },
-    [layerId, visibleColumns],
+    [queryKey, visibleColumns],
   );
 
   const engineDown =
@@ -290,17 +295,19 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         }}
       />
 
-      {query?.rawObjectId !== null && query?.rawObjectId !== undefined && (
-        <div className="table-raw-target" role="status">
-          <span>Viewing raw object {query.rawObjectId}</span>
-          <button
-            type="button"
-            onClick={() => useQueryStore.getState().clearRawObject(layerId!)}
-          >
-            Return to filtered records
-          </button>
-        </div>
-      )}
+      {query?.rawObjectId !== null &&
+        query?.rawObjectId !== undefined &&
+        queryKey !== null && (
+          <div className="table-raw-target" role="status">
+            <span>Viewing raw object {query.rawObjectId}</span>
+            <button
+              type="button"
+              onClick={() => useQueryStore.getState().clearRawObject(queryKey)}
+            >
+              Return to filtered records
+            </button>
+          </div>
+        )}
       <div className="table-panel-header">
         <span className="table-panel-title">
           {activeLayer?.name ?? activeGeoLayer?.name ?? "Objects"}
@@ -396,7 +403,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
               <ActionIcon name="columns" />
               Columns
             </button>
-            {columnsOpen && layerId !== null && (
+            {columnsOpen && layerId !== null && queryKey !== null && (
               <ColumnsPanel
                 computedNames={
                   new Set(derivedKeys.map((column) => column.name))
@@ -411,7 +418,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                     : name
                 }
                 onChange={(names) =>
-                  useQueryStore.getState().setColumns(layerId, names)
+                  useQueryStore.getState().setColumns(queryKey, names)
                 }
                 onMove={reorderColumn}
                 onClose={() => {
@@ -444,7 +451,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
             role="group"
             aria-label="Record controls"
           >
-            {layerId !== null && (
+            {queryKey !== null && (
               <button
                 type="button"
                 className="tb-btn table-action-btn"
@@ -452,7 +459,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                   useQueryStore
                     .getState()
                     .setView(
-                      layerId,
+                      queryKey,
                       query?.view === "raw" ? "buildings" : "raw",
                     )
                 }
@@ -461,7 +468,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                 {query?.view === "raw" ? "Buildings" : "Raw objects"}
               </button>
             )}
-            {layerId !== null && (
+            {queryKey !== null && (
               <label className="table-sync-label">
                 <input
                   type="checkbox"
@@ -469,7 +476,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                   onChange={(e) =>
                     useQueryStore
                       .getState()
-                      .setShowSelectedOnly(layerId, e.target.checked)
+                      .setShowSelectedOnly(queryKey, e.target.checked)
                   }
                 />{" "}
                 Show selected records
@@ -488,7 +495,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
       )}
 
       <>
-        {view.status === "ready" && query !== null && layerId !== null && (
+        {view.status === "ready" && query !== null && queryKey !== null && (
           <FilterBar
             getCandidates={view.getCandidates}
             columns={view.columns}
@@ -498,10 +505,10 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
             error={pageError ? null : view.message}
             disabled={view.loading}
             onChange={(filter) =>
-              useQueryStore.getState().setFilter(layerId, filter)
+              useQueryStore.getState().setFilter(queryKey, filter)
             }
-            onApply={() => useQueryStore.getState().applyFilter(layerId)}
-            onClear={() => useQueryStore.getState().clearFilter(layerId)}
+            onApply={() => useQueryStore.getState().applyFilter(queryKey)}
+            onClear={() => useQueryStore.getState().clearFilter(queryKey)}
           />
         )}
 
@@ -592,16 +599,16 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
           )}
         </div>
 
-        {view.status === "ready" && query !== null && layerId !== null && (
+        {view.status === "ready" && query !== null && queryKey !== null && (
           <Pagination
             page={query.page}
             pageSize={query.pageSize}
             totalRows={view.totalRows}
             unfilteredRows={view.unfilteredRows}
             filtered={query.applied !== null}
-            onPage={(page) => useQueryStore.getState().setPage(layerId, page)}
+            onPage={(page) => useQueryStore.getState().setPage(queryKey, page)}
             onPageSize={(size) =>
-              useQueryStore.getState().setPageSize(layerId, size)
+              useQueryStore.getState().setPageSize(queryKey, size)
             }
           />
         )}

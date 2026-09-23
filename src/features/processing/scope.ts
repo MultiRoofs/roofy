@@ -29,7 +29,7 @@
  */
 
 import { runQuery } from "../../insights/duckdb";
-import type { LayerTable } from "../../insights/layerTables";
+import { layerTableKey, type LayerTable } from "../../insights/layerTables";
 import {
   buildFeatureRowsSql,
   compileFilter,
@@ -61,8 +61,17 @@ export type ScopeResolution =
     }
   | { readonly ok: false; readonly message: string };
 
-/** Freeze the stores' contribution to a run. Called from `submitRun`, once. */
-export function snapshotScopeInputs(layerId: string): ScopeSnapshot {
+/**
+ * Freeze the stores' contribution to a run. Called from `submitRun`, once.
+ *
+ * `family` is the FROZEN family the run is over (R-C′): a CityParquet layer's
+ * filter is kept per family, so reading the bare key would find no filter at all
+ * and a "matching" scope would refuse a run the user had filtered.
+ */
+export function snapshotScopeInputs(
+  layerId: string,
+  family: string | null = null,
+): ScopeSnapshot {
   return {
     selectedObjectIds: [
       ...new Set(
@@ -72,7 +81,8 @@ export function snapshotScopeInputs(layerId: string): ScopeSnapshot {
           .map((s) => s.objectId),
       ),
     ],
-    filter: layerQuery(useQueryStore.getState(), layerId).applied,
+    filter: layerQuery(useQueryStore.getState(), layerTableKey(layerId, family))
+      .applied,
   };
 }
 

@@ -51,11 +51,13 @@ export function useLayerCounts(layerId: string | null): LayerCounts {
   // The ACTIVE family's table for a CityParquet layer (ruling S3); the bare key
   // for every other one.
   const family = useActiveFamily(layerId);
+  // The table AND its query state under one key (R-C′).
+  const queryKey = layerId === null ? null : layerTableKey(layerId, family);
   const tableState = useLayerTableStore((state) =>
-    layerId === null ? undefined : state.tables[layerTableKey(layerId, family)],
+    queryKey === null ? undefined : state.tables[queryKey],
   );
   const query = useQueryStore((state) =>
-    layerId === null ? null : layerQuery(state, layerId),
+    queryKey === null ? null : layerQuery(state, queryKey),
   );
   const selections = useSelectionStore((state) => state.selections);
   const layer = useLayerStore((state) =>
@@ -74,7 +76,7 @@ export function useLayerCounts(layerId: string | null): LayerCounts {
     layer?.isStreaming && layerId !== null
       ? getResidentModel(layerId, streamVersion ?? 0)
       : null;
-  const key = `${layerId ?? ""}:${table?.table ?? ""}`;
+  const key = `${queryKey ?? ""}:${table?.table ?? ""}`;
   const selectedIds = useMemo(
     () =>
       selections
@@ -142,9 +144,9 @@ export function useLayerCounts(layerId: string | null): LayerCounts {
         query.view === "buildings" &&
         layer !== null &&
         !layer.isStreaming &&
-        layerId !== null
+        queryKey !== null
       ) {
-        useQueryStore.getState().setView(layerId, "raw");
+        useQueryStore.getState().setView(queryKey, "raw");
       }
     });
     return () => {

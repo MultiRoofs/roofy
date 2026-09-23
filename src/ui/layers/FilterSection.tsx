@@ -20,6 +20,7 @@ import { clearMapFilter } from "../../features/query/mapFilterSync";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { isNullaryOp, type FilterCondition } from "../../features/query/types";
 import type { ActiveLayer } from "../../features/workspace/activeLayer";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 import { useShellStore } from "../shell/shellStore";
 import { OP_LABELS, valueText } from "../table/tableText";
 
@@ -29,7 +30,10 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
   // `layerQuery` defaults to the frozen `DEFAULT_LAYER_QUERY`, so `applied`
   // is a stable `null` for a layer with no query — no new object per store
   // notification, and no re-render loop.
-  const applied = useQueryStore((s) => layerQuery(s, layerId).applied);
+  // Through the layer's ACTIVE family (R-C′): the predicate was compiled
+  // against that family's columns, and a family layer has no bare-key query.
+  const queryKey = useActiveTableKey(layerId) ?? layerId;
+  const applied = useQueryStore((s) => layerQuery(s, queryKey).applied);
   const clearFilter = useQueryStore((s) => s.clearFilter);
 
   if (item.kind === "geo" && item.layer.kind !== "geojson") {
@@ -99,7 +103,7 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
           type="button"
           className="active-layer-action"
           onClick={() => {
-            clearFilter(layerId);
+            clearFilter(queryKey);
             // BOTH halves, always. The query alone would leave the map drawn
             // from a predicate nothing is showing any more — a stale id set
             // is worse than no filter, because it looks like one that works.

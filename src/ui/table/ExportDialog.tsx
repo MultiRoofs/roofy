@@ -38,6 +38,7 @@ import { useStreamStore } from "../../features/streaming/streamStore";
 import { FLAT_PREFIX_COLUMNS } from "../../insights/layerRows";
 import { refreshStreamingTable } from "../../features/layers/layerTableLifecycle";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 import { downloadBlob } from "../../platform/download";
 import { useModalChrome } from "../useModalChrome";
 import { exportFileName } from "./exportFileName";
@@ -144,7 +145,10 @@ export function ExportDialog({
   // `useModalChrome` is called further down, once `requestClose` exists: the
   // dialog must not dismiss itself out from under an export in flight.
 
-  const query = useQueryStore((s) => layerQuery(s, layerId));
+  // The ACTIVE family's query (R-C′): an export of a family's table carries the
+  // filter that was written against that family's columns.
+  const queryKey = useActiveTableKey(layerId) ?? layerId;
+  const query = useQueryStore((s) => layerQuery(s, queryKey));
   const counts = useLayerCounts(layerId);
   const selections = useSelectionStore((s) => s.selections);
   const selectedObjectIds = useMemo(
