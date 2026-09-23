@@ -1248,7 +1248,11 @@ Leaving UTM changes what some measurements MEAN. State them as changed:
   change, it repairs a defect the milestone introduced — a level ENU frame is
   tangent at exactly one point, so a constant-height roof leans away from its
   cell's origin by d/R (0.0032° at 360 m), and reading a bearing off that tilt
-  made the SAME roof face 88.28° in one cell and 271.80° in the next. Every
+  made the SAME roof face read a different bearing per cell. The external
+  reviewer measured 88.28° against 271.80° on a real PLATEAU object; this
+  repo's own tests pin the synthetic case they could reproduce, 225.18° against
+  244.83° for a constant-height roof baked in two cells 400 m apart
+  (`streamWorkerFrame.test.ts`). Every
   app reader treats `null` as "no aspect", never as due north (the Details
   panel and the hover tooltip print "Flat"; `roof_azimuth_deg` writes NULL; an
   azimuth rule condition matches nothing). This does NOT cover a STATIC
@@ -1262,24 +1266,49 @@ them here is that a value read before this milestone and a value read after it
 are not the same value, and a comparison across the boundary is not a
 regression.
 
-- **Winding.** `geodeticRingsToEnu` re-boxes each object's bbox from the
-  CONVERTED rings, because `buildCityMeshArrays` → `orientExteriorRing`
-  orients an exterior ring against the object's bbox CENTRE (a bbox left in
-  another space flips roughly half of an object's surfaces). That box is
-  therefore TIGHT around the rings actually PRESENT, where the old path handed
-  the heuristic the file's own row box. This paragraph used to call the
-  consequence a changed heuristic; the milestone review measured a SIGN FLIP —
-  a roof-only LoD baked with normal z = −1 against +1 for the same input with
-  a full-height box — because for an object that IS one planar face the tight
-  box's centre lies IN that face's plane and all that is left to read is
-  rounding (sub-nanometre for a symmetric ring). `orientExteriorRing` now
-  refuses any reference below `2.5e-4` of the object's bbox diagonal and keeps
-  the file's own winding instead; the constant sits between the measured
-  populations (residue 1.5e-6 … 2.0e-5 of the diagonal, a real reference
-  1.0e-1 for a 30 m building down to 3.4e-3 for a pathological 1 m slab). A
-  roof-only LoD therefore keeps its upward normal, and a tight box is safe.
-  Still unfixed by it, and not chased: a STEPPED roof-only bake, where two
-  roof planes a few metres apart give each other a real-looking reference.
+- **Winding.** `geodeticRingsToEnu` re-boxes each object's bbox in the cell's
+  ENU frame, because `buildCityMeshArrays` → `orientExteriorRing` orients an
+  exterior ring against the object's bbox CENTRE (a bbox left in another space
+  flips roughly half of an object's surfaces). The milestone first re-boxed that
+  TIGHT around the rings actually PRESENT, where the old path handed the
+  heuristic the file's own row box — and that was a SIGN FLIP, not a changed
+  heuristic. Two rounds of review measured it:
+  - one planar face (a roof-only or footprint-only LoD): the tight box's centre
+    lies IN that face's plane, so all that is left to read is rounding —
+    sub-nanometre for a symmetric ring. Measured normal z = −1 against +1 for
+    the same input with a full-height box.
+  - MORE than one face in the same near-plane: the faces give each OTHER a
+    reference far above any noise floor, and the tight box sits between them and
+    inverts the upper one. Measured on a two-part LoD 0 footprint, `normals[2]`
+    of the lower and upper polygon: tight `−1 / +1` at 5 cm, 50 cm and 2 m of
+    step where the file's row box gives `−1 / −1` at all three; two roof planes
+    3 m apart over a 40 m footprint give tight `−1 / +1` against the row box's
+    `+1 / +1`. The pre-milestone reference was CORRECT for that identical input,
+    so this was milestone-introduced too — an earlier report called it "the
+    original concave weakness of the heuristic", which the measurement refutes.
+
+  The fix is to restore the reference: `geodeticRingsToEnu` takes the objects'
+  FULL geodetic extents — the source file's own row boxes, including the
+  surfaces a LoD filter dropped at READ time — and seeds each object's new box
+  with one before the rings extend it, exactly as `projectCityObjects` seeds from
+  `projectBBox` on the projected path. The stream worker takes them off the
+  bucket boxes the adapter already converted (`geodeticExtentsOf`), and their
+  heights carry `heightOffset` like a vertex does.
+
+  `orientExteriorRing` keeps the `2.5e-4`-of-the-diagonal magnitude floor added
+  in between, now as the BACKSTOP for an object with no file box at all — a
+  CityParquet child row whose bbox columns are null. The constant sits between
+  the measured populations (residue 1.5e-6 … 2.0e-5 of the diagonal, a real
+  reference 1.0e-1 for a 30 m building down to 3.4e-3 for a pathological 1 m
+  slab), and it covers exactly one shape: ONE planar face. For such an object
+  with two or more near-coplanar faces the upper one is still inverted above a
+  step of 2.5e-4 of the diagonal (2.2 cm over 40 m). That residue is pinned by a
+  test, not by this sentence; closing it means judging the box's degeneracy
+  rather than one face's offset within it. Note also that a refused flip keeps
+  the FILE's winding, which is deterministic and spec-conformant but not
+  necessarily right — real CityJSON does point normals into the building on the
+  faces this heuristic exists for.
+
 - **Coverage, not equality.** Two different transforms need not select
   identical rows for the same axis-aligned box. The tests assert CONSERVATIVE
   coverage (every object the UTM index returned for a view is still returned),
