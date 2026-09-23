@@ -1242,7 +1242,18 @@ Leaving UTM changes what some measurements MEAN. State them as changed:
 - **Areas and distances** lose UTM's scale factor — ≈ 0.99979868 at
   139.6°E/35.5°N, about 2.01 m per 10 km and 0.040 % of an area.
 - **Azimuths** lose its ≈ 0.813° grid convergence: "north" is now true north,
-  not grid north.
+  not grid north. And, since the milestone review, a surface tilted by less
+  than `FLAT_INCLINATION_DEG` = 0.1° has NO azimuth: `computeAzimuth` answers
+  `null`, on the static path too. That is not a refinement of the convergence
+  change, it repairs a defect the milestone introduced — a level ENU frame is
+  tangent at exactly one point, so a constant-height roof leans away from its
+  cell's origin by d/R (0.0032° at 360 m), and reading a bearing off that tilt
+  made the SAME roof face 88.28° in one cell and 271.80° in the next. Every
+  app reader treats `null` as "no aspect", never as due north (the Details
+  panel and the hover tooltip print "Flat"; `roof_azimuth_deg` writes NULL; an
+  azimuth rule condition matches nothing). This does NOT cover a STATIC
+  model-wide frame, which tilts 0.135° at 15 km — past the threshold; that is
+  the deferred per-object anchoring below.
 - **Normals** are computed in ENU instead of being left in UTM space with that
   convergence unremoved.
 
@@ -1256,10 +1267,19 @@ regression.
   orients an exterior ring against the object's bbox CENTRE (a bbox left in
   another space flips roughly half of an object's surfaces). That box is
   therefore TIGHT around the rings actually PRESENT, where the old path handed
-  the heuristic the file's own row box: under a LoD filter the two centres can
-  differ, so a borderline surface can wind the other way. Invisible with the
-  city's double-sided material — and real for anything reading the normal
-  G-buffer.
+  the heuristic the file's own row box. This paragraph used to call the
+  consequence a changed heuristic; the milestone review measured a SIGN FLIP —
+  a roof-only LoD baked with normal z = −1 against +1 for the same input with
+  a full-height box — because for an object that IS one planar face the tight
+  box's centre lies IN that face's plane and all that is left to read is
+  rounding (sub-nanometre for a symmetric ring). `orientExteriorRing` now
+  refuses any reference below `2.5e-4` of the object's bbox diagonal and keeps
+  the file's own winding instead; the constant sits between the measured
+  populations (residue 1.5e-6 … 2.0e-5 of the diagonal, a real reference
+  1.0e-1 for a 30 m building down to 3.4e-3 for a pathological 1 m slab). A
+  roof-only LoD therefore keeps its upward normal, and a tight box is safe.
+  Still unfixed by it, and not chased: a STEPPED roof-only bake, where two
+  roof planes a few metres apart give each other a real-looking reference.
 - **Coverage, not equality.** Two different transforms need not select
   identical rows for the same axis-aligned box. The tests assert CONSERVATIVE
   coverage (every object the UTM index returned for a view is still returned),
