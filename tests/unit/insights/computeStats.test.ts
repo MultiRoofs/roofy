@@ -179,6 +179,42 @@ describe("computeModelStatsFromRecords / computeObjectStatsFromRecord", () => {
     expect(stats.avgRoofAzimuth).toBeCloseTo(90, 10);
   });
 
+  it("leaves a surface with no azimuth out of the object's mean", () => {
+    // A null azimuth read as 0 would drag the circular mean north; the 1-degree
+    // flat gate already excludes such a surface, so this pins that it stays
+    // excluded and never becomes a NaN either.
+    const stats = computeObjectStatsFromRecord({
+      id: "flat",
+      objectType: "Building",
+      attributes: {},
+      bbox: [0, 0, 0, 1, 1, 1],
+      lod: "2.2",
+      surfaceCount: 2,
+      roofMetrics: [
+        {
+          areaSqM: 900,
+          inclinationDeg: 0,
+          azimuthDeg: null,
+          elevationM: 0,
+          lod: "2.2",
+        },
+        {
+          areaSqM: 10,
+          inclinationDeg: 40,
+          azimuthDeg: 90,
+          elevationM: 0,
+          lod: "2.2",
+        },
+      ],
+      geometryLods: ["2.2"],
+      footprintAreaSqM: 900,
+      volumeCuM: null,
+      parents: [],
+      children: [],
+    });
+    expect(stats.avgRoofAzimuth).toBeCloseTo(90, 10);
+  });
+
   it("uses r.roofMetrics directly (never recomputes from rings) for model-level aggregation", () => {
     const modelStats = computeModelStatsFromRecords([
       {

@@ -40,8 +40,9 @@ function countByOrientation(metrics: RoofMetrics[]): OrientationCount[] {
   }
 
   for (const m of metrics) {
-    // Skip flat roofs — their azimuth is meaningless
-    if (m.inclinationDeg < 1) continue;
+    // Skip flat roofs — their azimuth is meaningless, and core reports it as
+    // null rather than as due north.
+    if (m.inclinationDeg < 1 || m.azimuthDeg === null) continue;
     const band = classifyOrientation(m.azimuthDeg);
     counts.set(band, (counts.get(band) ?? 0) + 1);
   }
@@ -172,7 +173,7 @@ function accumulateObjectStats(input: ObjectStatsInput): ObjectStats {
     slopeSum += m.inclinationDeg * m.areaSqM;
     slopeWeight += m.areaSqM;
 
-    if (m.inclinationDeg >= 1) {
+    if (m.inclinationDeg >= 1 && m.azimuthDeg !== null) {
       const rad = (m.azimuthDeg * Math.PI) / 180;
       azimuthSinSum += m.areaSqM * Math.sin(rad);
       azimuthCosSum += m.areaSqM * Math.cos(rad);

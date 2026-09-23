@@ -12,7 +12,7 @@ import {
 const s = (
   areaSqM: number,
   inclinationDeg: number,
-  azimuthDeg: number,
+  azimuthDeg: number | null,
   lod: string | null = "2.2",
 ): RoofSurfaceMetric => ({ lod, areaSqM, inclinationDeg, azimuthDeg });
 
@@ -54,6 +54,16 @@ describe("rollUpRoofSurfaces", () => {
     const atFive = rollUpRoofSurfaces([s(12, 0, 135), s(4, 0, 315)], 5)!;
     expect(atFive.flatM2).toBe(16);
     expect(atFive.azimuthDeg).toBeNull();
+  });
+
+  it("passes a surface's absent azimuth through as the dominant one", () => {
+    // At threshold 0 a horizontal roof is the largest NON-flat surface, so it
+    // supplies the dominant azimuth — and since the geographic-to-ENU milestone
+    // a horizontal surface HAS no azimuth. The column is nullable for exactly
+    // this: `roof_azimuth_deg` reads NULL rather than 0 (due north).
+    const out = rollUpRoofSurfaces([s(12, 0, null), s(4, 0, null)], 0)!;
+    expect(out.flatM2).toBe(0);
+    expect(out.azimuthDeg).toBeNull();
   });
 
   it("weights the mean slope by area, over ALL surfaces", () => {

@@ -10,7 +10,10 @@ function surfaceName(type: string): string {
   return type.replace(/Surface$/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
-function orientation(azimuth: number): string {
+/** `null` is "no aspect" (core answers that below 0.1 degrees of inclination),
+ *  and `Math.round(null / 45)` would have printed it as due north. */
+function orientation(azimuth: number | null): string {
+  if (azimuth === null) return "flat";
   const labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   return labels[Math.round(azimuth / 45) % labels.length]!;
 }

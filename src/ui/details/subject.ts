@@ -225,15 +225,16 @@ export function buildingSummary(
     inclinations.length > 0
       ? inclinations.reduce((a, b) => a + b, 0) / inclinations.length
       : 0;
-  const azimuth = computeAverageAzimuth(metrics);
+  // `computeAverageAzimuth` returns 0 both for due north and for "nothing to
+  // average", so the row asks the surfaces themselves whether any of them has
+  // an aspect at all.
+  const anySloped = metrics.some((m) => m.azimuthDeg !== null);
+  const azimuth = anySloped ? computeAverageAzimuth(metrics) : null;
 
   const rows: SummaryRow[] = [
     { label: "Roof area", value: `${totalArea.toFixed(1)} m\u00B2` },
     { label: "Mean roof slope", value: `${meanSlope.toFixed(1)}\u00B0` },
-    {
-      label: "Main orientation",
-      value: `${azimuthToCardinal(azimuth)} (${azimuth.toFixed(0)}\u00B0)`,
-    },
+    { label: "Main orientation", value: formatAzimuth(azimuth) },
   ];
 
   const attributes = building.object.attributes;
@@ -301,7 +302,11 @@ export function formatSurfaceType(type: Surface["type"]): string {
   return type.replace(/([a-z])([A-Z])/g, "$1 $2").replace("Surface", "surface");
 }
 
-function formatAzimuth(deg: number): string {
+/** `null` is "no aspect" — core answers that below 0.1 degrees of inclination,
+ *  where a bearing would be the frame's tilt rather than the roof's. It must
+ *  not read as "N (0°)". */
+function formatAzimuth(deg: number | null): string {
+  if (deg === null) return "Flat";
   return `${azimuthToCardinal(deg)} (${deg.toFixed(0)}\u00B0)`;
 }
 

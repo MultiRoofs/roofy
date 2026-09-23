@@ -26,6 +26,20 @@ const roof: Surface = {
   attributes: {},
   lod: "2",
 };
+/** A horizontal roof: no aspect at all, so `computeRoofMetrics` gives it a
+ *  null azimuth (navara-core's flatness convention). */
+const flatRoof: Surface = {
+  type: "RoofSurface",
+  rings: [
+    [
+      [0, 0, 6],
+      [10, 0, 6],
+      [0, 10, 6],
+    ],
+  ],
+  attributes: {},
+  lod: "2",
+};
 const wall: Surface = {
   type: "WallSurface",
   rings: [
@@ -58,7 +72,7 @@ const model: CityModel = {
       id: "part",
       objectType: "BuildingPart",
       attributes: {},
-      surfaces: [roof, wall],
+      surfaces: [roof, wall, flatRoof],
       bbox: null,
       children: [],
       parents: ["root"],
@@ -108,7 +122,7 @@ describe("HoverTooltip", () => {
       .hover({ kind: "object", layerId: "L", objectId: "root" });
     render(<HoverTooltip />);
     expect(screen.getByText("Building · root")).toBeTruthy();
-    expect(screen.getByText("1 roof surfaces")).toBeTruthy();
+    expect(screen.getByText("2 roof surfaces")).toBeTruthy();
     expect(useSelectionStore.getState().selections).toEqual([]);
   });
   it("shows static roof metrics and hides after hover clears", () => {
@@ -124,6 +138,21 @@ describe("HoverTooltip", () => {
     expect(screen.getByText(/70.7 m²/)).toBeTruthy();
     act(() => useSelectionStore.getState().hover(null));
     expect(view.container.textContent).toBe("");
+  });
+  it("says a flat roof surface faces nowhere instead of calling it north", () => {
+    // `azimuthDeg` is null below 0.1 degrees of tilt; reading that as a bearing
+    // used to print "N", and formatting it used to be a crash waiting to
+    // happen.
+    useLayerStore.setState({ layers: [layer()] });
+    useSelectionStore.getState().hover({
+      kind: "surface",
+      layerId: "L",
+      objectId: "part",
+      surfaceIndex: 2,
+    });
+    render(<HoverTooltip />);
+    expect(screen.getByText("Roof surface")).toBeTruthy();
+    expect(screen.getByText(/50.0 m² · 0.0° · flat/)).toBeTruthy();
   });
   it("reports loading rather than fabricated streaming metrics after eviction", () => {
     useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });

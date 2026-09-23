@@ -8,7 +8,9 @@ import type { RoofMetrics } from "@cityjson/navara-core";
 const FLAT_THRESHOLD_DEG = 1;
 
 /** Compute the area-weighted circular mean of azimuth angles.
- *  Flat surfaces (inclination < 1°) are excluded since their azimuth is undefined. */
+ *  Flat surfaces (inclination < 1°, or with a null azimuth) are excluded since
+ *  their azimuth is undefined. Returns 0 when nothing is left to average — the
+ *  caller has to distinguish that from a real northerly mean itself. */
 export function computeAverageAzimuth(
   metrics: ReadonlyArray<RoofMetrics>,
 ): number {
@@ -20,6 +22,9 @@ export function computeAverageAzimuth(
 
   for (const m of metrics) {
     if (m.inclinationDeg < FLAT_THRESHOLD_DEG) continue;
+    // A surface with no aspect at all (core answers null below 0.1 degrees)
+    // never contributes: read as 0 it would drag the mean due north.
+    if (m.azimuthDeg === null) continue;
     const rad = (m.azimuthDeg * Math.PI) / 180;
     const w = m.areaSqM;
     sinSum += w * Math.sin(rad);

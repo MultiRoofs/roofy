@@ -234,6 +234,42 @@ describe("surfaceSummary", () => {
     expect(rows[4]!.act).toBe("owner");
     expect(rows[4]!.value).toBe("Building \u202625028");
   });
+
+  it("shows a flat surface as having no aspect, not as due north", () => {
+    // navara-core answers `null` below 0.1 degrees of inclination, and
+    // `formatAzimuth` used to call `.toFixed` on whatever it was handed.
+    const rows = surfaceSummary(
+      surface({ type: "RoofSurface" }),
+      metrics({ areaSqM: 40, inclinationDeg: 0, azimuthDeg: null }),
+      object({ id: "b" }),
+    );
+    expect(rows.find((r) => r.label === "Azimuth")?.value).toBe("Flat");
+  });
+});
+
+describe("buildingSummary with no sloped roof", () => {
+  it("shows no main orientation when every roof is flat", () => {
+    const parent = object({ id: "parent" });
+    const building: ResolvedBuilding = {
+      object: parent,
+      parts: [],
+      roofSurfaces: [
+        {
+          owner: parent,
+          metrics: metrics({
+            areaSqM: 100,
+            inclinationDeg: 0,
+            azimuthDeg: null,
+          }),
+        },
+      ],
+      loading: false,
+    };
+    expect(
+      buildingSummary(building).find((r) => r.label === "Main orientation")
+        ?.value,
+    ).toBe("Flat");
+  });
 });
 
 describe("geoSummary", () => {
