@@ -112,13 +112,15 @@ export function buildSourceIdsSql(input: {
  * the CityJSON geometry type the executor classifies on.
  */
 function parsedRows(input: SolidSqlInput): string {
-  const g = quoteIdent(input.geometryColumn);
+  // The sidecar beside the WKB: shell structure and semantics the blob cannot
+  // carry, so a CompositeSolid or a hollow solid parses with its real shells.
+  const solid = `ST_3DTryFromWKB(${quoteIdent(input.geometryColumn)}, ${quoteIdent(input.propertiesColumn)})`;
   // The WHERE is INSIDE the subquery, so only the scoped rows are ever parsed;
   // filtering on the outer select would parse the whole file first.
   return (
     `(SELECT "id", "feature_id", ${quoteIdent(input.propertiesColumn)}.type AS geometry_type, ` +
-    `ST_3DTryFromWKB(${g}) AS s, ` +
-    `ST_3DValidationReport(ST_3DTryFromWKB(${g})) AS r ` +
+    `${solid} AS s, ` +
+    `ST_3DValidationReport(${solid}) AS r ` +
     `FROM ${input.from}${idFilter(input.ids)})`
   );
 }

@@ -35,8 +35,8 @@ const P = "geometry_properties_lod2_2";
 /** The subquery both statements share, for the fixture's own columns. */
 const PARSED_ROWS =
   `(SELECT "id", "feature_id", "geometry_properties_lod2_2".type AS geometry_type, ` +
-  `ST_3DTryFromWKB("geometry_lod2_2") AS s, ` +
-  `ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r ` +
+  `ST_3DTryFromWKB("geometry_lod2_2", "geometry_properties_lod2_2") AS s, ` +
+  `ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2", "geometry_properties_lod2_2")) AS r ` +
   `FROM read_cityjson('two.city.json', lod => '2.2'))`;
 
 describe("buildSolidMeasureSql", () => {
@@ -169,7 +169,9 @@ describe("buildSolidMeasureSql", () => {
       propertiesColumn: "geometry_properties_lod0_0",
       ids: null,
     });
-    expect(sql).toContain('ST_3DTryFromWKB("geometry_lod0_0")');
+    expect(sql).toContain(
+      'ST_3DTryFromWKB("geometry_lod0_0", "geometry_properties_lod0_0")',
+    );
   });
 });
 
