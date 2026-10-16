@@ -26,8 +26,9 @@ import type { CityModel } from "../domain/citymodel/types";
 import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 import {
   classifyColumnType,
-  isDroppedColumn,
+  LOD_MARKER_PREFIX,
   lodsFromColumnNames,
+  readerTableSelectList,
   type ColumnInfo,
   type LodColumn,
 } from "./columnKind";
@@ -918,6 +919,15 @@ async function releaseBuffer(scratch: BuildScratch, name: string) {
   scratch.delete(name);
 }
 
+/**
+ * The largest CityJSON document a layer table is built from. `read_cityjson`
+ * holds the whole document in memory while it reads, and WebAssembly memory
+ * never shrinks: 75 MB took the engine to 1.25 GB and 233 MB to 3.5 GB, close
+ * to the 4 GB ceiling where the worker dies. CityJSONSeq is read a feature at a
+ * time and has no limit.
+ */
+export const READ_CITYJSON_TABLE_LIMIT_BYTES = 150 * 1024 * 1024;
+
 async function buildFromReader(
   table: string,
   source: Extract<LayerTableSource, { kind: "bytes" }>,
@@ -927,6 +937,15 @@ async function buildFromReader(
   // BEFORE the register: `registerBuffer` transfers the array to the worker and
   // DETACHES it, after which `byteLength` is 0.
   const sourceBytes = source.bytes.byteLength;
+  if (
+    source.reader === "read_cityjson" &&
+    sourceBytes > READ_CITYJSON_TABLE_LIMIT_BYTES
+  ) {
+    const mb = (n: number) => Math.round(n / (1024 * 1024));
+    throw new BuildError(
+      `This file is too large to open as a table (${mb(sourceBytes)} MB; the limit for CityJSON is ${mb(READ_CITYJSON_TABLE_LIMIT_BYTES)} MB). As CityJSONSeq it has no limit.`,
+    );
+  }
   const registered = await registerBuffer(sourceName, source.bytes);
   if (!registered) {
     throw new BuildError("The source bytes could not be handed to DuckDB.");
@@ -934,19 +953,25 @@ async function buildFromReader(
   scratch.add(sourceName);
   const from = `${source.reader}(${quoteLiteral(sourceName)})`;
   try {
-    const described = await runQuery(`DESCRIBE SELECT * FROM ${from}`);
-    if (!described.ok) throw new BuildError(described.message);
-
-    const all = columnsFromDescribe(described.rows);
-    const kept = all.filter((c) => !isDroppedColumn(c.name));
-    if (kept.length === 0) {
-      throw new BuildError("This file has no attribute columns to browse.");
-    }
-    const select = kept.map((c) => quoteIdent(c.name)).join(", ");
+    // ONE read of the source: the reader parses the whole document for a
+    // DESCRIBE as it does for a CREATE, so asking for the schema first doubled
+    // the time of every build.
     const created = await ddl(
-      `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT ${select} FROM ${from}`,
+      `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT ${readerTableSelectList()} FROM ${from}`,
     );
     if (!created.ok) throw new BuildError(created.message);
+
+    const described = await runQuery(`DESCRIBE ${quoteIdent(table)}`);
+    if (!described.ok) throw new BuildError(described.message);
+    const all = columnsFromDescribe(described.rows);
+    const markers = all.filter((c) => c.name.startsWith(LOD_MARKER_PREFIX));
+    for (const marker of markers) {
+      const dropped = await ddl(
+        `ALTER TABLE ${quoteIdent(table)} DROP COLUMN ${quoteIdent(marker.name)}`,
+      );
+      if (!dropped.ok) throw new BuildError(dropped.message);
+    }
+    const kept = all.filter((c) => !c.name.startsWith(LOD_MARKER_PREFIX));
 
     return {
       table,
@@ -956,9 +981,11 @@ async function buildFromReader(
       extension: source.extension,
       sourceBytes,
       columns: kept,
-      // From ALL the described names, never the kept ones: the `geometry_lod*`
-      // columns the ladder is read from are exactly the ones dropped.
-      lods: lodsFromColumnNames(all.map((c) => c.name)),
+      // From the markers: the `geometry_lod*` columns the ladder is read from
+      // are exactly the ones the table leaves out.
+      lods: lodsFromColumnNames(
+        markers.map((c) => c.name.slice(LOD_MARKER_PREFIX.length)),
+      ),
       // An ordinary build holds the WHOLE source; only a derived layer's
       // adopted table carries a cut (`adoptLayerTable`).
       sourceFeatureIds: null,

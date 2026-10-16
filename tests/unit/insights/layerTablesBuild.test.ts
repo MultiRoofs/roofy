@@ -178,27 +178,23 @@ import type { CityModel } from "../../../src/domain/citymodel/types";
 const BBOX_TYPE =
   "STRUCT(xmin DOUBLE, ymin DOUBLE, zmin DOUBLE, xmax DOUBLE, ymax DOUBLE, zmax DOUBLE)";
 
+/**
+ * What `DESCRIBE "layer_1"` answers right after the reader's one statement:
+ * the kept columns, then the presence markers that carry the LoD ladder (one
+ * per `geometry_lod*` column the reader had, plus `id`'s, which makes the
+ * marker set never empty).
+ */
 const READER_DESCRIBE = [
   { column_name: "id", column_type: "VARCHAR" },
   { column_name: "feature_id", column_type: "VARCHAR" },
   { column_name: "object_type", column_type: "VARCHAR" },
   { column_name: "parents", column_type: "VARCHAR[]" },
   { column_name: "bbox", column_type: "STRUCT(xmin DOUBLE)" },
-  { column_name: "geometry_lod1_2", column_type: "BLOB" },
-  {
-    column_name: "geometry_properties_lod1_2",
-    column_type: "STRUCT(a INTEGER)",
-  },
-  { column_name: "geometry_lod2_2", column_type: "BLOB" },
-  {
-    column_name: "geometry_properties_lod2_2",
-    column_type: "STRUCT(a INTEGER)",
-  },
-  { column_name: "material_lod2_2", column_type: "INTEGER[]" },
-  { column_name: "texture_lod2_2", column_type: "INTEGER[]" },
-  { column_name: "template", column_type: "STRUCT(a INTEGER)" },
   { column_name: "b3_h_dak_max", column_type: "DOUBLE" },
   { column_name: "bouwjaar", column_type: "BIGINT" },
+  { column_name: "__roofy_has_id", column_type: "BOOLEAN" },
+  { column_name: "__roofy_has_geometry_lod1_2", column_type: "BOOLEAN" },
+  { column_name: "__roofy_has_geometry_lod2_2", column_type: "BOOLEAN" },
 ];
 
 const FALLBACK_DESCRIBE = [
@@ -298,20 +294,54 @@ describe("reader-backed layer table", () => {
     expect(registered).toEqual([{ name: "layer_1.city.json", length: 16 }]);
   });
 
-  it("describes the reader, then creates the table WITHOUT geometry columns", async () => {
+  it("reads the source ONCE: one CREATE TABLE AS that keeps no geometry", async () => {
     await build();
     expect(sql[0]).toBe(
-      "DESCRIBE SELECT * FROM read_cityjson('layer_1.city.json')",
+      'CREATE OR REPLACE TABLE "layer_1" AS SELECT ' +
+        "COLUMNS(c -> NOT (c IN ('template', 'geometry') OR regexp_matches(c, '^(geometry|geometry_properties|material|texture)_lod\\d+(_\\d+)?$'))), " +
+        "COLUMNS('^(id|geometry_lod\\d+(?:_\\d+)?)$') IS NOT NULL AS '__roofy_has_\\1' " +
+        "FROM read_cityjson('layer_1.city.json')",
     );
-    expect(sql[1]).toBe(
-      'CREATE OR REPLACE TABLE "layer_1" AS SELECT "id", "feature_id", "object_type", "parents", "bbox", "b3_h_dak_max", "bouwjaar" FROM read_cityjson(\'layer_1.city.json\')',
-    );
+    expect(sql.some((s) => s.startsWith("DESCRIBE SELECT"))).toBe(false);
+  });
+
+  it("describes the table, then drops the LoD markers", async () => {
+    await build();
+    expect(sql.slice(1, 5)).toEqual([
+      'DESCRIBE "layer_1"',
+      'ALTER TABLE "layer_1" DROP COLUMN "__roofy_has_id"',
+      'ALTER TABLE "layer_1" DROP COLUMN "__roofy_has_geometry_lod1_2"',
+      'ALTER TABLE "layer_1" DROP COLUMN "__roofy_has_geometry_lod2_2"',
+    ]);
   });
 
   it("counts the rows and drops the source buffer", async () => {
     await build();
-    expect(sql[2]).toBe('SELECT COUNT(*) AS "n" FROM "layer_1"');
+    expect(sql[5]).toBe('SELECT COUNT(*) AS "n" FROM "layer_1"');
     expect(dropped).toEqual(["layer_1.city.json"]);
+  });
+
+  it("refuses a CityJSON document above the size limit before handing it over", async () => {
+    await enqueueLayerTable("L1", {
+      ...readerSource(),
+      bytes: { byteLength: 151 * 1024 * 1024 } as Uint8Array,
+    });
+    expect(stateOf("L1")).toMatchObject({ state: "failed" });
+    expect((stateOf("L1") as { message: string }).message).toMatch(
+      /too large to open as a table/,
+    );
+    expect(registered).toEqual([]);
+    expect(sql.some((q) => q.includes("read_cityjson"))).toBe(false);
+  });
+
+  it("builds a CityJSONSeq table of any size", async () => {
+    await enqueueLayerTable("L1", {
+      ...readerSource(),
+      reader: "read_cityjsonseq" as const,
+      extension: "city.jsonl" as const,
+      bytes: { byteLength: 151 * 1024 * 1024 } as Uint8Array,
+    });
+    expect(stateOf("L1")).toMatchObject({ state: "ready" });
   });
 
   it("publishes the table with its column kinds, LoDs and row count", async () => {
@@ -410,24 +440,6 @@ describe("a failed build leaves nothing behind", () => {
     // the scratch set, so the cleanup has nothing left to re-drop.
     expect(dropped).toEqual(["layer_1.json"]);
   });
-
-  it("refuses a file whose columns are ALL geometry", async () => {
-    describeRows = [
-      { column_name: "geometry_lod1_2", column_type: "BLOB" },
-      { column_name: "material_lod1_2", column_type: "INTEGER[]" },
-      { column_name: "template", column_type: "STRUCT(a INTEGER)" },
-    ];
-    await enqueueLayerTable("L1", readerSource());
-
-    expect(stateOf("L1")).toEqual({
-      state: "failed",
-      message: "This file has no attribute columns to browse.",
-    });
-    expect(sql.some((s) => s.startsWith("CREATE OR REPLACE TABLE"))).toBe(
-      false,
-    );
-    expect(dropped).toEqual(["layer_1.city.json"]);
-  });
 });
 
 describe("rebuilding a layer that already has a table", () => {
@@ -503,8 +515,7 @@ describe("rebuilding a layer that already has a table", () => {
     expect(stateOf("L1")).toEqual({ state: "ready", info: first });
 
     failures = {
-      "DESCRIBE SELECT * FROM read_cityjson('layer_2.city.json')":
-        "IO Error: boom",
+      "FROM read_cityjson('layer_2.city.json')": "IO Error: boom",
     };
     const outcome = await enqueueLayerTable("L1", readerSource());
     expect(outcome).toEqual({ ok: false, message: "IO Error: boom" });
@@ -641,8 +652,8 @@ describe("the build queue", () => {
     await Promise.all([a, b]);
 
     const firstCounted = sql.indexOf('SELECT COUNT(*) AS "n" FROM "layer_1"');
-    const secondDescribed = sql.indexOf(
-      "DESCRIBE SELECT * FROM read_cityjson('layer_2.city.json')",
+    const secondDescribed = sql.findIndex((s) =>
+      s.endsWith("FROM read_cityjson('layer_2.city.json')"),
     );
     expect(firstCounted).toBeGreaterThanOrEqual(0);
     expect(secondDescribed).toBeGreaterThan(firstCounted);
@@ -1171,7 +1182,7 @@ describe("a build the engine's death overtook", () => {
     // never created in the database anyone is now talking to.
     await enqueueLayerTable("L1", readerSource());
     onStatement = async (statement) => {
-      if (statement.startsWith("DESCRIBE")) killEngine();
+      if (statement.startsWith("CREATE OR REPLACE TABLE")) killEngine();
     };
     const first = enqueueLayerTable("L1", readerSource());
     const second = enqueueLayerTable("L2", readerSource());
@@ -1194,7 +1205,7 @@ describe("a build the engine's death overtook", () => {
     await enqueueLayerTable("L1", readerSource());
     failures = { "CREATE OR REPLACE TABLE": "boom" };
     onStatement = async (statement) => {
-      if (statement.startsWith("DESCRIBE")) killEngine();
+      if (statement.startsWith("CREATE OR REPLACE TABLE")) killEngine();
     };
     await enqueueLayerTable("L1", readerSource());
 
@@ -1307,11 +1318,11 @@ describe("a build whose engine went while it ran", () => {
     // writes the failed entry itself rather than assuming someone else did.
     await enqueueLayerTable("L1", readerSource());
     const held = deferred();
-    // THIS build's DESCRIBE, by the table name in it: a bare "DESCRIBE" is
-    // already in `sql` from the L1 build above, so waiting on that would let
+    // THIS build's reader statement, by the table name in it: L1's is
+    // already in `sql` from the build above, so waiting on that would let
     // the test run on while L2 was still at the head of the queue — and prove
     // the head guard instead of the mid-build one this case is about.
-    const describeL2 = "DESCRIBE SELECT * FROM read_cityjson('layer_2";
+    const describeL2 = 'CREATE OR REPLACE TABLE "layer_2"';
     holdStatement = { needle: describeL2, promise: held.promise };
     const building = enqueueLayerTable("L2", readerSource());
     await vi.waitFor(() =>
@@ -1379,7 +1390,7 @@ describe("a build enqueued before the engine came up", () => {
     // asks for an engine and adopts the replacement.
     publishStatus("initializing");
     const open = holdEngine();
-    const describeL1 = "DESCRIBE SELECT * FROM read_cityjson('layer_1";
+    const describeL1 = 'CREATE OR REPLACE TABLE "layer_1"';
     const held = deferred();
     holdStatement = { needle: describeL1, promise: held.promise };
     const first = enqueueLayerTable("L1", readerSource());

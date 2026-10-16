@@ -70,9 +70,13 @@ export function isTextColumn(column: ColumnInfo): boolean {
   );
 }
 
-/** A reader geometry/material/texture column, LoD suffix and all. */
-const DROPPED =
-  /^(geometry|geometry_properties|material|texture)_lod\d+(_\d+)?$/;
+/** A reader geometry/material/texture column, LoD suffix and all. RE2 and
+ *  JavaScript read it alike, so DuckDB's lambda below uses the same text. */
+const DROPPED_PATTERN =
+  "^(geometry|geometry_properties|material|texture)_lod\\d+(_\\d+)?$";
+const DROPPED = new RegExp(DROPPED_PATTERN);
+/** Dropped by name: the implicit-geometry reference and a bare `geometry`. */
+const DROPPED_NAMES: ReadonlyArray<string> = ["template", "geometry"];
 
 /**
  * Whether a reader column is left out of a layer's browsing table.
@@ -90,7 +94,31 @@ const DROPPED =
  * file's view therefore still carries those three, JSON and all.
  */
 export function isDroppedColumn(name: string): boolean {
-  return name === "template" || name === "geometry" || DROPPED.test(name);
+  return DROPPED_NAMES.includes(name) || DROPPED.test(name);
+}
+
+/**
+ * The prefix of the presence markers {@link readerTableSelectList} adds: one
+ * BOOLEAN per `geometry_lod*` column the reader had, named after it.
+ */
+export const LOD_MARKER_PREFIX = "__roofy_has_";
+
+/**
+ * The select list that builds a layer table from a reader in ONE read of the
+ * source: every column {@link isDroppedColumn} keeps, then the LoD markers.
+ *
+ * The markers are how the LoD ladder survives the geometry columns being left
+ * out: the ladder is read from the reader's own column names, and those names
+ * reach the table only as markers, which the build drops once it has read
+ * them. `id` gets a marker too because DuckDB refuses a `COLUMNS` that matches
+ * nothing, and a file with no geometry would otherwise fail.
+ */
+export function readerTableSelectList(): string {
+  const names = DROPPED_NAMES.map((n) => `'${n}'`).join(", ");
+  return (
+    `COLUMNS(c -> NOT (c IN (${names}) OR regexp_matches(c, '${DROPPED_PATTERN}'))), ` +
+    `COLUMNS('^(id|geometry_lod\\d+(?:_\\d+)?)$') IS NOT NULL AS '${LOD_MARKER_PREFIX}\\1'`
+  );
 }
 
 /**
