@@ -25,6 +25,8 @@
 import {
   CITYPARQUET_SIDECAR_NAMES,
   sidecarKindOf,
+  type CityParquetSidecarHrefs,
+  type CityParquetSidecarKind,
   type CityParquetSidecars,
   CityParquetError,
   assembleCityParquetModel,
@@ -220,12 +222,16 @@ function dropSidecars(names: readonly string[]): string[] {
  * wildcard can act on; the count is always in it, since "too many" without a
  * number leaves the user guessing how much narrower to get.
  */
-/** The appearance sidecars among a listing, by kind (first of each wins). */
-function sidecarsAmong(names: readonly string[]): {
-  textures?: string;
-  materials?: string;
-} {
-  const out: { textures?: string; materials?: string } = {};
+/** Every sidecar kind a package can ship: appearance and implicit geometry. */
+const SIDECAR_KINDS: ReadonlyArray<CityParquetSidecarKind> = [
+  "textures",
+  "materials",
+  "implicitGeometries",
+];
+
+/** The sidecars among a listing, by kind (first of each wins). */
+function sidecarsAmong(names: readonly string[]): CityParquetSidecarHrefs {
+  const out: CityParquetSidecarHrefs = {};
   for (const name of names) {
     const kind = sidecarKindOf(name);
     if (kind !== null) out[kind] ??= name;
@@ -253,21 +259,23 @@ export type CityParquetTableTarget = Target & {
 };
 
 /** Everything a source resolves to: the object tables to load, and the
- *  appearance sidecars found beside them (fetched too, when present). */
+ *  sidecars found beside them (fetched too, when present). */
 export interface CityParquetTargets {
   readonly tables: CityParquetTableTarget[];
-  readonly sidecars: { textures?: Target; materials?: Target };
+  readonly sidecars: Partial<Record<CityParquetSidecarKind, Target>>;
 }
 type Targets = CityParquetTargets;
 
 function sidecarTargets(
-  beside: { textures?: string; materials?: string },
+  beside: CityParquetSidecarHrefs,
   target: (name: string) => Target,
 ): Targets["sidecars"] {
-  return {
-    ...(beside.textures ? { textures: target(beside.textures) } : {}),
-    ...(beside.materials ? { materials: target(beside.materials) } : {}),
-  };
+  const out: Partial<Record<CityParquetSidecarKind, Target>> = {};
+  for (const kind of SIDECAR_KINDS) {
+    const name = beside[kind];
+    if (name) out[kind] = target(name);
+  }
+  return out;
 }
 
 function overCap(names: readonly string[]): boolean {
@@ -509,17 +517,15 @@ async function fetchSidecars(
   targets: Targets["sidecars"],
   http: HttpClient,
 ): Promise<CityParquetSidecars> {
-  const out: { textures?: Uint8Array; materials?: Uint8Array } = {};
-  if (targets.textures) {
-    out.textures = (
-      await fetchTable(targets.textures.url, targets.textures.name, http)
-    ).bytes;
-  }
-  if (targets.materials) {
-    out.materials = (
-      await fetchTable(targets.materials.url, targets.materials.name, http)
-    ).bytes;
-  }
+  const out: { -readonly [K in keyof CityParquetSidecars]: Uint8Array } = {};
+  await Promise.all(
+    SIDECAR_KINDS.map(async (kind) => {
+      const sidecar = targets[kind];
+      if (sidecar) {
+        out[kind] = (await fetchTable(sidecar.url, sidecar.name, http)).bytes;
+      }
+    }),
+  );
   return out;
 }
 
@@ -622,7 +628,7 @@ export interface CityParquetFileTargets {
      *  folder ships no manifest and the file name is all there is. */
     readonly family?: string;
   }>;
-  readonly sidecars: { readonly textures?: File; readonly materials?: File };
+  readonly sidecars: Partial<Record<CityParquetSidecarKind, File>>;
 }
 
 /**
@@ -654,7 +660,7 @@ export async function cityParquetFileTargets(
 
   const manifestFile = byPath.get(MANIFEST_FILENAME);
   let names: string[];
-  let sidecarNames: { textures?: string; materials?: string };
+  let sidecarNames: CityParquetSidecarHrefs;
   /** The manifest's family key per table, by INDEX into `names`. */
   let familyKeys: ReadonlyArray<string> = [];
   if (manifestFile === undefined) {
@@ -708,8 +714,8 @@ export async function cityParquetFileTargets(
     const family = familyKeys[index];
     return { name, file, ...(family === undefined ? {} : { family }) };
   });
-  const sidecars: { textures?: File; materials?: File } = {};
-  for (const kind of ["textures", "materials"] as const) {
+  const sidecars: Partial<Record<CityParquetSidecarKind, File>> = {};
+  for (const kind of SIDECAR_KINDS) {
     const name = sidecarNames[kind];
     const file = name === undefined ? undefined : fileForHref(name, byPath);
     if (file) sidecars[kind] = file;
@@ -729,8 +735,9 @@ export async function loadCityParquetFromFiles(
   for (const { name, file } of targets.tables) {
     tables.push({ name, bytes: new Uint8Array(await file.arrayBuffer()) });
   }
-  const sidecars: { textures?: Uint8Array; materials?: Uint8Array } = {};
-  for (const kind of ["textures", "materials"] as const) {
+  const sidecars: { -readonly [K in keyof CityParquetSidecars]: Uint8Array } =
+    {};
+  for (const kind of SIDECAR_KINDS) {
     const file = targets.sidecars[kind];
     if (file) sidecars[kind] = new Uint8Array(await file.arrayBuffer());
   }

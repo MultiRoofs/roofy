@@ -726,7 +726,7 @@ describe("cityParquetTargets", () => {
       {
         url: "https://x.test/delft/building.parquet",
         name: "building.parquet",
-        size: 22930,
+        size: 31839,
         // The manifest's own asset key, carried through as the OBJECT FAMILY
         // (ruling R-A′) for a streamed package's family list.
         family: "building",

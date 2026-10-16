@@ -940,13 +940,12 @@ The planner, settle gate, resident budgets, picking and inspector are shared.
   it has (every known LoD, highest first; `null` = every LoD, never "draw all
   surfaces"). `header.lods` seeds the ladder before any cell arrives, so the
   zoom-driven policy is complete from the first commit.
-  A source with an UNLABELLED geometry column (a bare `geometry`, no LoD in
-  its name) decodes surfaces with `lod: null`, which no labelled selection can
-  name. `null` is therefore a rung of core's `LodSelection` array, ranked below
-  every label: `bakeLodSelection` appends it whenever
-  `header.unlabelledGeometry`, so an object draws its unlabelled surfaces only
-  when it has no labelled surface at or below the rung. The invariant is that
-  an object with only unlabelled geometry is never silently invisible while
+  Every CityParquet geometry column names its LoD (`geometry_lod<major>_<minor>`),
+  so a streamed source has no unlabelled geometry. CityJSON geometry without
+  an `lod` decodes with `lod: null`, which no labelled selection can name;
+  `null` is therefore a rung of core's `LodSelection` array, ranked below every
+  label, so such an object draws its unlabelled surfaces only when it has no
+  labelled surface at or below the rung, and is never silently invisible while
   the layer counts it as loaded.
 - **Geographic sources: one seam.** `geographicToProjected.ts` maps EPSG:6697
   to ONE fixed UTM zone per open (the source extent's centre; Yokohama

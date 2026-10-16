@@ -106,7 +106,7 @@ describe.skipIf(!enabled)("a family view over a real CityParquet file", () => {
     // The file's own vocabulary already matches the app's flat one, which is
     // why no mapping layer exists: `id`/`feature_id`/`object_type`/`parents`/
     // `children`/`bbox` come straight through.
-    // MEASURED against this fixture: 15 of its 24 columns survive, in the
+    // MEASURED against this fixture: 15 of its 23 columns survive, in the
     // file's own order — the same 15-of-37 ratio the real Yokohama building
     // table showed in the spike.
     expect(kept.map((c) => c.name)).toEqual([
@@ -118,8 +118,8 @@ describe.skipIf(!enabled)("a family view over a real CityParquet file", () => {
       "children_roles",
       "address",
       "bbox",
+      "implicit_geometry",
       "other",
-      "other_attributes",
       "measuredHeight",
       "roofType",
       "yearOfConstruction",
@@ -129,7 +129,7 @@ describe.skipIf(!enabled)("a family view over a real CityParquet file", () => {
     // Every dropped column really was in the file — a rule that dropped
     // nothing would pass a bare "contains" check.
     const all = described.map((row) => String(row.column_name));
-    expect(all).toHaveLength(24);
+    expect(all).toHaveLength(23);
     expect(all.filter(isDroppedColumn)).toEqual([
       "geometry_lod0_0",
       "geometry_properties_lod0_0",
@@ -139,7 +139,6 @@ describe.skipIf(!enabled)("a family view over a real CityParquet file", () => {
       "geometry_properties_lod2_2",
       "material_lod2_2",
       "texture_lod2_2",
-      "template",
     ]);
   });
 
