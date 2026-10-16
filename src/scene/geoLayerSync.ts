@@ -436,10 +436,19 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
     // feature set carries no stale override, so the DESIRED colours — the
     // live highlight, and the style's categories (which an `update()` minted
     // this fresh set for) — are pushed into it and nothing needs clearing.
-    const remember = (params: {
-      readonly featureSetId?: unknown;
-      readonly evaluator: GeoFeatureEvaluator;
-    }): void => {
+    //
+    // `featureUpdated` is the engine answering a `forceUpdate`: it re-runs the
+    // evaluators in the frame it is already rendering. Forcing another update
+    // from inside it would schedule the next frame, whose `featureUpdated`
+    // would force the one after: a render loop that never lets a still camera
+    // go idle. So only a NEW feature set asks for the frame its colours need.
+    const remember = (
+      params: {
+        readonly featureSetId?: unknown;
+        readonly evaluator: GeoFeatureEvaluator;
+      },
+      created: boolean,
+    ): void => {
       const { evaluator } = params;
       if (evaluator === undefined || evaluator === null) return;
       entry.evaluators.set(params.featureSetId ?? evaluator, evaluator);
@@ -459,7 +468,7 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
           makeColor(GEO_HIGHLIGHT_COLOR_HEX),
           makeColor(styleColorNumber(entry.style)),
         );
-        entry.layer.forceUpdate?.();
+        if (created) entry.layer.forceUpdate?.();
       } catch (error) {
         console.error(
           `NavaraViewport: the geospatial layer "${entry.name}" could not be coloured.`,
@@ -467,8 +476,8 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
         );
       }
     };
-    handle.on?.("featureCreated", remember);
-    handle.on?.("featureUpdated", remember);
+    handle.on?.("featureCreated", (params) => remember(params, true));
+    handle.on?.("featureUpdated", (params) => remember(params, false));
 
     return entry;
   } catch (error) {

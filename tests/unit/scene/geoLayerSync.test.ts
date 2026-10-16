@@ -817,3 +817,67 @@ describe("removeAllGeoLayerHandles", () => {
     expect(live.size).toBe(0);
   });
 });
+
+describe("syncGeoHighlight — the engine's update loop", () => {
+  /**
+   * The engine's `Layer.forceUpdate()` arms `needUpdate`, and the next frame's
+   * `_processFeatureUpdates` emits `featureUpdated` for every feature set and
+   * forces a render. A handler that forces again re-arms itself, and the view
+   * renders every frame for as long as anything is painted.
+   */
+  function engineFrames(
+    handle: FakeLayerHandle,
+    evaluators: GeoFeatureEvaluator[],
+    frames: number,
+  ) {
+    let needUpdate = handle.forceUpdate.mock.calls.length > 0;
+    let rendered = 0;
+    let seen = handle.forceUpdate.mock.calls.length;
+    for (let frame = 0; frame < frames; frame++) {
+      if (!needUpdate) continue;
+      needUpdate = false;
+      rendered++;
+      evaluators.forEach((evaluator, i) =>
+        fireFeatureEvent(handle, "featureUpdated", evaluator, BigInt(i + 1)),
+      );
+      if (handle.forceUpdate.mock.calls.length > seen) {
+        seen = handle.forceUpdate.mock.calls.length;
+        needUpdate = true;
+      }
+    }
+    return rendered;
+  }
+
+  it("renders once after a highlight, then lets the view go idle", () => {
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson()], live);
+    const handle = layers[0]!;
+    const points = fakeEvaluator();
+    const polygons = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", points, 1n);
+    fireFeatureEvent(handle, "featureCreated", polygons, 2n);
+
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+
+    expect(engineFrames(handle, [points, polygons], 120)).toBe(1);
+  });
+
+  it("still re-applies the highlight to a feature set the engine updates", () => {
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson()], live);
+    const handle = layers[0]!;
+    const points = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", points, 1n);
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+    const before = handle.forceUpdate.mock.calls.length;
+    points.evaluate.mockClear();
+
+    fireFeatureEvent(handle, "featureUpdated", points, 1n);
+
+    expect(points.evaluate).toHaveBeenCalledTimes(1);
+    expect(points.run(7)).toEqual({ color: { hex: GEO_HIGHLIGHT_COLOR_HEX } });
+    expect(handle.forceUpdate.mock.calls.length).toBe(before);
+  });
+});
