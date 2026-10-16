@@ -17,6 +17,7 @@ import { resolve } from "node:path";
 import type { Harness } from "./harness";
 import { readerTableSelectList } from "../../../src/insights/columnKind";
 import {
+  buildFlatCityBufLossSql,
   buildGeometryExportSql,
   quoteIdent,
   quoteLiteral,
@@ -164,7 +165,8 @@ describe.skipIf(!enabled)("geometry export over the real writers", () => {
     const { bytes } = exportTo("cityjson", {
       sourceFile: source,
       table,
-      lodSuffix: "1_0",
+      // Implicit geometry only: there is no per-LoD group to choose.
+      lodSuffix: null,
       attributes: ["species"],
     });
     const doc = JSON.parse(new TextDecoder().decode(bytes)) as {
@@ -179,5 +181,29 @@ describe.skipIf(!enabled)("geometry export over the real writers", () => {
       "GeometryInstance",
     );
     expect(doc.CityObjects["tree-2"]?.attributes?.species).toBe("Tilia");
+  });
+
+  it("counts the implicit geometries a FlatCityBuf export leaves out", () => {
+    const source = "export_g_templates.city.json";
+    const scope = {
+      reader: "read_cityjson" as const,
+      sourceFile: source,
+      table: "layer_templates",
+      lodSuffix: null,
+      attributes: [],
+      computedAttributes: [],
+      where: null,
+      sourceFeatureIds: null,
+      rootTypes: null,
+    };
+    const { outFile } = exportTo("flatcitybuf", scope);
+    // The writer gap the warning reports: both trees come back without one.
+    const [kept] = db.query(
+      `SELECT count(*) FILTER (WHERE "implicit_geometry" IS NOT NULL) AS n FROM read_flatcitybuf(${quoteLiteral(outFile)})`,
+    );
+    expect(Number(kept!.n)).toBe(0);
+    const [lost] = db.query(buildFlatCityBufLossSql(scope));
+    expect(Number(lost!.implicit)).toBe(2);
+    expect(Number(lost!.address)).toBe(0);
   });
 });

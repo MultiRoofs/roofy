@@ -5,12 +5,26 @@ const registered: string[] = [];
 const dropped: string[] = [];
 let failOn: string | null = null;
 let output: Uint8Array | null = null;
+/** What the COPY's own result row says it wrote. */
+let copied = 2;
+/** What the FlatCityBuf loss count answers. */
+let losses = { implicit: 0, address: 0 };
 
 vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     if (failOn !== null && statement.includes(failOn)) {
       return { ok: false as const, message: "Binder Error: no such column" };
+    }
+    if (statement.startsWith("COPY")) {
+      return {
+        ok: true as const,
+        columns: ["Count"],
+        rows: [{ Count: copied }],
+      };
+    }
+    if (statement.includes('AS "implicit"')) {
+      return { ok: true as const, columns: [], rows: [losses] };
     }
     return { ok: true as const, columns: [], rows: [] };
   };
@@ -70,6 +84,8 @@ beforeEach(() => {
   registered.length = 0;
   dropped.length = 0;
   failOn = null;
+  copied = 2;
+  losses = { implicit: 0, address: 0 };
   output = new TextEncoder().encode('{"type":"CityJSON","CityObjects":{}}');
   resetExportCounterForTests();
 });
@@ -108,7 +124,9 @@ describe("geometry export", () => {
         sourceExtension: "city.jsonl",
       }),
     );
-    expect(sql[1]).toContain("TO 'export_2.city.jsonl' (FORMAT cityjsonseq");
+    expect(sql.filter((q) => q.startsWith("COPY"))[1]).toContain(
+      "TO 'export_2.city.jsonl' (FORMAT cityjsonseq",
+    );
     expect(seq.blob.type).toBe("application/city+json-seq");
   });
 
@@ -145,5 +163,31 @@ describe("geometry export", () => {
       "Binder Error: no such column",
     );
     expect(dropped).toContain("export_1_src.city.json");
+  });
+
+  it("warns when a FlatCityBuf could not carry implicit geometries or addresses", async () => {
+    output = new Uint8Array([...FCB_MAGIC, 0, 0]);
+    losses = { implicit: 2, address: 1 };
+    const result = await runExport(
+      request({ format: "flatcitybuf", fileName: "delft.fcb" }),
+    );
+    expect(result.warnings).toEqual([
+      "FlatCityBuf cannot hold implicit geometries or addresses: 2 objects were written without their implicit geometry and 1 without its address. CityJSON and CityJSONSeq keep both.",
+    ]);
+  });
+
+  it("asks nothing extra of a CityJSON export, which keeps both", async () => {
+    losses = { implicit: 2, address: 1 };
+    const result = await runExport(request());
+    expect(result.warnings).toEqual([]);
+    expect(sql).toHaveLength(1);
+  });
+
+  it("says so when no object matched", async () => {
+    copied = 0;
+    const result = await runExport(request());
+    expect(result.warnings).toEqual([
+      "No objects matched, so the file is empty.",
+    ]);
   });
 });

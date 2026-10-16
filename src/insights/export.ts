@@ -21,6 +21,7 @@ import {
   buildAttributeExportSql,
   buildCityParquetModuleSql,
   buildCityParquetSourceSql,
+  buildFlatCityBufLossSql,
   buildGeometryExportSql,
   exportColumnNames,
   quoteIdent,
@@ -736,8 +737,9 @@ export interface GeometryExportRequest {
   readonly reader: "read_cityjson" | "read_cityjsonseq";
   readonly source: SourceProvider;
   readonly sourceExtension: string;
-  /** `LodColumn.suffix`, as for a CityParquet package. */
-  readonly lodSuffix: string;
+  /** `LodColumn.suffix`, as for a CityParquet package; `null` for a layer
+   *  drawn only through implicit geometries. */
+  readonly lodSuffix: string | null;
   readonly attributes: ReadonlyArray<string>;
   readonly computedAttributes: ReadonlyArray<string>;
   readonly where: string | null;
@@ -774,8 +776,7 @@ async function exportGeometry(
   const sourceName = `${base}_src.${request.sourceExtension}`;
   const outFile = `${base}.${GEOMETRY_EXTENSIONS[request.format]}`;
   try {
-    // Built before the source is fetched, so a bad LoD costs no download.
-    const statement = buildGeometryExportSql({
+    const scope = {
       reader: request.reader,
       sourceFile: sourceName,
       table: request.table,
@@ -785,6 +786,10 @@ async function exportGeometry(
       where: request.where,
       sourceFeatureIds: request.sourceFeatureIds,
       rootTypes,
+    };
+    // Built before the source is fetched, so a bad LoD costs no download.
+    const statement = buildGeometryExportSql({
+      ...scope,
       format: request.format,
       outFile,
     });
@@ -793,7 +798,7 @@ async function exportGeometry(
     if (!(await registerBuffer(sourceName, bytes))) {
       throw new Error("The layer's source could not be re-read for export.");
     }
-    const written = await ddl(statement);
+    const written = await runQuery(statement);
     if (!written.ok) throw new Error(written.message);
 
     const readback = validateExportBytes(
@@ -802,17 +807,56 @@ async function exportGeometry(
       await readFile(outFile),
     );
     if (!readback.ok) throw new Error(readback.message);
+
+    const warnings: string[] = [];
+    if (Number(written.rows[0]?.Count) === 0) {
+      warnings.push("No objects matched, so the file is empty.");
+    } else if (request.format === "flatcitybuf") {
+      const lost = await flatCityBufLosses(buildFlatCityBufLossSql(scope));
+      if (lost !== null) warnings.push(lost);
+    }
     return {
       blob: new Blob([readback.bytes as BlobPart], {
         type: GEOMETRY_MIME[request.format],
       }),
       fileName: request.fileName,
-      warnings: [],
+      warnings,
     };
   } finally {
     await dropBuffer(sourceName);
     await dropWrittenFile(outFile);
   }
+}
+
+/**
+ * What a FlatCityBuf export left behind, as a sentence, or null.
+ *
+ * The extension's FlatCityBuf writer writes neither implicit geometries nor
+ * addresses, although the format has room for instances. The file is still
+ * handed over — everything else in it is right — but not quietly.
+ */
+async function flatCityBufLosses(sql: string): Promise<string | null> {
+  const counted = await runQuery(sql);
+  if (!counted.ok) {
+    return `Could not check what the FlatCityBuf left out: ${counted.message}`;
+  }
+  const implicit = Number(counted.rows[0]?.implicit ?? 0);
+  const address = Number(counted.rows[0]?.address ?? 0);
+  const parts: string[] = [];
+  if (implicit > 0) {
+    parts.push(
+      `${String(implicit)} ${implicit === 1 ? "object was" : "objects were"} written without ${implicit === 1 ? "its" : "their"} implicit geometry`,
+    );
+  }
+  if (address > 0) {
+    const lead =
+      parts.length === 0
+        ? `${String(address)} ${address === 1 ? "object was written" : "objects were written"}`
+        : String(address);
+    parts.push(`${lead} without ${address === 1 ? "its" : "their"} address`);
+  }
+  if (parts.length === 0) return null;
+  return `FlatCityBuf cannot hold implicit geometries or addresses: ${parts.join(" and ")}. CityJSON and CityJSONSeq keep both.`;
 }
 
 export type ExportRequest =

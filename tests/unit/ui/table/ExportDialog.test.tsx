@@ -339,6 +339,29 @@ describe("ExportDialog", () => {
     }
   });
 
+  it("writes a layer drawn only through implicit geometries, with no LoD to choose", async () => {
+    open({ table: { ...READER_TABLE, lods: [] } });
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByLabelText("Level of detail")).toBeNull();
+    // A package needs an LoD's geometry; the CityJSON family does not.
+    expect(screen.queryByLabelText("CityParquet package (.zip)")).toBeNull();
+    fireEvent.click(screen.getByLabelText("CityJSON"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect(
+      (runExport.mock.calls[0]![0] as { lodSuffix: string | null }).lodSuffix,
+    ).toBeNull();
+  });
+
+  it("offers no LoD picker over a table with a ladder but no reader", async () => {
+    // A CityParquet package's table: read from its Parquet, with nothing to
+    // re-read its geometry through.
+    open({ table: { ...READER_TABLE, reader: null, source: null } });
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByLabelText("Level of detail")).toBeNull();
+    expect(screen.queryByLabelText("CityJSON")).toBeNull();
+  });
+
   it("still exports ATTRIBUTES when the layer's bytes cannot be re-obtained", async () => {
     // A missing source costs the CityParquet package and nothing else: CSV,
     // JSON and Parquet are written from the browsing table, which is right

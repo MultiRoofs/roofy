@@ -3,6 +3,7 @@ import {
   buildAttributeExportSql,
   buildCityParquetModuleSql,
   buildCityParquetSourceSql,
+  buildFlatCityBufLossSql,
   buildGeometryExportSql,
   buildRootTypeWhere,
   exportColumnNames,
@@ -557,5 +558,17 @@ describe("buildGeometryExportSql", () => {
         /LoD/,
       );
     }
+  });
+
+  it("selects no LoD group for a layer drawn only through implicit geometries", () => {
+    expect(buildGeometryExportSql({ ...base, lodSuffix: null })).toContain(
+      "SELECT COLUMNS(c -> c IN ('id', 'feature_id', 'object_type', 'parents', 'children', 'children_roles', 'bbox', 'address', 'implicit_geometry', 'other', 'bouwjaar')) FROM",
+    );
+  });
+
+  it("counts what a FlatCityBuf cannot hold over the same scoped rows", () => {
+    expect(buildFlatCityBufLossSql({ ...base, rootTypes: ["Building"] })).toBe(
+      `SELECT count(*) FILTER (WHERE "implicit_geometry" IS NOT NULL) AS "implicit", count(*) FILTER (WHERE len("address") > 0) AS "address" FROM read_cityjson('export_1_src.city.json') WHERE COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN ('Building'))`,
+    );
   });
 });

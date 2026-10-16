@@ -54,18 +54,17 @@ import { useLayerCounts } from "./useLayerCounts";
  * `bbox` are identity and structure — the exporter always writes them, and
  * `CITYPARQUET_REQUIRED_COLUMNS` says so.
  *
- * `address` and `other` are here for the OPPOSITE reason: they are the
- * reader's own columns, not the file's attributes, and the CityParquet source
- * table does not carry them (the writer does not require them, and nobody
- * chose them). Leaving them in the attribute list would offer
- * `address STRUCT[]` as a tick-box and then feed it into a source SELECT that
- * has no business holding it.
+ * `address`, `implicit_geometry` and `other` are the reader's own columns,
+ * not the file's attributes: the geometry formats always write them, and the
+ * CityParquet source table does not carry them. A tick-box for one would do
+ * nothing in either route.
  */
 const FIXED_COLUMNS = new Set([
   ...FLAT_PREFIX_COLUMNS,
   "children_roles",
   "bbox",
   "address",
+  "implicit_geometry",
   "other",
 ]);
 
@@ -219,13 +218,13 @@ export function ExportDialog({
     [table.columns],
   );
 
-  /** A geometry format needs a reader (the geometry comes from the source, not
-   *  the browsing table) and an LoD to write. The CityJSON-family writers take
-   *  the CRS from the source itself; a CityParquet package also needs an EPSG
-   *  code to state its CRS. */
-  const canGeometry =
-    table.reader !== null && table.source !== null && table.lods.length > 0;
-  const canCityParquet = canGeometry && epsg !== null;
+  /** A geometry format needs a reader: the geometry comes from the source, not
+   *  the browsing table. The CityJSON-family writers take the CRS from the
+   *  source itself, and write a layer drawn only through implicit geometries
+   *  with no LoD chosen; a CityParquet package needs an LoD's geometry and an
+   *  EPSG code to state its CRS. */
+  const canGeometry = table.reader !== null && table.source !== null;
+  const canCityParquet = canGeometry && table.lods.length > 0 && epsg !== null;
   const formats: ReadonlyArray<Format> = [
     ...(canCityParquet ? (["cityparquet"] as const) : []),
     ...(canGeometry ? GEOMETRY_FORMATS : []),
@@ -509,9 +508,9 @@ export function ExportDialog({
         };
       } else if (isGeometryFormat(format)) {
         const { reader, source } = table;
-        if (reader === null || source === null || lod === null) {
+        if (reader === null || source === null) {
           throw new Error(
-            "This layer no longer has a CityJSON source with an LoD, so its geometry cannot be written. Pick another format.",
+            "This layer no longer has a CityJSON source, so its geometry cannot be written. Pick another format.",
           );
         }
         request = {
@@ -522,7 +521,7 @@ export function ExportDialog({
           source,
           sourceExtension:
             reader === "read_cityjsonseq" ? "city.jsonl" : "city.json",
-          lodSuffix: lod.suffix,
+          lodSuffix: lod?.suffix ?? null,
           attributes,
           computedAttributes,
           where,
@@ -729,7 +728,7 @@ export function ExportDialog({
 
           {relinkNeeded && <p className="export-note">{RELINK_REASON}</p>}
 
-          {table.lods.length > 0 && (
+          {canGeometry && table.lods.length > 0 && (
             <label className="export-field">
               <span>Level of detail</span>
               <select

@@ -778,9 +778,8 @@ function whereOf(conditions: ReadonlyArray<string>): string {
  * bind-time failure mode for an LoD spelled differently than the file spells it.
  *
  * `lodSuffix` is the exact text after `geometry_lod` in the SOURCE'S OWN column
- * name — "0_0", "2_2" — never a label put through string surgery: the reader
- * spells Delft's LoD 0 as `geometry_lod0_0` while another file may spell the
- * same rung `geometry_lod0`, so only the column list can say which it is.
+ * name — "0_0", "2_2" — `LodColumn.suffix`, never a label put through string
+ * surgery.
  *
  * The whole select list is DEDUPED. A caller's attribute list is chosen from
  * the layer's columns, which include the required names and the geometry pair,
@@ -887,6 +886,41 @@ export const GEOMETRY_EXPORT_READER_COLUMNS: ReadonlyArray<string> = [
  *  decimals. */
 const LOD_SUFFIX = /^(0|[1-9][0-9]*)_(0|[1-9][0-9]*)$/;
 
+/** What {@link buildGeometryExportSql} reads: the source, scoped. */
+export interface GeometryExportScope {
+  readonly reader: "read_cityjson" | "read_cityjsonseq";
+  readonly sourceFile: string;
+  readonly table: string;
+  /** The chosen LoD's suffix, or `null` for a layer with no per-LoD geometry
+   *  (one drawn only through implicit geometries). */
+  readonly lodSuffix: string | null;
+  readonly attributes: ReadonlyArray<string>;
+  /**
+   * As in {@link buildCityParquetSourceSql}: on the layer table only, so
+   * joined in by id. A computed name must not also be a reader column — the
+   * tools refuse one that belongs to the source data — or both would be
+   * written.
+   */
+  readonly computedAttributes: ReadonlyArray<string>;
+  readonly where: string | null;
+  readonly sourceFeatureIds: ReadonlyArray<string> | null;
+  readonly rootTypes: ReadonlyArray<string> | null;
+}
+
+/** The scoped source as `FROM … [JOIN …] [WHERE …]`. */
+function geometryExportFrom(input: GeometryExportScope): string {
+  const computed = [...new Set(input.computedAttributes)];
+  const conditions = sourceScopeConditions(
+    input.table,
+    input.where,
+    input.sourceFeatureIds,
+  );
+  if (input.rootTypes !== null) {
+    conditions.push(buildRootTypeWhere(input.table, input.rootTypes));
+  }
+  return `FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${computedJoin(input.table, computed)}${whereOf(conditions)}`;
+}
+
 /**
  * A CityJSON, CityJSONSeq or FlatCityBuf file of the export's features, in
  * ONE statement: the re-registered source goes straight through the
@@ -898,49 +932,45 @@ const LOD_SUFFIX = /^(0|[1-9][0-9]*)_(0|[1-9][0-9]*)$/;
  * `metadata_from` names the same registered source: the writer then carries its
  * CRS, transform, appearance definitions and geometry templates across.
  *
+ * `other` travels whole, whatever the attribute selection: it holds the
+ * attributes the reader could not give a column of their own.
+ *
  * `rootTypes` is `null` for "every type": that predicate is a subquery over the
  * whole layer table, and paying for it to keep every row is pure cost.
  */
-export function buildGeometryExportSql(input: {
-  readonly reader: "read_cityjson" | "read_cityjsonseq";
-  readonly sourceFile: string;
-  readonly table: string;
-  readonly lodSuffix: string;
-  readonly attributes: ReadonlyArray<string>;
-  /** As in {@link buildCityParquetSourceSql}: on the layer table only, so
-   *  joined in by id. */
-  readonly computedAttributes: ReadonlyArray<string>;
-  readonly where: string | null;
-  readonly sourceFeatureIds: ReadonlyArray<string> | null;
-  readonly rootTypes: ReadonlyArray<string> | null;
-  readonly format: GeometryExportFormat;
-  readonly outFile: string;
-}): string {
+export function buildGeometryExportSql(
+  input: GeometryExportScope & {
+    readonly format: GeometryExportFormat;
+    readonly outFile: string;
+  },
+): string {
   // Spliced into a regular expression, so anything outside the grammar is a
   // refusal rather than a pattern that matches something else.
-  if (!LOD_SUFFIX.test(input.lodSuffix)) {
+  if (input.lodSuffix !== null && !LOD_SUFFIX.test(input.lodSuffix)) {
     throw new Error(
       `"${input.lodSuffix}" is not an LoD column suffix, so no geometry can be chosen for the export.`,
     );
   }
-  const computed = [...new Set(input.computedAttributes)];
   const names = [
     ...new Set([
       ...GEOMETRY_EXPORT_READER_COLUMNS,
       ...input.attributes,
-      ...computed,
+      ...input.computedAttributes,
     ]),
   ];
-  const lodGroup = `^(geometry|geometry_properties|material|texture)_lod${input.lodSuffix}$`;
-  const select = `COLUMNS(c -> c IN (${names.map((n) => quoteLiteral(n)).join(", ")}) OR regexp_matches(c, ${quoteLiteral(lodGroup)}))`;
-  const conditions = sourceScopeConditions(
-    input.table,
-    input.where,
-    input.sourceFeatureIds,
-  );
-  if (input.rootTypes !== null) {
-    conditions.push(buildRootTypeWhere(input.table, input.rootTypes));
-  }
+  const byName = `c IN (${names.map((n) => quoteLiteral(n)).join(", ")})`;
+  const lodGroup =
+    input.lodSuffix === null
+      ? ""
+      : ` OR regexp_matches(c, ${quoteLiteral(`^(geometry|geometry_properties|material|texture)_lod${input.lodSuffix}$`)})`;
   const source = quoteLiteral(input.sourceFile);
-  return `COPY (SELECT ${select} FROM ${input.reader}(${source})${computedJoin(input.table, computed)}${whereOf(conditions)}) TO ${quoteLiteral(input.outFile)} (FORMAT ${input.format}, metadata_from ${source})`;
+  return `COPY (SELECT COLUMNS(c -> ${byName}${lodGroup}) ${geometryExportFrom(input)}) TO ${quoteLiteral(input.outFile)} (FORMAT ${input.format}, metadata_from ${source})`;
+}
+
+/**
+ * How many of the exported objects carry an implicit geometry and an address
+ * — the two members a FlatCityBuf file cannot hold.
+ */
+export function buildFlatCityBufLossSql(input: GeometryExportScope): string {
+  return `SELECT count(*) FILTER (WHERE "implicit_geometry" IS NOT NULL) AS "implicit", count(*) FILTER (WHERE len("address") > 0) AS "address" ${geometryExportFrom(input)}`;
 }
