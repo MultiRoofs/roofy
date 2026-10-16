@@ -1,3 +1,4 @@
+import { useReadoutStore } from "../features/readouts/readoutStore";
 import type { StreamStatus } from "../features/streaming/streamStore";
 
 interface StatusBarProps {
@@ -13,8 +14,6 @@ interface StatusBarProps {
    * total, and the bar would read as a stream stuck at 1%.
    */
   readonly totalObjectCount?: number | null;
-  readonly fps?: number;
-  readonly cursorPosition?: readonly [number, number, number] | null;
   readonly streamStatus?: StreamStatus | null;
   readonly streamMessage?: string | null;
   readonly residentCellCount?: number;
@@ -22,17 +21,23 @@ interface StatusBarProps {
 export function StatusBar({
   objectCount,
   totalObjectCount = null,
-  fps,
-  cursorPosition,
   streamStatus,
   streamMessage,
   residentCellCount,
 }: StatusBarProps) {
+  // Read here, not passed in: the cursor moves at pointer rate, and only this
+  // bar should re-render for it.
+  const cursorPosition = useReadoutStore((s) => s.cursor);
+  const frameMs = useReadoutStore((s) => s.frameMs);
   return (
     <footer className="statusbar statusbar--map">
       <div className="statusbar__left">
         <span>Navara</span>
-        {fps !== undefined && <span>· {fps} FPS</span>}
+        {frameMs !== null && (
+          <span title="CPU time of the last frame drawn; the engine draws only when something changes">
+            · {formatFrameMs(frameMs)} ms/frame
+          </span>
+        )}
         <span
           title={
             totalObjectCount !== null && totalObjectCount !== objectCount
@@ -95,4 +100,9 @@ function streamDotClass(status: StreamStatus) {
 }
 function formatCount(n: number) {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+}
+
+/** One decimal under 10 ms, whole milliseconds above. */
+export function formatFrameMs(ms: number): string {
+  return ms < 10 ? ms.toFixed(1) : String(Math.round(ms));
 }

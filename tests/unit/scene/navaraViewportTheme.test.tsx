@@ -164,6 +164,8 @@ vi.mock("@navaramap/three", () => ({
       screenSize: { x: 800, y: 600 },
       pixelRatio: 2,
       pickDepthPosition: vi.fn(() => null as unknown),
+      forceUpdate: vi.fn(),
+      animation: false,
     };
     viewInstances.push(view as unknown as Record<string, unknown>);
     return view;

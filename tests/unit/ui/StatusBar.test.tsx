@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { StatusBar, formatCoordinate } from "../../../src/ui/StatusBar";
+import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  StatusBar,
+  formatCoordinate,
+  formatFrameMs,
+} from "../../../src/ui/StatusBar";
+import { useReadoutStore } from "../../../src/features/readouts/readoutStore";
+
+afterEach(() => {
+  cleanup();
+  useReadoutStore.getState().reset();
+});
 const baseProps = { objectCount: 10 };
 describe("StatusBar", () => {
   it("formats the WGS84 [lng, lat, height] callback tuple", () => {
@@ -52,10 +62,26 @@ describe("StatusBar", () => {
         {...baseProps}
         streamStatus="error"
         streamMessage="range read failed"
-        cursorPosition={[4.3571, 52.0116, 38]}
       />,
     );
+    act(() => useReadoutStore.getState().setCursor([4.3571, 52.0116, 38]));
     expect(screen.getByText(/range read failed/)).toBeInTheDocument();
     expect(screen.queryByText(/EPSG:28992/)).toBeNull();
+  });
+  it("shows the cursor and the last frame's time from the readout store", () => {
+    render(<StatusBar {...baseProps} />);
+    expect(screen.queryByText(/ms\/frame/)).toBeNull();
+    act(() => {
+      useReadoutStore.getState().setCursor([4.3571, 52.0116, 38]);
+      useReadoutStore.getState().setFrameMs(4.24);
+    });
+    expect(
+      screen.getByText("52.0116° N, 4.3571° E · 38 m"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("· 4.2 ms/frame")).toBeInTheDocument();
+  });
+  it("formats frame times to a tenth below 10 ms and whole above", () => {
+    expect(formatFrameMs(4.24)).toBe("4.2");
+    expect(formatFrameMs(16.6)).toBe("17");
   });
 });

@@ -151,6 +151,8 @@ vi.mock("@navaramap/three", () => ({
       screenSize: { x: 800, y: 600 },
       pixelRatio: 1,
       pickDepthPosition: vi.fn(() => null as unknown),
+      forceUpdate: vi.fn(),
+      animation: false,
     };
   }),
   getPickRay: vi.fn(() => null as unknown),

@@ -154,6 +154,17 @@ ws.onmessage = (event) => {
     pending.delete(message.id);
     if (message.error) call?.reject(new Error(JSON.stringify(message.error)));
     else call?.resolve(message.result);
+  } else if (
+    message.method === "Runtime.consoleAPICalled" &&
+    (message.params.type === "error" || message.params.type === "warning")
+  ) {
+    // The page's own errors and warnings, so a run that silently drops a
+    // layer says why.
+    console.error(
+      `console.${message.params.type}: ${message.params.args
+        .map((arg) => arg.value ?? arg.description ?? "")
+        .join(" ")}`,
+    );
   } else if (message.method === "Runtime.exceptionThrown") {
     exceptions.push(
       message.params.exceptionDetails.exception?.description ??
@@ -229,6 +240,18 @@ while (Date.now() - started < 240_000) {
   } else if (Date.now() - quietSince >= 5000 && now.uploadedBytes > 0) break;
 }
 const lines = [];
+// `--shots <dir>`: a PNG after load and after the last phase, to see that the
+// frames the counters count are the right ones.
+const SHOTS = args.shots;
+const shot = async (name) => {
+  if (!SHOTS) return;
+  const { data } = await send("Page.captureScreenshot", { format: "png" });
+  fs.mkdirSync(SHOTS, { recursive: true });
+  fs.writeFileSync(
+    path.join(SHOTS, `${SCENARIO}-${name}.png`),
+    Buffer.from(data, "base64"),
+  );
+};
 const record = async (phase, extra = {}) => {
   const counters = await snapshot();
   const line = {
@@ -242,6 +265,7 @@ const record = async (phase, extra = {}) => {
   console.log(JSON.stringify(line));
 };
 await record("load", { loadMs: Date.now() - started });
+await shot("load");
 
 // --- input helpers: pressed/released pointer events over the canvas --------
 const mouse = (type, x, y, extra = {}) =>
@@ -307,6 +331,7 @@ for (const [phase, act] of phases) {
   await record(phase, { phaseMs: Date.now() - t0 });
 }
 
+await shot("end");
 fs.writeFileSync(
   OUT,
   lines.map((line) => JSON.stringify(line)).join("\n") + "\n",

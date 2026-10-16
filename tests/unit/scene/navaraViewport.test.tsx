@@ -239,6 +239,8 @@ const RAY = { origin: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 0, z: 1 } };
 const getPickRay = vi.fn(() => RAY as unknown);
 const viewInstances: unknown[] = [];
 const viewOptions: unknown[] = [];
+/** `view.forceUpdate`: the one way the app asks the on-demand engine for a frame. */
+const viewForceUpdate = vi.fn();
 /** Reproduces the engine's real pre-first-frame behaviour (see the test). */
 let cameraThrows = false;
 /** Set to make `new DefaultPlugin()` throw, i.e. an unsupported browser. */
@@ -314,6 +316,8 @@ vi.mock("@navaramap/three", () => ({
       screenSize: { x: 800, y: 600 },
       pixelRatio: 2,
       pickDepthPosition,
+      forceUpdate: viewForceUpdate,
+      animation: (options as { animation?: boolean }).animation ?? false,
     };
     viewInstances.push(view);
     return view;
@@ -400,6 +404,7 @@ import {
   useRenderDebugStore,
 } from "../../../src/features/debug/renderDebugStore";
 import { useAtmosphereStore } from "../../../src/features/atmosphere/atmosphereStore";
+import { useSolarStore } from "../../../src/features/solar/solarStore";
 import { BASEMAPS } from "../../../src/scene/basemaps";
 import { GEO_HIGHLIGHT_COLOR_HEX } from "../../../src/scene/geoLayerSync";
 import { TERRAIN_ATTRIBUTION } from "../../../src/scene/terrain";
@@ -585,6 +590,7 @@ describe("NavaraViewport lifecycle", () => {
     defaultPluginInstance.addDefaultPhotorealScene.mockClear();
     viewInstances.length = 0;
     viewOptions.length = 0;
+    useSolarStore.setState({ timeAnimating: false });
     cameraThrows = false;
     defaultPluginThrows = null;
     cityPluginInstance.getHandle.mockReset();
@@ -649,6 +655,53 @@ describe("NavaraViewport lifecycle", () => {
     expect(options.shadow).toBe(true);
     // Task B1 finding 3: `Options` has no `useNormal` field.
     expect("useNormal" in options).toBe(false);
+  });
+
+  it("renders on demand, not every frame", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect((viewOptions[0] as Record<string, unknown>).animation).toBe(false);
+  });
+
+  it("renders continuously only while the sun animates", async () => {
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    const view = viewInstances[0] as { animation: boolean };
+    expect(view.animation).toBe(false);
+    act(() => useSolarStore.getState().setTimeAnimating(true));
+    expect(view.animation).toBe(true);
+    act(() => useSolarStore.getState().setTimeAnimating(false));
+    expect(view.animation).toBe(false);
+  });
+
+  it("asks for a frame after every commit, for the writes the engine cannot see", async () => {
+    const ref = createRef<CitySceneHandle>();
+    const { rerender } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    viewForceUpdate.mockClear();
+    // Any re-render: the catch-all does not care which prop changed.
+    rerender(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    expect(viewForceUpdate).toHaveBeenCalled();
+  });
+
+  it("does not re-render for a parent render that passes the same props", async () => {
+    const ref = createRef<CitySceneHandle>();
+    const onTriangleCount = () => {};
+    const { rerender } = render(
+      <NavaraViewport ref={ref} onTriangleCount={onTriangleCount} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    // Let the boot's own state updates land first: they are commits too.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    viewForceUpdate.mockClear();
+    rerender(<NavaraViewport ref={ref} onTriangleCount={onTriangleCount} />);
+    expect(viewForceUpdate).not.toHaveBeenCalled();
   });
 
   it("REJECTS `ready` and shows an error panel when view.init() fails", async () => {
@@ -895,9 +948,9 @@ describe("NavaraViewport lifecycle", () => {
     expect(ref.current!.getCameraState()).not.toBeNull();
   });
 
-  it("subscribes to postRender only when an FPS callback is given", async () => {
+  it("subscribes to postRender only when a frame-time callback is given", async () => {
     const { unmount } = render(
-      <NavaraViewport onTriangleCount={() => {}} onFps={() => {}} />,
+      <NavaraViewport onTriangleCount={() => {}} onFrameTime={() => {}} />,
     );
     await waitFor(() =>
       expect(on.mock.calls.some((c) => c[0] === "postRender")).toBe(true),

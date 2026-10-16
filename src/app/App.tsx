@@ -159,6 +159,7 @@ import { useGeoFeatureVisibilityStore } from "../features/geoLayers/geoFeatureVi
 import type { FlyToTarget } from "../scene/geographicCamera";
 import { DataDrawer } from "../ui/drawer/DataDrawer";
 import type { Rule } from "../features/rules/types";
+import { useReadoutStore } from "../features/readouts/readoutStore";
 
 /**
  * The loader's encoding override, from what the Add Layer dialog detected.
@@ -213,6 +214,9 @@ function selectionTitle(
 /** How long an explanatory message stays up. Longer than a status toast: these
  *  are full sentences the user has to read, not a "saved" acknowledgement. */
 const EXPLANATION_TOAST_MS = 8000;
+
+/** A stable no-op: an inline arrow would defeat the viewport's `memo`. */
+const IGNORE_TRIANGLE_COUNT = () => {};
 const STATUS_TOAST_MS = 3000;
 
 /** How a streaming layer's `.fcb` source was opened, for the save/restore
@@ -329,10 +333,6 @@ export function App({
    *  Share was clicked, so a new click mints a new one rather than reopening
    *  a stale link. Only reachable from the viewer shell (the toolbar). */
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [fps, setFps] = useState<number | undefined>(undefined);
-  const [cursorPosition, setCursorPosition] = useState<
-    readonly [number, number, number] | null
-  >(null);
   const sceneRef = useRef<CitySceneHandle | null>(null);
   // Retain the viewpoint while a local-only workspace waits for its files.
   const pendingRestoredCameraRef = useRef<GeographicCamera | null>(null);
@@ -606,8 +606,8 @@ export function App({
       await scene.ready;
       // No suppression needed around this: `setCameraState` is already
       // bracketed by the streaming plugin's settle suppression inside the
-      // viewport, and the engine's `setCamera` emits no camera events of its
-      // own (Task C7), so a restored camera cannot masquerade as a gesture.
+      // viewport, which swallows the `moveend` the engine's `setCamera` emits,
+      // so a restored camera cannot masquerade as a gesture.
       scene.setCameraState(camera);
     },
     [awaitSceneHandle],
@@ -1771,8 +1771,7 @@ export function App({
     closeAllStreamingLayers(getStreamPlugin());
     useLayerStore.getState().removeAllLayers();
     useShellStore.getState().closeDrawer();
-    setFps(undefined);
-    setCursorPosition(null);
+    useReadoutStore.getState().reset();
     setUnavailableLayers([]);
     clearSelection();
     useGeoLayerStore.getState().removeAllGeoLayers();
@@ -2262,9 +2261,9 @@ export function App({
                 )}
               <NavaraViewport
                 ref={attachScene}
-                onTriangleCount={() => {}}
-                onFps={setFps}
-                onCursorPosition={setCursorPosition}
+                onTriangleCount={IGNORE_TRIANGLE_COUNT}
+                onFrameTime={useReadoutStore.getState().setFrameMs}
+                onCursorPosition={useReadoutStore.getState().setCursor}
                 onLayerError={handleLayerError}
                 onAttributionChange={setViewportAttribution}
               />
@@ -2363,8 +2362,6 @@ export function App({
             <StatusBar
               objectCount={totalObjects.loaded}
               totalObjectCount={totalObjects.total}
-              fps={fps}
-              cursorPosition={cursorPosition}
               streamStatus={
                 activeCityLayer?.isStreaming
                   ? (activeStreamStatus ?? "idle")

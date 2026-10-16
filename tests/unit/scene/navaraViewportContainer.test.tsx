@@ -77,7 +77,13 @@ vi.mock("@navaramap/three", () => ({
     }
   },
   default: vi.fn(function () {
-    return { addPlugin: vi.fn(), init, dispose: vi.fn(), on: vi.fn() };
+    return {
+      addPlugin: vi.fn(),
+      init,
+      dispose: vi.fn(),
+      on: vi.fn(),
+      forceUpdate: vi.fn(),
+    };
   }),
 }));
 vi.mock("@navaramap/three-default-plugin", () => ({
