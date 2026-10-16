@@ -18,7 +18,11 @@ drawn.
 ## Per phase
 
 `seq` is `delft.city.jsonl` and `json` is `delft.city.json`, both static layers;
-`fcb` is `delft.fcb`, streamed.
+`fcb` is `delft.fcb`, streamed. **The `fcb` column is the globe without the
+layer**: in a development build the streamed layer of a share link was dropped
+(StrictMode's simulated remount rejected the engine gate it waited on), so it
+measures the empty scene. `../2026-10-16-render-on-demand/` has the first
+`fcb` run with the layer loaded.
 
 | Phase                  | Ticks (seq / json / fcb) | Frames          | Draw calls           | Uploaded MB    | Readbacks    | Long tasks (s)     |
 | ---------------------- | ------------------------ | --------------- | -------------------- | -------------- | ------------ | ------------------ |
@@ -31,14 +35,14 @@ The JSONL files carry every phase, including load, zoom-in, pan and zoom-out.
 
 ## What it shows
 
-- **Every tick draws.** A still camera renders a full frame on each tick, for
-  every source. That is the review's first finding, and the "still" rows are the
+- **Every tick draws.** A still camera renders a full frame on each tick,
+  even with no layer at all. That is the review's first finding, and the "still" rows are the
   ones render on demand must bring to zero frames.
 - **A still static layer uploads.** 1.9 MB in ten seconds with no input on
-  either static format, none on the streamed one.
+  either static format, none on the empty globe.
 - **Hover is the expensive interaction.** On a static layer the 121-move sweep
   costs 48 synchronous depth readbacks and about 40 s of long tasks, against 15
-  readbacks and 11 s streamed. Draw calls per frame on a static layer are
+  readbacks and 11 s over the empty globe. Draw calls per frame on a static layer are
   about 105 at the start and about 480 from the zoom phases on, still or not:
   that is the view the camera ends in, not the sweep.
 - **Orbit and pan read back too.** 10 readbacks in the orbit, 6 in the pan, from
