@@ -124,6 +124,7 @@ import {
   sameSelection,
   type EnginePickStash,
 } from "./pickEventHandlers";
+import { createHoverScheduler } from "./hoverScheduler";
 import { createThrottle, epsgForLayer } from "./cursorCrsReadout";
 import {
   createNavaraSession,
@@ -3323,8 +3324,30 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
        */
       let lastEngineMove: unknown = null;
 
+      /**
+       * The hover raycast, at most once per animation frame and never while a
+       * button is held: the pointer reports moves far faster than a frame can
+       * show their highlight, and during a drag the camera moves under it.
+       */
+      const hoverScheduler = createHoverScheduler({
+        schedule: (callback) => requestAnimationFrame(callback),
+        resolve: (point) => {
+          const store = useSelectionStore.getState();
+          const hit = narrowToMode(pickAt(point), store.mode);
+          // Every resolved pick is a fresh object, so pushing it unconditionally
+          // would change `hovered` on every move and repaint every layer.
+          if (!sameSelection(store.hovered, hit)) {
+            applyPickIntent(
+              pickIntentFor({ type: "move", shiftKey: false }, hit),
+              store,
+            );
+          }
+        },
+      });
+
       /** Nothing is under the cursor: drop the hover and the readout. */
       const clearCursorState = () => {
+        hoverScheduler.cancel();
         const store = useSelectionStore.getState();
         if (store.hovered !== null) store.hover(null);
         onCursorPosition?.(null);
@@ -3366,22 +3389,18 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         lastEngineMove = e;
         const point = canvasPointOf(e);
         clickGate.move(point);
+        // A drag moves the camera, not the cursor over the model: no hover, and
+        // no depth readback for a readout that is stale before it is shown.
+        const buttons = e.buttons > 0 ? e.buttons : 0;
+        if (buttons !== 0) {
+          hoverScheduler.move(point, buttons);
+          return;
+        }
         const store = useSelectionStore.getState();
         // Gate on the tool BEFORE resolving: a measure-mode move must not cost
         // a raycast across every layer.
-        if (!acceptsPointer(store.toolMode, "move")) {
-          reportCursor(point);
-          return;
-        }
-        const hit = narrowToMode(pickAt(point), store.mode);
-        // Every resolved pick is a fresh object, so pushing it unconditionally
-        // would change `hovered` on every mousemove and repaint every layer's
-        // vertex colors at pointer rate.
-        if (!sameSelection(store.hovered, hit)) {
-          applyPickIntent(
-            pickIntentFor({ type: "move", shiftKey: false }, hit),
-            store,
-          );
+        if (acceptsPointer(store.toolMode, "move")) {
+          hoverScheduler.move(point, buttons);
         }
         reportCursor(point);
       };
@@ -3501,6 +3520,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       host?.addEventListener("pointercancel", onDomPointerCancel);
 
       return () => {
+        hoverScheduler.cancel();
         // `featureClick` included: this effect re-runs on every city-layer
         // edit, and a handler left behind would accumulate one per edit.
         view.off("featureClick", onEnginePick);

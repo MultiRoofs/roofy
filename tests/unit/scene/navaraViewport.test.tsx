@@ -448,6 +448,12 @@ globalThis.ResizeObserver =
  * default moves again. The suites that DO test them opt back in.
  */
 beforeEach(() => {
+  // The hover raycast runs on the next animation frame; run frames at once so
+  // a move's hover is visible to the assertion right after it.
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
   useBasemapStore.setState({ basemapId: "none" });
   useRenderDebugStore.setState({
     ...DEFAULT_RENDER_DEBUG_STATE,
@@ -464,6 +470,9 @@ beforeEach(() => {
   resetPhotorealHandles();
   resize.mockClear();
   resizeObservers.length = 0;
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 // ---------------------------------------------------------------------------
@@ -1335,6 +1344,14 @@ describe("NavaraViewport lifecycle", () => {
       layerId: "b",
       objectId: "b-obj",
     });
+  });
+
+  it("raycasts nothing and reads no depth while a button is held (a drag)", async () => {
+    const { handles } = await mountTwoLayers({ a: 900, b: 12 });
+    act(() => fire("pointermove", mouse(10, 20, { buttons: 1 })));
+    expect(handles.a.resolveRaycast).not.toHaveBeenCalled();
+    expect(handles.b.resolveRaycast).not.toHaveBeenCalled();
+    expect(useSelectionStore.getState().hovered).toBeNull();
   });
 
   it("raycasts from CANVAS-relative pixels, not viewport clientX/clientY", async () => {
