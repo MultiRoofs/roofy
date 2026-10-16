@@ -220,7 +220,7 @@ export function syncLayers(
  * which is the user's rules plus a trailing unmatched catch-all, one catch-all
  * for a single colour, or nothing at all for the semantic palette. Memoised on
  * that array's identity (so on all five of its inputs): `handle.setStyle`
- * repaints every vertex of the layer, so pushing on an unrelated store change
+ * re-evaluates every surface of the layer, so pushing on an unrelated store change
  * (another layer's visibility toggle, a selection) would be a full recolor per
  * keystroke.
  *
@@ -611,11 +611,12 @@ function highlightKey(
  * to do. That is also why the caller must pass {@link allInteractionHandles}
  * and not {@link interactionHandles}: a hidden layer still has to be cleared.
  *
- * `memo` makes that cheap. `setHighlight` is not a cheap setter — it re-runs
- * `computeStyleColors` over the whole layer and repaints every vertex — so
- * hovering one building in layer A must not repaint layers B and C, whose own
- * filtered view of `(selections, hovered)` did not move. Without a memo every
- * hover step costs one full recolor PER LAYER, at pointer rate.
+ * `memo` makes that cheap. `setHighlight` is not a free setter — it rewrites
+ * the highlight flags of every surface in the layer and uploads its style
+ * texture — so hovering one building in layer A must not touch layers B and
+ * C, whose own filtered view of `(selections, hovered)` did not move. Without
+ * a memo every hover step costs one texture upload PER LAYER, at pointer
+ * rate.
  *
  * Omitting `memo` pushes unconditionally, which is what a caller that has no
  * state to keep (a one-shot resync) wants.
