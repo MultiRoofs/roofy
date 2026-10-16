@@ -129,7 +129,8 @@ const {
 const { getLayerTable, resetLayerTablesForTest, useLayerTableStore } =
   await import("../../../src/insights/layerTables");
 
-/** The real file's vocabulary, as a DESCRIBE reports it. */
+/** A Yokohama building table as the current writer lays it out, as a
+ *  DESCRIBE reports it. */
 const YOKOHAMA_COLUMNS = [
   { column_name: "id", column_type: "VARCHAR" },
   { column_name: "feature_id", column_type: "VARCHAR" },
@@ -146,9 +147,12 @@ const YOKOHAMA_COLUMNS = [
   { column_name: "geometry_lod2_2", column_type: "BLOB" },
   { column_name: "material_lod2_2", column_type: "JSON" },
   { column_name: "texture_lod2_2", column_type: "JSON" },
-  { column_name: "template", column_type: "JSON" },
+  {
+    column_name: "implicit_geometry",
+    column_type: "STRUCT(id BIGINT, point BLOB, transformationMatrix DOUBLE[])",
+  },
+  { column_name: "other", column_type: "JSON" },
   { column_name: "measuredHeight", column_type: "DOUBLE" },
-  { column_name: "other_attributes", column_type: "JSON" },
 ];
 
 beforeEach(() => {
@@ -167,7 +171,7 @@ beforeEach(() => {
 });
 
 describe("keptFamilyColumns", () => {
-  it("keeps identity and attributes, drops geometry, appearance and template", () => {
+  it("keeps identity, structure and attributes, drops geometry and appearance", () => {
     expect(keptFamilyColumns(YOKOHAMA_COLUMNS).map((c) => c.name)).toEqual([
       "id",
       "feature_id",
@@ -175,8 +179,9 @@ describe("keptFamilyColumns", () => {
       "parents",
       "children",
       "bbox",
+      "implicit_geometry",
+      "other",
       "measuredHeight",
-      "other_attributes",
     ]);
   });
 

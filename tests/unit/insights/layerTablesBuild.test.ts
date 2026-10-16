@@ -299,8 +299,8 @@ describe("reader-backed layer table", () => {
     await build();
     expect(sql[0]).toBe(
       'CREATE OR REPLACE TABLE "layer_1" AS SELECT ' +
-        "COLUMNS(c -> NOT (c IN ('template', 'geometry') OR regexp_matches(c, '^(geometry|geometry_properties|material|texture)_lod\\d+(_\\d+)?$'))), " +
-        `COLUMNS('^(id|geometry_lod\\d+(?:_\\d+)?)$') IS NOT NULL AS '${MARKER}\\1' ` +
+        "COLUMNS(c -> NOT regexp_matches(c, '^(geometry|geometry_properties|material|texture)_lod(0|[1-9][0-9]*)_(0|[1-9][0-9]*)$')), " +
+        `COLUMNS('^(id|geometry_lod(0|[1-9][0-9]*)_(0|[1-9][0-9]*))$') IS NOT NULL AS '${MARKER}\\1' ` +
         "FROM read_cityjson('layer_1.city.json')",
     );
     expect(sql.some((s) => s.startsWith("DESCRIBE SELECT"))).toBe(false);

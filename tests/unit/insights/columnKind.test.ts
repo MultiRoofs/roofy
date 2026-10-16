@@ -82,14 +82,14 @@ describe("isTextColumn", () => {
 });
 
 describe("isDroppedColumn", () => {
-  it("drops geometry, its sidecar, materials, textures and template", () => {
+  it("drops geometry, its sidecar, materials and textures", () => {
     for (const n of [
       "geometry_lod2_2",
       "geometry_properties_lod2_2",
       "material_lod1_2",
       "texture_lod2_2",
-      "template",
       "material_lod2_2",
+      "geometry_lod10_0",
       "geometry_lod0_0",
       "geometry_properties_lod1_3",
     ]) {
@@ -97,14 +97,21 @@ describe("isDroppedColumn", () => {
     }
   });
 
-  it("drops a LEGACY bare `geometry` column", () => {
-    // CityParquet's pre-suffix grammar wrote one unsuffixed `geometry` column
-    // (`lodFromColumnName` answers `{lod: null}` for it), and a real package
-    // still in that dialect would otherwise put a WKB blob of every object in
-    // the browsing view — the one column that must never reach a grid, a
-    // filter or an export. The suffixed names cover every modern file; this is
-    // the one spelling the LoD pattern cannot match.
-    expect(isDroppedColumn("geometry")).toBe(true);
+  it("keeps a name off the extension's LoD suffix grammar: it is an attribute", () => {
+    // `<prefix>_lod<major>_<minor>`, minor always present, canonical decimals.
+    // The reader escapes only an attribute spelled that way, so every other
+    // spelling reaches the table as the attribute it is.
+    for (const n of [
+      "geometry",
+      "template",
+      "material",
+      "geometry_lod3",
+      "geometry_lod02_2",
+      "geometry_lod2_02",
+      "texture_lod1",
+    ]) {
+      expect(isDroppedColumn(n)).toBe(false);
+    }
   });
 
   it("keeps a user attribute that merely STARTS with a dropped word", () => {
@@ -131,6 +138,7 @@ describe("isDroppedColumn", () => {
       "children_roles",
       "address",
       "bbox",
+      "implicit_geometry",
       "other",
       "b3_h_dak_max",
     ]) {
@@ -160,21 +168,20 @@ describe("LoD column maths", () => {
     expect(lodsFromColumnNames(["id", "object_type"])).toEqual([]);
   });
 
-  it("keeps the reader's own suffix, minor part or not, and rejects an attribute", () => {
-    // The reader spells Delft's LoD 0 `geometry_lod0_0`, and nothing promises
-    // every file uses two parts — so the suffix is read off the column and
-    // never rebuilt from the label. `geometry_lod_note` is not a rung.
+  it("reads only the extension's suffix grammar, so an attribute is no rung", () => {
+    // `geometry_lod1`, `geometry_lod02_2` and `geometry_lod_note` are
+    // attributes under the grammar the reader writes and escapes by.
     expect(
       lodsFromColumnNames([
         "geometry_lod0_0",
         "geometry_lod2_2",
         "geometry_lod1",
+        "geometry_lod02_2",
         "geometry_lod_note",
         "geometry_properties_lod2_2",
       ]),
     ).toEqual([
       { label: "0.0", suffix: "0_0" },
-      { label: "1", suffix: "1" },
       { label: "2.2", suffix: "2_2" },
     ]);
   });

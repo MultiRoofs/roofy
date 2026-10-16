@@ -13,9 +13,9 @@
  *    unfaithfully is cast to VARCHAR in SQL, where DuckDB's own formatting is
  *    the answer. Only the types JS can hold exactly travel raw.
  *  - `isDroppedColumn` names the reader columns a BROWSING table never wants:
- *    geometry WKB and its sidecar, per-LoD material/texture indices, and the
- *    geometry-template struct. Dropping them keeps 53 of 70 columns on the
- *    Delft sample and cuts table memory 2.45x (13.1 vs 32.1 MiB for 2231 rows).
+ *    geometry WKB and its sidecar, and the per-LoD material/texture indices.
+ *    Dropping them keeps 53 of 70 columns on the Delft sample and cuts table
+ *    memory 2.45x (13.1 vs 32.1 MiB for 2231 rows).
  *
  * The dropped SHAPE is matched exactly, never by prefix. A reader column of
  * this family always carries the LoD suffix (`geometry_lod2_2`,
@@ -70,31 +70,26 @@ export function isTextColumn(column: ColumnInfo): boolean {
   );
 }
 
+/** One LoD suffix part: a decimal with no leading zero, as the extension
+ *  writes it (`<prefix>_lod<major>_<minor>`, the minor always present). */
+const LOD_PART = "(0|[1-9][0-9]*)";
+
 /** A reader geometry/material/texture column, LoD suffix and all. RE2 and
  *  JavaScript read it alike, so DuckDB's lambda below uses the same text. */
-const DROPPED_PATTERN =
-  "^(geometry|geometry_properties|material|texture)_lod\\d+(_\\d+)?$";
+const DROPPED_PATTERN = `^(geometry|geometry_properties|material|texture)_lod${LOD_PART}_${LOD_PART}$`;
 const DROPPED = new RegExp(DROPPED_PATTERN);
-/** Dropped by name: the implicit-geometry reference and a bare `geometry`. */
-const DROPPED_NAMES: ReadonlyArray<string> = ["template", "geometry"];
 
 /**
  * Whether a reader column is left out of a layer's browsing table.
  *
- * A BARE `geometry` is dropped as well, and only that one of the four names.
- * CityParquet's pre-suffix grammar wrote a single unsuffixed geometry column
- * (`lodFromColumnName` in `navara-cityparquet` still reads it, as an LoD of
- * `null`), and a package in that dialect would otherwise put a WKB blob of
- * every object into the view — the exact column this list exists to keep out.
- * Its siblings (`geometry_properties`, `material`, `texture`, unsuffixed) are
- * deliberately NOT matched: `material` and `texture` are plausible third-party
- * ATTRIBUTE names, and this module's rule is that over-dropping — a column the
- * user can see in their file missing from the table, the filter bar and the
- * export with nothing to show it happened — is the worse failure. A legacy
- * file's view therefore still carries those three, JSON and all.
+ * Exactly the extension's reserved per-LoD names, and nothing else: the reader
+ * escapes an attribute spelled that way (`_geometry_lod2_2`), so any other
+ * spelling (`geometry_lod3`, a bare `geometry` or `material`) is an attribute
+ * the user can see in their file, and over-dropping it would take it out of
+ * the table, the filter bar and the export with nothing to show it happened.
  */
 export function isDroppedColumn(name: string): boolean {
-  return DROPPED_NAMES.includes(name) || DROPPED.test(name);
+  return DROPPED.test(name);
 }
 
 /**
@@ -121,10 +116,9 @@ export const LOD_MARKER_PREFIX = `__roofy_has_${Array.from(
  * nothing, and a file with no geometry would otherwise fail.
  */
 export function readerTableSelectList(): string {
-  const names = DROPPED_NAMES.map((n) => `'${n}'`).join(", ");
   return (
-    `COLUMNS(c -> NOT (c IN (${names}) OR regexp_matches(c, '${DROPPED_PATTERN}'))), ` +
-    `COLUMNS('^(id|geometry_lod\\d+(?:_\\d+)?)$') IS NOT NULL AS '${LOD_MARKER_PREFIX}\\1'`
+    `COLUMNS(c -> NOT regexp_matches(c, '${DROPPED_PATTERN}')), ` +
+    `COLUMNS('^(id|geometry_lod${LOD_PART}_${LOD_PART})$') IS NOT NULL AS '${LOD_MARKER_PREFIX}\\1'`
   );
 }
 
@@ -137,9 +131,9 @@ export function readerTableSelectList(): string {
  * `"0.0"` and `"0"` are different columns and only the file knows which it has.
  */
 export interface LodColumn {
-  /** `major.minor`, or the bare major when the column names no minor part. */
+  /** `major.minor`. */
   readonly label: string;
-  /** The text after `geometry_lod`, verbatim: "0_0", "2_2", "1". */
+  /** The text after `geometry_lod`, verbatim: "0_0", "2_2". */
   readonly suffix: string;
 }
 
@@ -147,20 +141,24 @@ export interface LodColumn {
  * The LoD ladder a reader's column list implies, ascending by label.
  *
  * Deduplicated by SUFFIX, since the suffix is the thing that addresses a
- * column. The minor part is optional, so `geometry_lod1` is a rung labelled
- * "1" rather than being skipped; `geometry_lod_note` is not a rung at all.
+ * column. Only the extension's grammar is a rung: `geometry_lod1` and
+ * `geometry_lod_note` are attributes.
  */
+const LOD_GEOMETRY = new RegExp(`^geometry_lod(${LOD_PART}_${LOD_PART})$`);
+
 export function lodsFromColumnNames(
   names: ReadonlyArray<string>,
 ): ReadonlyArray<LodColumn> {
   const bySuffix = new Map<string, LodColumn>();
   for (const name of names) {
-    const match = /^geometry_lod((\d+)(?:_(\d+))?)$/.exec(name);
+    const match = LOD_GEOMETRY.exec(name);
     const suffix = match?.[1];
     const major = match?.[2];
-    if (suffix === undefined || major === undefined) continue;
     const minor = match?.[3];
-    const label = minor === undefined ? major : `${major}.${minor}`;
+    if (suffix === undefined || major === undefined || minor === undefined) {
+      continue;
+    }
+    const label = `${major}.${minor}`;
     if (!bySuffix.has(suffix)) bySuffix.set(suffix, { label, suffix });
   }
   return [...bySuffix.values()].sort(
