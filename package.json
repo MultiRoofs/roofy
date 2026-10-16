@@ -26,6 +26,7 @@
     "@cityjson/navara-cityparquet": "file:packages/cityjson-navara-plugins/packages/navara-cityparquet",
     "@cityjson/navara-core": "file:packages/cityjson-navara-plugins/packages/navara-core",
     "@cityjson/navara-flatcitybuf": "file:packages/cityjson-navara-plugins/packages/navara-flatcitybuf",
+    "@cityjson/navara-stream": "file:packages/cityjson-navara-plugins/packages/navara-stream",
     "@duckdb/duckdb-wasm": "1.33.1-dev64.0",
     "@fontsource/source-sans-3": "^5.3.0",
     "@navaramap/three": "0.2.1",

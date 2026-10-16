@@ -5,7 +5,7 @@
  *
  * Both halves that used to live here are gone: the merge moved to
  * `@cityjson/navara-flatcitybuf` in M7.5, and the one-memo-per-layer bookkeeping
- * moved INTO `FcbStreamLayerHandle` in Task C9 — it memoises on its own commit
+ * moved INTO `StreamLayerHandle` in Task C9 — it memoises on its own commit
  * counter, which is the only counter that can actually tell you a cell landed.
  * All that is left is resolving a layer id to its handle.
  *
@@ -19,7 +19,7 @@
  * avoid. Calling this function imperatively from a mounted consumer's render
  * body means the merge only runs when something actually asks for it.
  */
-import type { ResidentModel } from "@cityjson/navara-flatcitybuf";
+import type { ResidentModel } from "@cityjson/navara-stream";
 import { useStreamStore } from "./streamStore";
 
 export type { ResidentModel };

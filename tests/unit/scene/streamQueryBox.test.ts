@@ -7,7 +7,7 @@
  * NODE_IMPORT_SAFE = false).
  */
 import { describe, expect, it, vi } from "vitest";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import {
   addQueryBox,
   QUERY_BOX_COLOR,

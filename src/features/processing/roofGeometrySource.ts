@@ -20,7 +20,7 @@
  *    surfaces of EVERY semantic type, and is also tags only.
  */
 import { computeRoofMetrics } from "@cityjson/navara-core";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import {
   parentsIndexOf,
   rootFeatureId,

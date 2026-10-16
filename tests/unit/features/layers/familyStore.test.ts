@@ -11,11 +11,11 @@
 import { STREAMED_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type {
-  FcbHeaderModel,
-  FcbStreamLayerHandle,
+  StreamHeader,
+  StreamLayerHandle,
   Grid,
   OpenStreamOptions,
-} from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
 
 type EnsureInput = {
   readonly layerId: string;
@@ -68,7 +68,7 @@ import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 
-const HEADER: FcbHeaderModel = {
+const HEADER: StreamHeader = {
   version: "1.0",
   featuresCount: 10,
   extent: [0, 0, 0, 10, 10, 5],
@@ -78,7 +78,7 @@ const HEADER: FcbHeaderModel = {
 const GRID: Grid = { originX: 0, originY: 0, rootCell: 1000, maxLevel: 4 };
 
 interface FakeHandle {
-  readonly handle: FcbStreamLayerHandle;
+  readonly handle: StreamLayerHandle;
   readonly deleted: Mock<() => void>;
 }
 
@@ -102,7 +102,7 @@ function fakeHandle(
     onAppearanceThemes: () => () => {},
     onCommit: () => () => {},
     delete: deleted,
-  } as unknown as FcbStreamLayerHandle;
+  } as unknown as StreamLayerHandle;
   return { handle, deleted } satisfies FakeHandle;
 }
 
@@ -117,7 +117,7 @@ function fakePlugin(
   behaviour: (
     opts: OpenStreamOptions,
     call: number,
-  ) => Promise<FcbStreamLayerHandle> | "fail" = () => "fail",
+  ) => Promise<StreamLayerHandle> | "fail" = () => "fail",
 ): FakePlugin {
   const handles: FakeHandle[] = [];
   let call = 0;

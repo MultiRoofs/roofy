@@ -12,7 +12,7 @@
  */
 import { useMemo } from "react";
 import { computeRoofMetrics } from "@cityjson/navara-core";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import type { CityObject } from "../../domain/citymodel/types";
 import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttributes";
 import { useLayerStore } from "../../features/layers/layerStore";

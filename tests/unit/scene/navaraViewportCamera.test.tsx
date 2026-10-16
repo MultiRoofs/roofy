@@ -187,8 +187,8 @@ function settleWrappedMove(): unknown {
   const move = suppressSettleThenCommit.mock.calls.at(-1)![0] as () => unknown;
   return move();
 }
-vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
-  FlatCityBufPlugin: vi.fn(function () {
+vi.mock("@cityjson/navara-stream/plugin", () => ({
+  CityStreamPlugin: vi.fn(function () {
     return {
       openStream: vi.fn(),
       remove: vi.fn(),

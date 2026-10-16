@@ -153,7 +153,7 @@ One door used by file drop, the Add dialog, URL, STAC, restore and share. URL pr
 
 ### Task 1.4: `CityLayerHandle` and `CityLayerState`
 
-One handle over `CityModelHandle` and `FcbStreamLayerHandle`, with `SourceCapabilities`
+One handle over `CityModelHandle` and `StreamLayerHandle`, with `SourceCapabilities`
 (`access`, `spatialIndex`, `collections`, `appearance`) and `coverage`; capabilities replace the
 `isStreaming` switches; one reconciler. Tests per replaced switch family (fit, table, details,
 export, summary, LoD rule).
@@ -167,6 +167,12 @@ Task 2.3, which cuts static layers into cells and so unifies the two handle type
 `navara-stream` (worker core, residency, cells, one worker entry loading adapters by id) out of
 `navara-flatcitybuf`; the CityParquet adapter next to its reader; `navara-flatcitybuf` keeps only
 its adapter. Tests move with their code.
+
+Done as: `navara-stream` with three entries (`.`, `/worker`, `/plugin`). Instead of one worker
+entry that loads adapters by id (which would make the core depend on every format), each format
+package ships its own worker entry and factory, and the host passes the factories to
+`CityStreamPlugin` keyed by format id; the core names no format. `FlatCityBufPlugin` is
+`CityStreamPlugin`, `FcbStreamLayerHandle` is `StreamLayerHandle`.
 
 ## Phase 2 — data and render core
 

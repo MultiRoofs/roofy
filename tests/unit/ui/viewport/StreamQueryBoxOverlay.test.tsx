@@ -5,7 +5,7 @@
 import { STREAMED_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import { StreamQueryBoxOverlay } from "../../../../src/ui/viewport/StreamQueryBoxOverlay";
 import { useQueryRegionStore } from "../../../../src/features/streaming/queryRegionStore";
 import { useRenderDebugStore } from "../../../../src/features/debug/renderDebugStore";

@@ -40,7 +40,7 @@ import { familySourceCrs } from "../cityparquet/familySourceCrs";
 import { reopenStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
 import { useStreamStore } from "../streaming/streamStore";
-import type { StreamSource } from "@cityjson/navara-flatcitybuf";
+import type { StreamSource } from "@cityjson/navara-stream";
 
 export type { FamilySource };
 

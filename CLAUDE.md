@@ -10,7 +10,7 @@ Keep this file short: commands, workflow, hard rules. Decision records and engin
 
 - **Build**: Vite (via vite-plus `vp`) + React 19 + TypeScript. `.env` is dotenvx-encrypted.
 - **3D**: `@navaramap/three`, `@navaramap/three-default-plugin`, `@navaramap/three-default-descs` pinned exactly at `0.2.1` (beta; the GitHub releases page is the only changelog). `three@0.183.2`, `postprocessing@6.39.0`, `@types/three@0.183.1` pinned exactly to match its peer ranges; a `three` bump is its own change, never folded into a Navara bump. No React Three Fiber, no drei.
-- **CityJSON plugins**: `@cityjson/navara-{core,cityjson,flatcitybuf,cityparquet}` — git submodule at `packages/cityjson-navara-plugins` (pnpm workspace, public repo), consumed via `file:` deps plus a Vite alias + tsconfig `paths` into the packages' `src/` (editing a plugin hot-reloads the app).
+- **CityJSON plugins**: `@cityjson/navara-{core,cityjson,stream,flatcitybuf,cityparquet}` — git submodule at `packages/cityjson-navara-plugins` (pnpm workspace, public repo), consumed via `file:` deps plus a Vite alias + tsconfig `paths` into the packages' `src/` (editing a plugin hot-reloads the app).
 - **Geospatial**: proj4, WGS84 ENU frames + EGM2008 geoid sampling from `@cityjson/navara-core`.
 - **State**: Zustand stores under `src/features/*`.
 - **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with `cityjson`, `three_d`, `spatial`, `parquet` and `json` vendored under `public/duckdb-ext/` (never DuckDB's CDN at runtime; `npm run vendor:ext` refreshes the ones with a URL source, `npm run check:lockstep` checks them against the duckdb-wasm pin, and both move in one commit); `spatial` and `three_d` load on demand via `ensureExtension`. See `docs/architecture-notes.md` for the per-layer table design and the verified engine facts.
@@ -39,8 +39,9 @@ src/
 packages/cityjson-navara-plugins/packages/
   navara-core/        # Engine-free: types, parsers, ENU frames, geoid, rules
   navara-cityjson/    # Static CityJSON layers (CityJSONPlugin)
-  navara-flatcitybuf/ # Streaming FCB layers + worker
-  navara-cityparquet/ # Engine-free CityParquet reader (vendored patched hyparquet)
+  navara-stream/      # Format-agnostic streaming: worker core, cells, residency, CityStreamPlugin
+  navara-flatcitybuf/ # FlatCityBuf stream source: admission, adapter, worker entry
+  navara-cityparquet/ # Engine-free CityParquet reader (vendored patched hyparquet) + its stream adapter and worker
 tests/unit, tests/integration   # mirrors src/
 fixtures/                       # two-buildings.city.json/jsonl, delft.fcb
 docs/                           # roadmap, design-doc, architecture-notes, testing-strategy
@@ -92,7 +93,7 @@ Browser smokes use `agent-browser` (Navara needs real WebGL + WASM, so jsdom can
 Each of these has a story in `docs/architecture-notes.md`; the rule here is the short form.
 
 - Never run bare `vite` / `vp dev` / `vp build`: `.env` is dotenvx-encrypted and a bare run inlines ciphertext as env values. Always go through the npm scripts.
-- `@navaramap/*` imports live only in the named engine-binding modules (`CityJSONPlugin`, `CityModelMeshDesc`, `CityMeshArraysDesc`, `FlatCityBufPlugin`, `engineRays`, `plugin.ts`). Importing `@navaramap/three` under Node crashes at module scope, so plugin tests import specific engine-free modules, never a package barrel.
+- `@navaramap/*` imports live only in the named engine-binding modules (`CityJSONPlugin`, `CityModelMeshDesc`, `CityMeshArraysDesc`, `CityStreamPlugin`, `engineRays`, `plugin.ts`). Importing `@navaramap/three` under Node crashes at module scope, so plugin tests import specific engine-free modules, never a package barrel.
 - At most one Navara viewport per page (module-level tile worker pool). `NavaraViewport` serialises engine lifetimes; keep it that way.
 - `AttributionOverlay` renders the geoid attribution unconditionally. It is a licence obligation; never drop or gate it.
 - Never write `view.globe.color` or `view.globe.wireframe` (frame presentation freezes, only a reload recovers). `view.globe.elevationColormap` is the one clean globe setter. Mesh-desc colours must be engine `Color` instances.

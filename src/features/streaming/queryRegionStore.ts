@@ -8,14 +8,14 @@
  * them on every camera stop for a readout only one small overlay shows.
  *
  * Nothing computes here. `NavaraViewport`'s query-box effect subscribes to
- * `FcbStreamLayerHandle.onQueryRegion` — the region the plugin's `probe`/
+ * `StreamLayerHandle.onQueryRegion` — the region the plugin's `probe`/
  * `fetch` messages actually carried — and mirrors it in. That is also why this
  * store is only ever POPULATED while the Advanced Settings toggle is on: with
  * the diagnostic off the effect does not subscribe at all, so neither the
  * outline nor this store costs anything.
  */
 import { create } from "zustand";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 
 export interface QueryRegionStoreState {
   /** Keyed by layer id. Empty whenever the diagnostic is off. */

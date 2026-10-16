@@ -23,7 +23,7 @@
 
 import { create } from "zustand";
 import type { CityModel } from "../domain/citymodel/types";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import {
   classifyColumnType,
   LOD_MARKER_PREFIX,

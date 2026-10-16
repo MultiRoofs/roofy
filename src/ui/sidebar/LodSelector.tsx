@@ -22,7 +22,7 @@ import {
   cellSize,
   lodForCellSize,
   type LodSelection,
-} from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
 
 interface LodSelectorProps {
   readonly layerId: string;

@@ -52,34 +52,34 @@ import { openCityParquetStream } from "../../packages/cityjson-navara-plugins/pa
 import {
   createCityParquetSourceAdapter,
   MAX_FETCH_READ_BYTES,
-} from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/cityParquetSourceAdapter";
-import { installStreamWorker } from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/streamWorkerCore";
-import { CellCache } from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/cellCache";
+} from "../../packages/cityjson-navara-plugins/packages/navara-cityparquet/src/streamAdapter";
+import { installStreamWorker } from "../../packages/cityjson-navara-plugins/packages/navara-stream/src/streamWorkerCore";
+import { CellCache } from "../../packages/cityjson-navara-plugins/packages/navara-stream/src/cellCache";
 import {
   cellStatsFromGeometry,
   commitNormal,
   lodToWireLabel,
   type FetchedCell,
-} from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/commitPlanner";
+} from "../../packages/cityjson-navara-plugins/packages/navara-stream/src/commitPlanner";
 import {
   chooseLevel,
   lodForCellSize,
-} from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/levelPolicy";
+} from "../../packages/cityjson-navara-plugins/packages/navara-stream/src/levelPolicy";
 import {
   cellSize,
   keysCovering,
   makeGrid,
   type CellKey,
-} from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/tileGrid";
+} from "../../packages/cityjson-navara-plugins/packages/navara-stream/src/tileGrid";
 import {
   RESIDENT_BYTE_BUDGET,
   RESIDENT_TRIANGLE_BUDGET,
   VIEWPORT_FEATURE_BUDGET,
-} from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/constants";
+} from "../../packages/cityjson-navara-plugins/packages/navara-stream/src/constants";
 import type {
   WorkerRequest,
   WorkerResponse,
-} from "../../packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/workerProtocol";
+} from "../../packages/cityjson-navara-plugins/packages/navara-stream/src/workerProtocol";
 import type { BBox3 } from "@cityjson/navara-core";
 
 const DEFAULT_FILE = "/data2/hideba/roofy-perf-data/yokohama-building.parquet";

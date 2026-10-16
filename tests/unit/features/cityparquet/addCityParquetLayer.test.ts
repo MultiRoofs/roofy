@@ -7,7 +7,7 @@
  * stream plugin at its seam; DuckDB's table registry at its module.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
+import type { StreamLayerHandle } from "@cityjson/navara-stream";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { addCityParquetLayerFromUrl } from "../../../../src/features/cityparquet/addCityParquetLayer";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
@@ -90,7 +90,7 @@ function fakePlugin(): StreamPlugin & {
       onTypes: () => () => {},
       onAppearanceThemes: () => () => {},
       onCommit: () => () => {},
-    } as unknown as FcbStreamLayerHandle),
+    } as unknown as StreamLayerHandle),
   );
   return { openStream, remove: vi.fn() };
 }
@@ -237,7 +237,7 @@ describe("addCityParquetLayerFromUrl — object families", () => {
         onTypes: () => () => {},
         onAppearanceThemes: () => () => {},
         onCommit: () => () => {},
-      } as unknown as FcbStreamLayerHandle),
+      } as unknown as StreamLayerHandle),
     );
     const layerId = await addCityParquetLayerFromUrl(
       URL_,

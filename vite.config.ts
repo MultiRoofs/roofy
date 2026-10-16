@@ -275,12 +275,20 @@ export default defineConfig({
         import.meta.dirname,
         "packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts",
       ),
-      // Same ordering rule as the CityJSON pair above: the subpath entry must
-      // precede the bare key. This one carries `FlatCityBufPlugin` and the
-      // `getPickRay` binding (Task C11).
-      "@cityjson/navara-flatcitybuf/plugin": resolve(
+      // Same ordering rule as the CityJSON pair above: the subpath entries
+      // must precede the bare key. `/plugin` carries `CityStreamPlugin` and
+      // the `getPickRay` binding; `/worker` is what a format's worker imports.
+      "@cityjson/navara-stream/plugin": resolve(
         import.meta.dirname,
-        "packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/plugin.ts",
+        "packages/cityjson-navara-plugins/packages/navara-stream/src/plugin.ts",
+      ),
+      "@cityjson/navara-stream/worker": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-stream/src/worker.ts",
+      ),
+      "@cityjson/navara-stream": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-stream/src/index.ts",
       ),
       "@cityjson/navara-flatcitybuf": resolve(
         import.meta.dirname,

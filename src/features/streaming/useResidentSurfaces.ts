@@ -23,8 +23,8 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   CellEnuFrameDescriptor,
-  FcbStreamLayerHandle,
-} from "@cityjson/navara-flatcitybuf";
+  StreamLayerHandle,
+} from "@cityjson/navara-stream";
 import type { Surface } from "../../domain/citymodel/types";
 import { useStreamStore } from "./streamStore";
 
@@ -58,7 +58,7 @@ export type SurfacesFetchState =
  * caller-side conditional hook call.
  */
 export function useObjectSurfaces(
-  handle: FcbStreamLayerHandle | null,
+  handle: StreamLayerHandle | null,
   objectId: string | null,
 ): SurfacesFetchState {
   const [state, setState] = useState<SurfacesFetchState>({ status: "empty" });
@@ -77,7 +77,7 @@ export function useObjectSurfaces(
   // keeps the surfaces on screen until the new ones land instead of flashing
   // "Loading" on every camera settle.
   const fetchedFor = useRef<{
-    handle: FcbStreamLayerHandle;
+    handle: StreamLayerHandle;
     objectId: string;
   } | null>(null);
 

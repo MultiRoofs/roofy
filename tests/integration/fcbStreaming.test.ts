@@ -43,12 +43,11 @@ import {
 import {
   bucketFeatures,
   cellBBox,
-  checkAdmission,
   chooseLevel,
-  headerModel,
   keysCovering,
   makeGrid,
-} from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
+import { checkAdmission, headerModel } from "@cityjson/navara-flatcitybuf";
 import {
   dequantizeAll,
   mapMetadata,

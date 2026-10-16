@@ -79,7 +79,7 @@ export interface RenderDebugState {
   readonly exposure: number;
   /**
    * Draw the ground-plane rectangle each FlatCityBuf layer's last commit
-   * actually queried (`FcbStreamLayerHandle.onQueryRegion`), plus a readout of
+   * actually queried (`StreamLayerHandle.onQueryRegion`), plus a readout of
    * its source-CRS numbers.
    *
    * Its engine counterpart is a `smoothLines` mesh per streaming layer, added

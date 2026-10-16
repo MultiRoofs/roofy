@@ -85,7 +85,7 @@ export interface Layer {
    * the only value a static layer ever has) is the behaviour every streaming
    * layer has always had: each camera settle re-queries the source for the
    * new viewport. `false` freezes the resident set where it is — the plugin
-   * handle stops committing entirely (`FcbStreamLayerHandle.setCameraSync`).
+   * handle stops committing entirely (`StreamLayerHandle.setCameraSync`).
    *
    * Per-layer rather than global, unlike the LoD choice above, because the
    * two answer different questions: "which detail level" is a property of how

@@ -183,7 +183,7 @@ const flatPluginInstance = {
 };
 /** Options the component constructed the plugin with (the viewport-size seam). */
 const flatPluginOptions: Array<Record<string, unknown>> = [];
-/** Set to make `new FlatCityBufPlugin()` throw — a build where streaming is
+/** Set to make `new CityStreamPlugin()` throw — a build where streaming is
  *  unavailable, which must still leave the static viewer fully usable. */
 let flatPluginThrows: string | null = null;
 const FlatCityBufPluginMock = vi.fn(function (
@@ -193,8 +193,8 @@ const FlatCityBufPluginMock = vi.fn(function (
   flatPluginOptions.push(options);
   return flatPluginInstance;
 });
-vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
-  FlatCityBufPlugin: FlatCityBufPluginMock,
+vi.mock("@cityjson/navara-stream/plugin", () => ({
+  CityStreamPlugin: FlatCityBufPluginMock,
 }));
 
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
@@ -211,7 +211,7 @@ import {
 import { getStreamPlugin } from "../../../src/features/streaming/streamPlugin";
 import { useQueryRegionStore } from "../../../src/features/streaming/queryRegionStore";
 import { useRenderDebugStore } from "../../../src/features/debug/renderDebugStore";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Selection } from "../../../src/domain/selection/types";
@@ -235,7 +235,7 @@ import { normalizeColorBy } from "../../../src/features/rules/colorBy";
 
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
-/** A query region as `FcbStreamLayerHandle.onQueryRegion` publishes it: the
+/** A query region as `StreamLayerHandle.onQueryRegion` publishes it: the
  *  source-CRS bbox its `fetch` carried, plus the same rectangle as a lng/lat
  *  ring for the renderer. Four corners is enough here — the densification is
  *  the plugin's `queryRegion.ts` and is tested there. */
@@ -319,7 +319,7 @@ function makeStaticHandle(id: string, triangles = 10) {
 }
 
 /**
- * An `FcbStreamLayerHandle` stub: the `InteractionHandle` members plus the
+ * An `StreamLayerHandle` stub: the `InteractionHandle` members plus the
  * event subscriptions and the per-layer setters the viewport drives.
  * `triangles` is mutable so a test can simulate cells arriving.
  */
@@ -383,7 +383,7 @@ function makeFakeStreamHandle(
     // Pushed by `syncStreamState` whenever the row's list differs from what the
     // memo last saw — including on a REPLACEMENT handle, whose memo is empty.
     setHiddenTypes: vi.fn(),
-    // The real `FcbStreamLayerHandle` gained this with the scene themes: the
+    // The real `StreamLayerHandle` gained this with the scene themes: the
     // viewport pushes the active theme's mesh style on the same beat as rules.
     setThemeStyle: vi.fn(),
     setAppearance: vi.fn(),
@@ -530,7 +530,7 @@ describe("NavaraViewport streaming wiring", () => {
     expect(pluginCallOrder).toBeLessThan(init.mock.invocationCallOrder[0]!);
   });
 
-  it("passes [DefaultPlugin, CityJSONPlugin, FlatCityBufPlugin] to the session, ALL before init", async () => {
+  it("passes [DefaultPlugin, CityJSONPlugin, CityStreamPlugin] to the session, ALL before init", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(init).toHaveBeenCalled());
     expect(addPlugin).toHaveBeenCalledTimes(3);
@@ -1320,7 +1320,7 @@ describe("NavaraViewport streaming wiring", () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(addedMeshes).toHaveLength(1));
 
-    // What `FcbStreamLayerHandle.delete()` announces.
+    // What `StreamLayerHandle.delete()` announces.
     streamHandle.emitQueryRegion(null);
 
     await waitFor(() => expect(addedMeshes[0]!.deleted).toBe(true));

@@ -64,7 +64,9 @@ import { ToneMappingMode } from "postprocessing";
 // The engine-bound subpaths, NOT the package barrels: the barrels must stay
 // importable from Node (Global Constraints -> NODE_IMPORT_SAFE = false).
 import { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
-import { FlatCityBufPlugin } from "@cityjson/navara-flatcitybuf/plugin";
+import { CityStreamPlugin } from "@cityjson/navara-stream/plugin";
+import { createFlatCityBufWorker } from "@cityjson/navara-flatcitybuf";
+import { createCityParquetWorker } from "@cityjson/navara-cityparquet";
 import { geodeticBoundsFromBBox } from "@cityjson/navara-cityjson";
 import type { BBox3 } from "@cityjson/navara-core";
 import type {
@@ -72,7 +74,7 @@ import type {
   GeodeticBounds,
   ScreenPoint,
 } from "@cityjson/navara-cityjson";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useSolarStore } from "../features/solar/solarStore";
@@ -246,7 +248,7 @@ export interface CitySceneHandle {
    * QUEUES instead of dereferencing a null ref, and an engine that never comes
    * up REJECTS this rather than leaving the caller hanging.
    */
-  getStreamingPlugin(): Promise<FlatCityBufPlugin>;
+  getStreamingPlugin(): Promise<CityStreamPlugin>;
 }
 
 export interface NavaraViewportProps {
@@ -1223,7 +1225,7 @@ export const NavaraViewport = memo(
       /** The live FlatCityBuf plugin, or null before the engine is up (and after
        *  it goes away). Read through the ref everywhere: it is the difference
        *  between a streaming-capable session and a static-only one. */
-      const flatPluginRef = useRef<FlatCityBufPlugin | null>(null);
+      const flatPluginRef = useRef<CityStreamPlugin | null>(null);
       /** Why there is no FlatCityBuf plugin, when there is none. Reported to a
        *  caller that asks for one rather than swallowed — see
        *  {@link getStreamingPlugin}. */
@@ -1539,9 +1541,15 @@ export const NavaraViewport = memo(
             // layers, so the failure is recorded and re-raised only at the point
             // someone actually asks to open a `.fcb` — unlike DefaultPlugin,
             // whose failure is the whole viewer's failure.
-            let flatPlugin: FlatCityBufPlugin | null = null;
+            let flatPlugin: CityStreamPlugin | null = null;
             try {
-              flatPlugin = new FlatCityBufPlugin({
+              flatPlugin = new CityStreamPlugin({
+                // One worker per stream format; `openStreamingLayer` names
+                // which a layer runs in.
+                workers: {
+                  flatcitybuf: createFlatCityBufWorker,
+                  cityparquet: createCityParquetWorker,
+                },
                 // The component owns the container element, so it — not the
                 // plugin — measures the viewport: `ThreeView` documents `canvas`
                 // as a CONSTRUCTOR option, not a readable property (Task C4).
@@ -2708,7 +2716,7 @@ export const NavaraViewport = memo(
           // handle is not registered yet is simply one whose open is still in
           // flight: `streamIds` brings this effect back when it lands.
           // No cast: this is where the compiler checks that the plugin's
-          // `FcbStreamLayerHandle` really does satisfy the app's structural
+          // `StreamLayerHandle` really does satisfy the app's structural
           // `StreamInteractionHandle` — the same discipline `gatherHandles` uses
           // for the static side.
           const entry = store.get(layer.id);
@@ -3771,7 +3779,7 @@ export const NavaraViewport = memo(
        * an error it can toast rather than a promise that never settles.
        */
       const getStreamingPlugin =
-        useCallback(async (): Promise<FlatCityBufPlugin> => {
+        useCallback(async (): Promise<CityStreamPlugin> => {
           const gate = readyRef.current!;
           try {
             await gate.promise;

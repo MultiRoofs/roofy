@@ -7,8 +7,8 @@ import { type AttributeOrders } from "../attributes/attributeOrder";
  *
  * Everything that used to happen here — spinning up a `WorkerClient`, the
  * `open` round trip, admission, the grid, the cell cache, the CRS gate, the
- * vertical datum — now happens inside `FlatCityBufPlugin.openStream`, which
- * resolves a `FcbStreamLayerHandle` that owns all of it. What is left is
+ * vertical datum — now happens inside `CityStreamPlugin.openStream`, which
+ * resolves a `StreamLayerHandle` that owns all of it. What is left is
  * exactly the app-side half:
  *
  *  1. Ask the plugin to open the source. It throws on a worker error, an
@@ -34,10 +34,10 @@ import { type AttributeOrders } from "../attributes/attributeOrder";
  */
 import type { AppearanceTheme } from "@cityjson/navara-core";
 import type {
-  FcbStreamLayerHandle,
+  StreamLayerHandle,
   StreamSource,
   WorkerFormat,
-} from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
 import { useStreamStore } from "./streamStore";
 import type { StreamPlugin } from "./streamPlugin";
 import { useLayerStore } from "../layers/layerStore";
@@ -53,7 +53,7 @@ import {
 } from "../rules/colorBy";
 
 export interface OpenStreamingLayerInput {
-  /** The live `FlatCityBufPlugin`, passed in rather than read from
+  /** The live `CityStreamPlugin`, passed in rather than read from
    *  `streamPlugin.ts` so this stays a pure function a test can drive with a
    *  fake. Call sites resolve it with `requireStreamPlugin()`. */
   readonly plugin: StreamPlugin;
@@ -207,7 +207,7 @@ export async function openStreamingLayer(
  */
 function registerStreamHandle(
   layerId: string,
-  handle: FcbStreamLayerHandle,
+  handle: StreamLayerHandle,
   options: { autoPicked: boolean; generation: number },
 ): void {
   let autoPicked = options.autoPicked;
@@ -338,7 +338,7 @@ export async function reopenStreamingLayer(
   useStreamStore.getState().unregister(layerId);
 
   const generation = nextHandleGeneration(layerId);
-  let handle: FcbStreamLayerHandle;
+  let handle: StreamLayerHandle;
   try {
     handle = await plugin.openStream({
       id: layerId,

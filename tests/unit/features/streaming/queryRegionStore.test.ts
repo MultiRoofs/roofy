@@ -3,7 +3,7 @@
  * fetch bbox.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import { useQueryRegionStore } from "../../../../src/features/streaming/queryRegionStore";
 
 function region(layerId: string, minX = 0): QueryRegion {

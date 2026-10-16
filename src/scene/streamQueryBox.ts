@@ -9,7 +9,7 @@
  * too little, or the wrong place — and it is invisible by construction. This
  * module draws it.
  *
- * The region is NOT recomputed here. `FcbStreamLayerHandle.onQueryRegion`
+ * The region is NOT recomputed here. `StreamLayerHandle.onQueryRegion`
  * publishes the very footprint its `probe`/`fetch` messages carried, so the
  * outline is the query by construction rather than by agreement (see
  * `queryRegion.ts` in the plugin).
@@ -20,7 +20,7 @@
  * points, how the numbers read — is unit-testable in jsdom without booting
  * Navara. `NavaraViewport` supplies the real `view`.
  */
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 
 /** The half of `MeshHandle` this module uses. */
 export interface QueryBoxMesh {

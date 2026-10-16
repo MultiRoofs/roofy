@@ -98,8 +98,8 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
 }));
 // Mocked for the same reason as the engine itself: the `/plugin` subpath
 // imports `@navaramap/three` at module scope (Task B1: NODE_IMPORT_SAFE=false).
-vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
-  FlatCityBufPlugin: vi.fn(function () {
+vi.mock("@cityjson/navara-stream/plugin", () => ({
+  CityStreamPlugin: vi.fn(function () {
     return {
       openStream: vi.fn(),
       remove: vi.fn(),

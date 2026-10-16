@@ -3,7 +3,7 @@
  *
  * A `.fcb` layer cannot exist before the 3D engine does: streaming has no
  * parse step that produces a `CityModel`, so the layer only appears once
- * `FlatCityBufPlugin.openStream` has resolved — and the plugin only exists
+ * `CityStreamPlugin.openStream` has resolved — and the plugin only exists
  * once a `NavaraViewport` is mounted, which used to require a layer. That
  * circle is what made a `.fcb` impossible as the FIRST layer.
  *

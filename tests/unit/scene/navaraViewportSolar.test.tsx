@@ -174,8 +174,8 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
   }),
 }));
 
-vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
-  FlatCityBufPlugin: vi.fn(function () {
+vi.mock("@cityjson/navara-stream/plugin", () => ({
+  CityStreamPlugin: vi.fn(function () {
     return {
       openStream: vi.fn(),
       remove: vi.fn(),

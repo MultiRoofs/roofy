@@ -32,7 +32,7 @@ import type {
   Selection,
   ThemeStyle,
 } from "@cityjson/navara-cityjson";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import type { Rule } from "../features/rules/types";
 import {
   effectiveRules,

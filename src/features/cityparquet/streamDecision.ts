@@ -30,7 +30,7 @@
  * Every size is read through an injected seam (`http`, `headLength`,
  * `footerSize`); the browser implementations are in `sourceSizes.ts`.
  */
-import type { StreamSource } from "@cityjson/navara-flatcitybuf";
+import type { StreamSource } from "@cityjson/navara-stream";
 import type { HttpClient } from "../../platform/types";
 import {
   cityParquetFileTargets,

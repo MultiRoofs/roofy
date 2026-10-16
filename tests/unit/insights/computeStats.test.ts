@@ -13,7 +13,7 @@ import {
   computeObjectStats,
   computeObjectStatsFromRecord,
 } from "../../../src/insights/computeStats";
-import { toObjectRecords } from "@cityjson/navara-flatcitybuf";
+import { toObjectRecords } from "@cityjson/navara-stream";
 
 const fixturePath = path.resolve(
   import.meta.dirname!,

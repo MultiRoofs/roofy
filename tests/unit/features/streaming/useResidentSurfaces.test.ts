@@ -3,9 +3,9 @@ import { act, renderHook, cleanup, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { useObjectSurfaces } from "../../../../src/features/streaming/useResidentSurfaces";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
-import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
+import type { StreamLayerHandle } from "@cityjson/navara-stream";
 import type { Surface } from "../../../../src/domain/citymodel/types";
-import type { ObjectSurfaces } from "@cityjson/navara-flatcitybuf";
+import type { ObjectSurfaces } from "@cityjson/navara-stream";
 
 afterEach(() => {
   cleanup();
@@ -15,9 +15,9 @@ afterEach(() => {
 /** Only `fetchSurfaces` is reached; the rest of the handle owns a worker and
  *  GPU meshes that jsdom cannot provide. */
 function fakeHandle(
-  fetchSurfaces: FcbStreamLayerHandle["fetchSurfaces"],
-): FcbStreamLayerHandle {
-  return { fetchSurfaces } as unknown as FcbStreamLayerHandle;
+  fetchSurfaces: StreamLayerHandle["fetchSurfaces"],
+): StreamLayerHandle {
+  return { fetchSurfaces } as unknown as StreamLayerHandle;
 }
 
 const SURFACES: Surface[] = [

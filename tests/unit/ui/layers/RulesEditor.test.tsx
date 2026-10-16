@@ -40,8 +40,8 @@ import {
 } from "../../../../src/features/rules/colorBy";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { evaluateRule } from "@cityjson/navara-core";
-import { CellCache } from "@cityjson/navara-flatcitybuf";
-import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
+import { CellCache } from "@cityjson/navara-stream";
+import { buildResidentModel } from "@cityjson/navara-stream";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 import { useRuleDraftStore } from "../../../../src/features/rules/ruleDraftStore";

@@ -8,7 +8,7 @@
 import type { CityModel, CityObject } from "../domain/citymodel/types";
 import { FLAT_THRESHOLD_DEG } from "../domain/roofMetrics/aggregate";
 import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import type { ModelStats, ObjectStats, OrientationCount } from "./types";
 
 // ---------------------------------------------------------------------------

@@ -16,8 +16,8 @@ import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { useLayerFileLoader } from "../../../../src/features/layers/useLayerFileLoader";
 import { setStreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
-import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
-import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
+import type { StreamLayerHandle } from "@cityjson/navara-stream";
+import type { StreamHeader } from "@cityjson/navara-stream";
 
 /** The CityParquet READER is faked, its ROUTING is not: `cityParquetUrl` and
  *  `cityParquetLayerNameFromUrl` stay real (that is what decides which arm a
@@ -153,7 +153,7 @@ const PARQUET_LOADED = {
   sourceCrs: null,
 };
 
-const HEADER: FcbHeaderModel = {
+const HEADER: StreamHeader = {
   version: "1.0",
   featuresCount: 10,
   extent: [0, 0, 0, 100, 100, 10],
@@ -163,14 +163,14 @@ const HEADER: FcbHeaderModel = {
 
 /** The engine is faked at the plugin seam, not at `Worker`: `openStream` now
  *  owns the worker, admission, the CRS gate and the vertical datum, and the
- *  real `FlatCityBufPlugin` cannot be imported under Node at all (Global
+ *  real `CityStreamPlugin` cannot be imported under Node at all (Global
  *  Constraints -> NODE_IMPORT_SAFE = false). */
 let openStream: ReturnType<typeof vi.fn>;
 
 /** The handle `openStream` resolves with. Named so a test that has to control
  *  WHEN the open resolves (the pending-row tests) can hand back the same shape
  *  the default fake would have. */
-function fakeHandle(id: string): FcbStreamLayerHandle {
+function fakeHandle(id: string): StreamLayerHandle {
   return {
     id,
     grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 3 },
@@ -187,7 +187,7 @@ function fakeHandle(id: string): FcbStreamLayerHandle {
     onAppearanceThemes: () => () => {},
     appearanceThemes: [],
     onCommit: () => () => undefined,
-  } as unknown as FcbStreamLayerHandle;
+  } as unknown as StreamLayerHandle;
 }
 
 function installPlugin(): void {
@@ -857,9 +857,9 @@ describe("useLayerFileLoader — pending and failed adds", () => {
   it("lists an in-flight add in `pending`, and drops it when the add settles", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
-    let release!: (handle: FcbStreamLayerHandle) => void;
+    let release!: (handle: StreamLayerHandle) => void;
     openStream.mockReturnValueOnce(
-      new Promise<FcbStreamLayerHandle>((resolve) => {
+      new Promise<StreamLayerHandle>((resolve) => {
         release = resolve;
       }),
     );
@@ -965,15 +965,15 @@ describe("useLayerFileLoader — several adds at once, and retrying", () => {
   it("stays loading until BOTH concurrent adds settle, one pending row each", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
-    let releaseFirst!: (handle: FcbStreamLayerHandle) => void;
-    let releaseSecond!: (handle: FcbStreamLayerHandle) => void;
+    let releaseFirst!: (handle: StreamLayerHandle) => void;
+    let releaseSecond!: (handle: StreamLayerHandle) => void;
     openStream.mockReturnValueOnce(
-      new Promise<FcbStreamLayerHandle>((resolve) => {
+      new Promise<StreamLayerHandle>((resolve) => {
         releaseFirst = resolve;
       }),
     );
     openStream.mockReturnValueOnce(
-      new Promise<FcbStreamLayerHandle>((resolve) => {
+      new Promise<StreamLayerHandle>((resolve) => {
         releaseSecond = resolve;
       }),
     );
