@@ -829,7 +829,9 @@ export function App({
   }, [persistenceStore]);
 
   useEffect(() => {
-    void refreshSnapshots();
+    refreshSnapshots().catch((error: unknown) =>
+      console.warn("Saved workspaces could not be listed.", error),
+    );
   }, [refreshSnapshots]);
 
   /**

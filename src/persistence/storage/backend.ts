@@ -11,7 +11,9 @@
  * parses anything.
  */
 export interface StorageBackend {
-  /** The value under `key`, or null when there is none. */
+  /** The value under `key`, or null when there is none. Every method rejects
+   *  with {@link StorageUnavailableError} when the store cannot be reached at
+   *  all, so "nothing stored" is never a guess. */
   get(namespace: string, key: string): Promise<string | null>;
   /** Store `value` under `key`, replacing any value already there. Rejects
    *  with {@link StorageQuotaError} when the backend is full. */
@@ -27,6 +29,15 @@ export class StorageQuotaError extends Error {
   constructor(options?: { cause?: unknown }) {
     super("The browser's storage is full.", options);
     this.name = "StorageQuotaError";
+  }
+}
+
+/** The backend cannot be reached: storage the browser blocks, a server that
+ *  does not answer. */
+export class StorageUnavailableError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super("The browser's storage is not available.", options);
+    this.name = "StorageUnavailableError";
   }
 }
 

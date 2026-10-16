@@ -1,12 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryBackend } from "../../../../src/persistence/storage/memoryBackend";
 import { LocalStorageBackend } from "../../../../src/persistence/storage/localStorageBackend";
 import {
   SNAPSHOT_NAMESPACE,
+  SNAPSHOT_SUMMARY_NAMESPACE,
   SnapshotRepository,
 } from "../../../../src/persistence/storage/snapshotRepository";
 import {
   StorageQuotaError,
+  StorageUnavailableError,
   type StorageBackend,
 } from "../../../../src/persistence/storage/backend";
 import { SNAPSHOT_VERSION } from "../../../../src/persistence/types";
@@ -96,6 +98,52 @@ describe("SnapshotRepository", () => {
     await store.remove(id);
     expect(await store.load(id)).toBeNull();
     expect(await backend.list(SNAPSHOT_NAMESPACE)).toEqual([]);
+    expect(await backend.list(SNAPSHOT_SUMMARY_NAMESPACE)).toEqual([]);
+  });
+
+  it("lists from the summaries, without reading a workspace document", async () => {
+    await store.save(makeSnapshot({ label: "A" }));
+    await store.save(makeSnapshot({ label: "B" }));
+    const get = vi.spyOn(backend, "get");
+    expect((await store.list()).map((s) => s.label)).toEqual(["A", "B"]);
+    expect(
+      get.mock.calls.filter(([namespace]) => namespace === SNAPSHOT_NAMESPACE),
+    ).toEqual([]);
+  });
+
+  it("lists a workspace saved without a summary, and writes the summary", async () => {
+    const old = makeSnapshot({ label: "Saved last week" });
+    await backend.put(SNAPSHOT_NAMESPACE, "old-id", JSON.stringify(old));
+    expect(await store.list()).toEqual([
+      { id: "old-id", savedAt: old.savedAt, label: "Saved last week" },
+    ]);
+    expect(await backend.list(SNAPSHOT_SUMMARY_NAMESPACE)).toEqual(["old-id"]);
+  });
+
+  it("leaves out a summary whose workspace is gone", async () => {
+    const id = await store.save(makeSnapshot());
+    await backend.delete(SNAPSHOT_NAMESPACE, id);
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("says storage is unavailable, not that the workspace is gone", async () => {
+    const blocked: StorageBackend = {
+      get: async () => {
+        throw new StorageUnavailableError();
+      },
+      list: async () => {
+        throw new StorageUnavailableError();
+      },
+      delete: async () => {
+        throw new StorageUnavailableError();
+      },
+      put: async () => {
+        throw new StorageUnavailableError();
+      },
+    };
+    await expect(
+      new SnapshotRepository(blocked).update("id", makeSnapshot()),
+    ).rejects.toBeInstanceOf(StorageUnavailableError);
   });
 
   it("loads null for an unknown id", async () => {

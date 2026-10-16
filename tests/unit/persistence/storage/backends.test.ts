@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryBackend } from "../../../../src/persistence/storage/memoryBackend";
 import { LocalStorageBackend } from "../../../../src/persistence/storage/localStorageBackend";
-import { StorageQuotaError } from "../../../../src/persistence/storage/backend";
+import {
+  StorageQuotaError,
+  StorageUnavailableError,
+} from "../../../../src/persistence/storage/backend";
 import { storageBackendContract } from "./backendContract";
 
 storageBackendContract("MemoryBackend", () => new MemoryBackend());
@@ -24,14 +27,18 @@ describe("LocalStorageBackend", () => {
     expect(await new LocalStorageBackend().list("snapshot")).toEqual([]);
   });
 
-  it("reads nothing and lists nothing when the browser blocks storage", async () => {
+  it("rejects every call with StorageUnavailableError when the browser blocks storage", async () => {
     const blocked = new LocalStorageBackend(() => {
       throw new DOMException("denied", "SecurityError");
     });
-    expect(await blocked.get("ns", "k")).toBeNull();
-    expect(await blocked.list("ns")).toEqual([]);
-    await expect(blocked.delete("ns", "k")).resolves.toBeUndefined();
-    await expect(blocked.put("ns", "k", "v")).rejects.toThrow();
+    for (const call of [
+      blocked.get("ns", "k"),
+      blocked.list("ns"),
+      blocked.delete("ns", "k"),
+      blocked.put("ns", "k", "v"),
+    ]) {
+      await expect(call).rejects.toBeInstanceOf(StorageUnavailableError);
+    }
   });
 
   it("reports a full store as StorageQuotaError", async () => {

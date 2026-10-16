@@ -169,11 +169,24 @@ export default defineConfig({
               message: "Use a StorageBackend from src/persistence/storage.",
             },
           ],
+          "no-restricted-properties": [
+            "error",
+            ...["window", "globalThis", "self"].flatMap((object) =>
+              ["localStorage", "sessionStorage"].map((property) => ({
+                object,
+                property,
+                message: "Use a StorageBackend from src/persistence/storage.",
+              })),
+            ),
+          ],
         },
       },
       {
         files: ["src/persistence/storage/localStorageBackend.ts"],
-        rules: { "no-restricted-globals": "off" },
+        rules: {
+          "no-restricted-globals": "off",
+          "no-restricted-properties": "off",
+        },
       },
     ],
     options: {

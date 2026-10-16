@@ -2,12 +2,15 @@
  * Saved workspaces over any {@link StorageBackend}: the app's
  * `ProjectStateStore`.
  *
- * One document per workspace, under its id in the `snapshot` namespace, and no
- * separate index: the list is read from the documents themselves, so a list
- * and the documents it names cannot disagree, and a backend needs nothing but
- * get, put, delete and list. A backend for which reading every document to
- * list them is too slow (a remote one with many saves) can implement
- * `ProjectStateStore` itself instead.
+ * One document per workspace, under its id in the `snapshot` namespace, and
+ * beside it a small summary (its label and time) under the same id in
+ * `snapshot-summary`, so listing workspaces reads the summaries and never a
+ * whole document: on a remote backend a document is the full scene.
+ *
+ * The documents are the truth. A summary is written after its document and
+ * deleted before it, a summary whose document is gone is left out of the
+ * list, and a document without a summary (saved before summaries existed, or
+ * a write cut short) is listed from the document, which writes its summary.
  */
 import { StorageQuotaError, type StorageBackend } from "./backend";
 import { jsonSnapshotCodec, type SnapshotCodec } from "./snapshotCodec";
@@ -18,6 +21,25 @@ import type {
 } from "../types";
 
 export const SNAPSHOT_NAMESPACE = "snapshot";
+export const SNAPSHOT_SUMMARY_NAMESPACE = "snapshot-summary";
+
+type Summary = Omit<SnapshotSummary, "id">;
+
+function encodeSummary(snapshot: ProjectSnapshot): string {
+  const summary: Summary = { savedAt: snapshot.savedAt, label: snapshot.label };
+  return JSON.stringify(summary);
+}
+
+function decodeSummary(raw: string): Summary | null {
+  try {
+    const value = JSON.parse(raw) as Partial<Summary> | null;
+    return typeof value?.savedAt === "string" && typeof value.label === "string"
+      ? { savedAt: value.savedAt, label: value.label }
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface SnapshotRepositoryOptions {
   readonly codec?: SnapshotCodec;
@@ -57,22 +79,35 @@ export class SnapshotRepository implements ProjectStateStore {
 
   /** Oldest first. A stored value that is not a workspace is left out. */
   async list(): Promise<SnapshotSummary[]> {
-    const ids = await this.backend.list(SNAPSHOT_NAMESPACE);
-    const summaries: SnapshotSummary[] = [];
-    for (const id of ids) {
-      const snapshot = await this.load(id);
-      if (snapshot) {
-        summaries.push({
-          id,
-          savedAt: snapshot.savedAt,
-          label: snapshot.label,
-        });
-      }
-    }
-    return summaries.sort((a, b) => a.savedAt.localeCompare(b.savedAt));
+    const [ids, summarised] = await Promise.all([
+      this.backend.list(SNAPSHOT_NAMESPACE),
+      this.backend.list(SNAPSHOT_SUMMARY_NAMESPACE),
+    ]);
+    const withSummary = new Set(summarised);
+    const summaries = await Promise.all(
+      ids.map(async (id): Promise<SnapshotSummary | null> => {
+        if (withSummary.has(id)) {
+          const raw = await this.backend.get(SNAPSHOT_SUMMARY_NAMESPACE, id);
+          const summary = raw === null ? null : decodeSummary(raw);
+          if (summary) return { id, ...summary };
+        }
+        const snapshot = await this.load(id);
+        if (!snapshot) return null;
+        await this.backend
+          .put(SNAPSHOT_SUMMARY_NAMESPACE, id, encodeSummary(snapshot))
+          .catch(() => {
+            // Listed from the document this time, and the next time too.
+          });
+        return { id, savedAt: snapshot.savedAt, label: snapshot.label };
+      }),
+    );
+    return summaries
+      .filter((s): s is SnapshotSummary => s !== null)
+      .sort((a, b) => a.savedAt.localeCompare(b.savedAt));
   }
 
   async remove(id: string): Promise<void> {
+    await this.backend.delete(SNAPSHOT_SUMMARY_NAMESPACE, id);
     await this.backend.delete(SNAPSHOT_NAMESPACE, id);
   }
 
@@ -82,6 +117,11 @@ export class SnapshotRepository implements ProjectStateStore {
         SNAPSHOT_NAMESPACE,
         id,
         this.codec.encode(snapshot),
+      );
+      await this.backend.put(
+        SNAPSHOT_SUMMARY_NAMESPACE,
+        id,
+        encodeSummary(snapshot),
       );
     } catch (error) {
       if (error instanceof StorageQuotaError) {

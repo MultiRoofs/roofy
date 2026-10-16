@@ -21,12 +21,18 @@ function LaunchReady() {
 
 // The stores read their preferences synchronously when their modules load,
 // so the preferences are read from storage before the app is imported. A
-// storage that cannot be read leaves the defaults.
-await appPreferences
-  .hydrate()
-  .catch((error: unknown) =>
-    console.warn("Preferences could not be read.", error),
-  );
+// storage that cannot be read, or does not answer within a moment (a remote
+// backend on a slow network), leaves the defaults for this session rather
+// than hold back the first paint.
+const PREFERENCE_WAIT_MS = 1500;
+await Promise.race([
+  appPreferences
+    .hydrate()
+    .catch((error: unknown) =>
+      console.warn("Preferences could not be read.", error),
+    ),
+  new Promise((resolve) => setTimeout(resolve, PREFERENCE_WAIT_MS)),
+]);
 const { App } = await import("./app/App");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
