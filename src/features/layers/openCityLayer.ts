@@ -28,6 +28,7 @@ import {
   SNIFF_BYTES,
   cityFormat,
   detectFormat,
+  formatFromName,
 } from "../../domain/citymodel/formats";
 import type { CityModel } from "../../domain/citymodel/types";
 import {
@@ -136,6 +137,33 @@ async function readHead(file: Blob): Promise<Uint8Array | null> {
   }
 }
 
+/**
+ * The first bytes of a URL, by one ranged request — for a URL whose name says
+ * nothing (`https://host/api/asset/42`), so a streamed format is recognised
+ * BEFORE anything downloads it whole. `null` when the server cannot answer a
+ * range (its body is cancelled, not read) or the request fails: the whole read
+ * then decides, as before. A named URL is not probed: its name routes it, and
+ * the whole read's own sniff still re-routes a name that lied.
+ */
+async function readUrlHead(url: string): Promise<Uint8Array | null> {
+  if (!/^https?:\/\//i.test(url)) return null;
+  try {
+    const response = await fetch(url, {
+      headers: { Range: `bytes=0-${SNIFF_BYTES - 1}` },
+    });
+    if (response.status !== 206) {
+      await response.body?.cancel();
+      return null;
+    }
+    return new Uint8Array(await response.arrayBuffer()).subarray(
+      0,
+      SNIFF_BYTES,
+    );
+  } catch {
+    return null;
+  }
+}
+
 function sourceName(source: CitySource, encoding: CityModelEncoding): string {
   switch (source.kind) {
     case "files":
@@ -179,8 +207,15 @@ async function decideEncoding(
         head: encoding === undefined ? await readHead(source.file) : null,
         override: encoding,
       });
-    case "url":
-      return detectFormat({ name: source.url, override: encoding });
+    case "url": {
+      const probe =
+        encoding === undefined && formatFromName(source.url) === null;
+      return detectFormat({
+        name: source.url,
+        head: probe ? await readUrlHead(source.url) : null,
+        override: encoding,
+      });
+    }
   }
 }
 

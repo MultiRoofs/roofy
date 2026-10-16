@@ -115,6 +115,19 @@ describe("sniffFormat", () => {
     expect(sniffFormat(text('\n {"type":"CityJSON"}'))).toBe("cityjson");
   });
 
+  it("does not call a hand-formatted CityJSON document a sequence", () => {
+    // The second line opens an object, but the first line is not a whole one.
+    const allman = text(
+      '{"type":"CityJSON","version":"2.0","transform":\n{"scale":[1,1,1]}}',
+    );
+    expect(sniffFormat(allman)).toBe("cityjson");
+    expect(detectFormat({ name: "a.city.json", head: allman })).toBe(
+      "cityjson",
+    );
+    const braceAlone = text('{\n  "type": "CityJSON",\n  "x": {\n');
+    expect(sniffFormat(braceAlone)).toBe("cityjson");
+  });
+
   it("cannot see through gzip, and says so", () => {
     expect(sniffFormat(GZIP)).toBeNull();
     expect(sniffFormat(new Uint8Array())).toBeNull();

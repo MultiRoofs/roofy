@@ -64,8 +64,9 @@ import {
 
 interface AddLayerDialogProps {
   readonly onClose: () => void;
-  /** The file, and what the user confirmed it is — the loader's encoding
-   *  override. */
+  /** The file, and the format the user picked by hand — the loader's
+   *  encoding override. Absent when the user kept the dialog's guess, so the
+   *  loader detects from the bytes itself. */
   readonly onAddFile: (file: File, override?: DetectedSource) => void;
   /** Several files as ONE layer — a CityParquet package folder, or a
    *  multi-file drop. Closes the dialog exactly like `onAddFile`. */
@@ -211,6 +212,10 @@ export function AddLayerDialog({
   const addStaged = useCallback(() => {
     if (staged === null || staged.detected.kind === "unknown") return;
     const { files, detected } = staged;
+    // Only a hand-made correction is the user's word. The dialog's own guess
+    // (from the name, or the bytes it read) goes out as no override, so the
+    // loader detects again and the bytes keep the last say.
+    const override = staged.corrected === true ? detected : undefined;
     if (detected.kind === "geo") {
       // Unreachable through the select (see FILE_SOURCE_OVERRIDES), and stated
       // anyway: reading a tile template out of a local file is not a thing
@@ -228,8 +233,8 @@ export function AddLayerDialog({
       });
       return;
     }
-    if (files.length > 1) onAddFiles([...files], detected);
-    else onAddFile(files[0]!, detected);
+    if (files.length > 1) onAddFiles([...files], override);
+    else onAddFile(files[0]!, override);
     onClose();
   }, [onAddFile, onAddFiles, onClose, staged]);
 
@@ -242,7 +247,12 @@ export function AddLayerDialog({
    * is added here and reports its refusal in place.
    */
   const submitUrl = useCallback(
-    (url: string, detected: DetectedSource, name?: string): string | null => {
+    (
+      url: string,
+      detected: DetectedSource,
+      name: string | undefined,
+      corrected: boolean,
+    ): string | null => {
       if (detected.kind === "unknown") return null;
       if (detected.kind === "geo") {
         const result = addGeoSourceFromUrl(url, detected.geoKind, name);
@@ -250,7 +260,7 @@ export function AddLayerDialog({
         onClose();
         return null;
       }
-      void onAddUrl(url, detected);
+      void onAddUrl(url, corrected ? detected : undefined);
       onClose();
       return null;
     },

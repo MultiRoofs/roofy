@@ -284,11 +284,11 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     render(<App persistenceStore={emptyStore} />);
     loadFromUrlBox(JSON_URL);
 
-    // Three arguments: the URL, the default http client, and the encoding the
-    // landing page's detection resolved to — a `.city.json` reaching the
-    // reader as CityJSON rather than being re-derived there.
+    // Three arguments: the URL, the default http client, and no override. The
+    // user never corrected the dialog's guess, so the reader decides from the
+    // name and the bytes rather than being handed that guess.
     await waitFor(() =>
-      expect(loadFromUrl).toHaveBeenCalledWith(JSON_URL, undefined, "cityjson"),
+      expect(loadFromUrl).toHaveBeenCalledWith(JSON_URL, undefined, undefined),
     );
     // Still parsing: a CityJSON layer mounts the viewport as a CONSEQUENCE of
     // existing, so there is nothing to boot early for.

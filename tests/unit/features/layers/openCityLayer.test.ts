@@ -200,6 +200,45 @@ describe("openCityLayer — URLs", () => {
     });
   });
 
+  it("reads the first bytes of a URL whose name says nothing, before any whole download", async () => {
+    const fetchSpy = vi.fn(async (_url: string, init?: RequestInit) => {
+      const range = new Headers(init?.headers).get("Range");
+      return range === null
+        ? new Response(FCB as BodyInit, { status: 200 })
+        : new Response(FCB.subarray(0, 64) as BodyInit, { status: 206 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    await openCityLayer(
+      { source: { kind: "url", url: "https://x/api/asset/42" } },
+      deps,
+    );
+    expect(calls.map((c) => c.opener)).toEqual(["stream"]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetchSpy.mock.calls[0]![1]?.headers).get("Range")).toBe(
+      "bytes=0-65535",
+    );
+  });
+
+  it("falls back to a whole read when the server ignores the range", async () => {
+    const cancel = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (new Headers(init?.headers).get("Range") === null) {
+          return new Response(CITYJSON as BodyInit, { status: 200 });
+        }
+        const body = new ReadableStream({ cancel });
+        return new Response(body, { status: 200 });
+      }),
+    );
+    await openCityLayer(
+      { source: { kind: "url", url: "https://x/api/asset/7" } },
+      deps,
+    );
+    expect(cancel).toHaveBeenCalled();
+    expect(calls[0]!.opener).toBe("static");
+  });
+
   it("opens a saved format as saved, without guessing from the name", async () => {
     await openCityLayer(
       {

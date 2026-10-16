@@ -107,17 +107,37 @@ function firstSignificant(head: Uint8Array): number {
 }
 
 const OPEN_BRACE = 0x7b;
+const CLOSE_BRACE = 0x7d;
 const OPEN_ANGLE = 0x3c;
 const NEWLINE = 0x0a;
 
+/** The last byte before `end` that is not JSON whitespace, or -1. */
+function lastSignificant(head: Uint8Array, end: number): number {
+  let i = end - 1;
+  while (
+    i >= 0 &&
+    (head[i] === 0x20 ||
+      head[i] === 0x09 ||
+      head[i] === 0x0a ||
+      head[i] === 0x0d)
+  ) {
+    i -= 1;
+  }
+  return i;
+}
+
 /**
- * Is this the head of a JSON text sequence: a line, a newline, and a second
- * line that opens another object? A CityJSON document never has `{` as the
- * first significant byte of its second line; a CityJSONSeq always does.
+ * Is this the head of a JSON text sequence: a first line that is a whole
+ * object, a newline, and a second line that opens another one? Both halves
+ * are needed: a hand-formatted CityJSON document can open an object on its
+ * second line (`"transform":` then `{` below it), but its first line never
+ * closes one.
  */
 function looksLikeSequence(head: Uint8Array, start: number): boolean {
   const newline = head.indexOf(NEWLINE, start);
   if (newline === -1) return false;
+  const close = lastSignificant(head, newline);
+  if (close < start || head[close] !== CLOSE_BRACE) return false;
   const next = firstSignificant(head.subarray(newline));
   const at = newline + next;
   return at < head.length && head[at] === OPEN_BRACE;

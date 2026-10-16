@@ -460,6 +460,51 @@ describe("App restore against CitySceneHandle.ready", () => {
     await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
   });
 
+  it("re-links a DIFFERENT file by what it is, not by the saved format", async () => {
+    // The saved format described the old file. A re-link to a file of another
+    // name (a converted tile, a renamed download) is detected afresh.
+    const snapshot = snapshotWithUrlLayer();
+    const localSnapshot: ProjectSnapshot = {
+      ...snapshot,
+      layers: snapshot.layers!.map((layer) => ({
+        ...layer,
+        modelRef: {
+          type: "file",
+          fileName: "delft.city.jsonl",
+          encoding: "cityjsonseq",
+        },
+      })),
+    };
+    render(<App persistenceStore={storeWith(localSnapshot)} />);
+    await clickRestore();
+    const input = await screen.findByTestId("relink-input");
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(
+            [
+              JSON.stringify({
+                type: "CityJSON",
+                version: "2.0",
+                CityObjects: {},
+                vertices: [],
+                metadata: { referenceSystem: "EPSG:7415" },
+              }),
+            ],
+            "delft.city.json",
+          ),
+        ],
+      },
+    });
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers[0]?.modelRef).toEqual({
+        type: "file",
+        fileName: "delft.city.json",
+        encoding: "cityjson",
+      }),
+    );
+  });
+
   it("gives a file-backed layer a ROW in the viewer, not a banner over it", async () => {
     // 12.2: inside the shell a layer waiting for its file is still one of the
     // workspace's layers, so it takes a row in the list beside the ones that

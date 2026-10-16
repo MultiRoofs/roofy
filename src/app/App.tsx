@@ -1677,7 +1677,11 @@ export function App({
             file,
             entry
               ? {
-                  encoding: entry.encoding,
+                  // The saved format describes the saved FILE: a file of
+                  // another name is detected afresh, so a converted or
+                  // renamed tile opens as what it is.
+                  encoding:
+                    file.name === entry.fileName ? entry.encoding : undefined,
                   rules: entry.rules,
                   colorBy: entry.colorBy,
                   singleColor: entry.singleColor,

@@ -211,9 +211,9 @@ describe("AddLayerDialog — the File tab", () => {
 
     fireEvent.click(addLayerButton());
 
-    expect(onAddFile.mock.calls).toEqual([
-      [file, { kind: "city", encoding: "cityjson", label: "CityJSON" }],
-    ]);
+    // The dialog's own guess is not the user's word: the loader detects
+    // again, from the bytes, so nothing is handed over as an override.
+    expect(onAddFile.mock.calls).toEqual([[file, undefined]]);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -248,11 +248,19 @@ describe("AddLayerDialog — the File tab", () => {
     expect(detectionLine()).toContain("CityJSON");
     await waitFor(() => expect(detectionLine()).toContain("FlatCityBuf"));
 
+    // Shown, not imposed: the loader reads the same bytes itself.
     fireEvent.click(addLayerButton());
-    expect(onAddFile.mock.calls[0]![1]).toMatchObject({
-      kind: "city",
-      encoding: "flatcitybuf",
-    });
+    expect(onAddFile.mock.calls[0]![1]).toBeUndefined();
+  });
+
+  it("adds before the bytes are read without imposing the name's guess", () => {
+    const onAddFile = vi.fn();
+    openDialog({ onAddFile });
+
+    drop(new File([new Uint8Array([0x66, 0x63, 0x62, 0x01])], "download.json"));
+    fireEvent.click(addLayerButton());
+
+    expect(onAddFile.mock.calls[0]![1]).toBeUndefined();
   });
 
   it("keeps the user's correction when the bytes arrive after it", async () => {
@@ -407,11 +415,10 @@ describe("AddLayerDialog — the URL tab", () => {
     expect(detectionLine()).toContain("CityJSON");
     fireEvent.click(addLayerButton());
 
+    // Detected from the name only, so the loader stays free to read the
+    // bytes: no override.
     expect(onAddUrl.mock.calls).toEqual([
-      [
-        "https://example.com/model.city.json",
-        { kind: "city", encoding: "cityjson", label: "CityJSON" },
-      ],
+      ["https://example.com/model.city.json", undefined],
     ]);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -461,6 +468,24 @@ describe("AddLayerDialog — the URL tab", () => {
     expect(onAddUrl.mock.calls[0]![1]).toMatchObject({
       encoding: "flatcitybuf",
     });
+  });
+
+  it("drops a correction once the URL it was made for changes", () => {
+    const onAddUrl = vi.fn(
+      async (_url: string, _override?: DetectedSource) =>
+        ({ ok: true }) as const,
+    );
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://example.com/model.json");
+    fireEvent.change(changeSelect(), { target: { value: "city:flatcitybuf" } });
+    typeUrl("https://example.com/other.json");
+    fireEvent.click(addLayerButton());
+
+    expect(onAddUrl.mock.calls[0]).toEqual([
+      "https://example.com/other.json",
+      undefined,
+    ]);
   });
 
   it("re-detects when the URL itself changes", () => {
