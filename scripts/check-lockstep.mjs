@@ -14,6 +14,9 @@ import {
   sha256,
 } from "./duckdb-ext.mjs";
 
+/** Cloudflare's limit on one static asset: a bigger extension cannot deploy. */
+export const MAX_ASSET_BYTES = 25 * 1024 * 1024;
+
 /** Every disagreement, as a sentence; empty when the three agree. */
 export async function lockstepErrors() {
   const require = createRequire(path.join(ROOT, "package.json"));
@@ -74,6 +77,10 @@ export async function lockstepErrors() {
     }
     if (sha256(bytes) !== ext.sha256)
       errors.push(`${name}: sha256 differs from the manifest`);
+    if (bytes.length > MAX_ASSET_BYTES)
+      errors.push(
+        `${name}: ${bytes.length} bytes is over the ${MAX_ASSET_BYTES}-byte deploy limit for one file`,
+      );
     const fields = footerFields(bytes);
     for (const want of [manifest.duckdb, manifest.platform]) {
       if (!fields.includes(want))

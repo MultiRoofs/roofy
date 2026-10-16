@@ -22,6 +22,11 @@
       "source": "https://extensions.duckdb.org/v1.5.5/wasm_eh/parquet.duckdb_extension.wasm",
       "sha256": "31b294da2ef96f61e87246a0b1aa7580d20ad7ae37aa1e912fa0c7488192c5c6",
       "footer": ["CPP", "v1.5.5", "v1.5.5", "wasm_eh", "4"]
+    },
+    "json": {
+      "source": "https://extensions.duckdb.org/v1.5.5/wasm_eh/json.duckdb_extension.wasm",
+      "sha256": "74813e84d41c7b33402f24f466e1793ad48bd00259d089c516af85ce2ecc8223",
+      "footer": ["CPP", "v1.5.5", "v1.5.5", "wasm_eh", "4"]
     }
   }
 }

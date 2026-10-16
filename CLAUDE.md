@@ -13,7 +13,7 @@ Keep this file short: commands, workflow, hard rules. Decision records and engin
 - **CityJSON plugins**: `@cityjson/navara-{core,cityjson,flatcitybuf,cityparquet}` — git submodule at `packages/cityjson-navara-plugins` (pnpm workspace, public repo), consumed via `file:` deps plus a Vite alias + tsconfig `paths` into the packages' `src/` (editing a plugin hot-reloads the app).
 - **Geospatial**: proj4, WGS84 ENU frames + EGM2008 geoid sampling from `@cityjson/navara-core`.
 - **State**: Zustand stores under `src/features/*`.
-- **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with `cityjson`, `three_d`, `spatial` and `parquet` vendored under `public/duckdb-ext/` (never DuckDB's CDN at runtime; `npm run vendor:ext` refreshes them, `npm run check:lockstep` checks them against the duckdb-wasm pin, and both move in one commit); `spatial` and `three_d` load on demand via `ensureExtension`. See `docs/architecture-notes.md` for the per-layer table design and the verified engine facts.
+- **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with `cityjson`, `three_d`, `spatial`, `parquet` and `json` vendored under `public/duckdb-ext/` (never DuckDB's CDN at runtime; `npm run vendor:ext` refreshes them, `npm run check:lockstep` checks them against the duckdb-wasm pin, and both move in one commit); `spatial` and `three_d` load on demand via `ensureExtension`. See `docs/architecture-notes.md` for the per-layer table design and the verified engine facts.
 - **Catalog mini-map**: `maplibre-gl@^6`, driven imperatively, worker pinned by hand in `StacItemMap.tsx`.
 - **Testing**: Vitest + @testing-library/react.
 

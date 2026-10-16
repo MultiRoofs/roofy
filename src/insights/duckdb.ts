@@ -328,7 +328,8 @@ export function formatDuckDBError(error: unknown): string {
  *  `<base>/duckdb-ext/<duckdb version>/<platform>/`. A CDN path carries no
  *  extension version, so a new upstream release would change behaviour
  *  without a deploy. Only `wasm_eh` is vendored: a browser without wasm
- *  exceptions gets the mvp bundle and no extensions, and the status says so. */
+ *  exceptions (none current) gets the mvp bundle, whose extension downloads
+ *  fail, and the status shows them as failed. */
 const EXTENSION_REPOSITORY = new URL(
   `${import.meta.env.BASE_URL}duckdb-ext`,
   location.href,
