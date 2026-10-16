@@ -152,6 +152,29 @@ export default defineConfig({
           browser: true,
         },
       },
+      {
+        // Where data is kept is the storage layer's business: everything else
+        // goes through a StorageBackend (src/persistence/storage), so the
+        // backend can change without touching the features.
+        files: ["src/**/*.{ts,tsx}"],
+        rules: {
+          "no-restricted-globals": [
+            "error",
+            {
+              name: "localStorage",
+              message: "Use a StorageBackend from src/persistence/storage.",
+            },
+            {
+              name: "sessionStorage",
+              message: "Use a StorageBackend from src/persistence/storage.",
+            },
+          ],
+        },
+      },
+      {
+        files: ["src/persistence/storage/localStorageBackend.ts"],
+        rules: { "no-restricted-globals": "off" },
+      },
     ],
     options: {
       typeAware: true,

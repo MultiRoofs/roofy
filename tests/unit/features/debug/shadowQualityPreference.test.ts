@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const KEY = "roofy.shadowQuality";
+const KEY = "shadow-quality";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -8,52 +8,50 @@ afterEach(() => {
   vi.resetModules();
 });
 
-async function freshStore() {
+/** A fresh module graph, with `stored` already in the preference cache. */
+async function freshStore(stored?: string) {
   vi.resetModules();
-  return await import("../../../../src/features/debug/renderDebugStore");
+  const storage =
+    await import("../../../../src/persistence/storage/appStorage");
+  if (stored !== undefined) storage.appPreferences.set(KEY, stored);
+  const store = await import("../../../../src/features/debug/renderDebugStore");
+  return { ...storage, ...store };
 }
 
 describe("shadow quality preference", () => {
   it.each(["low", "high"] as const)(
-    "initializes from valid %s storage",
+    "initializes from a stored %s",
     async (quality) => {
-      localStorage.setItem(KEY, quality);
-      const { useRenderDebugStore } = await freshStore();
+      const { useRenderDebugStore } = await freshStore(quality);
       expect(useRenderDebugStore.getState().shadowQuality).toBe(quality);
     },
   );
 
-  it.each([null, "invalid"])(
-    "defaults medium for %s storage",
-    async (value) => {
-      if (value !== null) localStorage.setItem(KEY, value);
-      const { useRenderDebugStore } = await freshStore();
-      expect(useRenderDebugStore.getState().shadowQuality).toBe("medium");
-    },
-  );
-
-  it("defaults medium when localStorage.getItem throws", async () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    const { useRenderDebugStore } = await freshStore();
+  it.each([undefined, "invalid"])("defaults medium for %s", async (value) => {
+    const { useRenderDebugStore } = await freshStore(value);
     expect(useRenderDebugStore.getState().shadowQuality).toBe("medium");
   });
 
-  it("persists setShadowQuality and reset", async () => {
-    const { useRenderDebugStore } = await freshStore();
+  it("persists setShadowQuality and reset through the storage backend", async () => {
+    const { useRenderDebugStore, appPreferences, appStorageBackend } =
+      await freshStore();
     useRenderDebugStore.getState().setShadowQuality("low");
-    expect(localStorage.getItem(KEY)).toBe("low");
+    expect(appPreferences.get(KEY)).toBe("low");
+    await vi.waitFor(async () =>
+      expect(await appStorageBackend.get("preference", KEY)).toBe("low"),
+    );
     useRenderDebugStore.getState().reset();
-    expect(localStorage.getItem(KEY)).toBe("medium");
+    expect(appPreferences.get(KEY)).toBe("medium");
   });
 
-  it("continues when localStorage.setItem throws", async () => {
+  it("applies the choice when the backend cannot store it", async () => {
     const { useRenderDebugStore } = await freshStore();
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("blocked");
     });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     useRenderDebugStore.getState().setShadowQuality("high");
     expect(useRenderDebugStore.getState().shadowQuality).toBe("high");
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
   });
 });

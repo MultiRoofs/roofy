@@ -49,7 +49,7 @@ import {
   normalizeLayers,
   UnsupportedSnapshotVersionError,
 } from "../persistence/types";
-import { LocalStorageProjectStateStore } from "../persistence/localStorage";
+import { appWorkspaces } from "../persistence/storage/appStorage";
 import {
   captureColorBy,
   captureSnapshot,
@@ -174,7 +174,7 @@ function cityEncoding(
   return detected?.kind === "city" ? detected.encoding : undefined;
 }
 
-const defaultStore = new LocalStorageProjectStateStore();
+const defaultStore = appWorkspaces;
 const SAMPLE_DATA_URL =
   "https://storage.googleapis.com/cityjson/delft.city.jsonl";
 

@@ -20,13 +20,11 @@
  * once and which re-resolves whenever the OS flips — but only while the
  * preference is "system".
  *
- * The preference is stored under a NEW key (`roofy-theme-preference`). The
- * old `roofy-theme` key is deleted on the first read and never honoured: the
- * old hook wrote it on every mount, so treating it as a choice would have
- * left every returning user pinned to an explicit theme they never picked.
- * System is the default for everyone.
+ * The preference is kept in the app's preference store, so where it lives is
+ * the storage layer's business. System is the default.
  */
 import { create } from "zustand";
+import { appPreferences } from "../../persistence/storage/appStorage";
 
 /** What the app actually renders as. */
 export type Theme = "dark" | "light";
@@ -35,21 +33,8 @@ export type Theme = "dark" | "light";
  *  time and re-resolves whenever the OS changes. */
 export type ThemePreference = "system" | "light" | "dark";
 
-/**
- * Where the PREFERENCE is kept — a new key, deliberately.
- *
- * The old hook stored an effective theme under {@link LEGACY_THEME_STORAGE_KEY}
- * and wrote it on EVERY mount, so every returning user has one whether or not
- * they ever chose anything. Reading those values as explicit preferences would
- * have meant nobody ever landed on "System": the whole point of this change
- * would have reached only brand-new users. A new key makes System the default
- * for everyone, and the old key is deleted on the first read so it cannot rot
- * in storage as a value nothing reads.
- */
-export const THEME_STORAGE_KEY = "roofy-theme-preference";
-
-/** The old hook's key. Removed on the first read, never honoured. */
-export const LEGACY_THEME_STORAGE_KEY = "roofy-theme";
+/** The preference store key the choice is kept under. */
+export const THEME_PREFERENCE_KEY = "theme";
 
 /** The one media query. Per the CSS spec a UA with no user preference reports
  *  `light`, so this single query answers both directions. */
@@ -84,16 +69,7 @@ function systemTheme(): Theme {
 }
 
 function readStoredPreference(): ThemePreference {
-  let stored: string | null = null;
-  try {
-    // The old key is swept, not read — see THEME_STORAGE_KEY.
-    localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
-    stored = localStorage.getItem(THEME_STORAGE_KEY);
-  } catch {
-    // A blocked localStorage (private mode, a hardened profile) is not a
-    // reason to fail to render: fall through to "system".
-    return "system";
-  }
+  const stored = appPreferences.get(THEME_PREFERENCE_KEY);
   if (stored === "dark" || stored === "light" || stored === "system")
     return stored;
   return "system";
@@ -125,11 +101,7 @@ function stamp(theme: Theme): void {
 export const useThemeStore = create<ThemeStore>((set) => ({
   ...initialThemeState(),
   setPreference: (preference) => {
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, preference);
-    } catch {
-      // Not persisting is survivable; not applying would not be.
-    }
+    appPreferences.set(THEME_PREFERENCE_KEY, preference);
     const theme = resolveTheme(preference);
     set({ preference, theme });
     stamp(theme);
