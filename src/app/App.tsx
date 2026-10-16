@@ -29,11 +29,7 @@ import "./brand.css";
 import "./app.css";
 import "./workspace.css";
 import "./flatControls.css";
-import { detectEncoding } from "../domain/citymodel/detectEncoding";
-import {
-  loadFromUrl,
-  fileNameFromUrl,
-} from "../domain/citymodel/loadCityModel";
+import { fileNameFromUrl } from "../domain/citymodel/loadCityModel";
 import type {
   CityModelReference,
   GeographicCamera,
@@ -89,14 +85,7 @@ import {
 } from "../features/processing/runQueue";
 import { installMapFilterSync } from "../features/query/mapFilterSync";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
-import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
-import {
-  addCityLayer,
-  modelTableSource,
-  urlSourceProvider,
-} from "../features/layers/addCityLayer";
-import { addCityParquetLayerFromUrl } from "../features/cityparquet/addCityParquetLayer";
-import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
+import { openCityLayer } from "../features/layers/openCityLayer";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
 import { useEscapeClearsSelection } from "../features/selection/useEscapeClearsSelection";
 import {
@@ -114,10 +103,7 @@ import { installRuleDraftInvariants } from "../features/rules/ruleDraftStore";
 import { useWorkspaceStore } from "../features/workspace/workspaceStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
-import {
-  closeAllStreamingLayers,
-  openStreamingLayer,
-} from "../features/streaming/openStreamingLayer";
+import { closeAllStreamingLayers } from "../features/streaming/openStreamingLayer";
 import {
   getStreamPlugin,
   requireStreamPlugin,
@@ -264,6 +250,9 @@ interface UnavailableLayer {
   readonly id: string;
   readonly name: string;
   readonly fileName: string;
+  /** The format it was opened as, so the re-link opens the file the same way
+   *  (`FileModelRef.encoding`). */
+  readonly encoding?: CityModelEncoding;
   /** The saved layer's settings, carried through so re-selecting a file
    *  restores them instead of silently reverting to defaults — see
    *  handleResolveUnavailableLayer. */
@@ -521,7 +510,7 @@ export function App({
         clearTimeout(timer);
         sceneGateRef.current = null;
         // Settled, not abandoned: an open still awaiting this must not hang.
-        // `withEngineBooting`'s caller catches it into the load-error state,
+        // The open's caller catches it into the load-error state,
         // and on unmount nobody is left to see it.
         fail(
           new Error(
@@ -554,7 +543,7 @@ export function App({
    * failing, and an engine that never came up rejects rather than hangs.
    *
    * With no viewport yet, a streaming open that went through
-   * {@link withEngineBooting} is mounting one right now, so this waits for the
+   * {@link holdEngine} is mounting one right now, so this waits for the
    * handle instead of failing. A caller that did NOT take a boot hold gets the
    * old `requireStreamPlugin()` error immediately, whose message names the real
    * cause — better than a 15 s wait for a viewport nobody asked for.
@@ -649,10 +638,16 @@ export function App({
 
   /**
    * Run an open with the 3D engine held up: the boot hold itself, for a
-   * source that is KNOWN to stream. {@link withEngineBooting} takes it for a
-   * `.fcb`; a CityParquet source only learns it streams once it has been
-   * sized, so the loader takes it at that point (`holdEngine` in
-   * `addCityParquetLayer.ts`).
+   * source that is KNOWN to stream. `openCityLayer` takes it for a `.fcb`; a
+   * CityParquet source only learns it streams once it has been sized, so its
+   * loader takes it at that point (`holdEngine` in `addCityParquetLayer.ts`).
+   * Every other format parses to a `CityModel` first and mounts the viewport
+   * as a consequence.
+   *
+   * The hold is released in `finally`, which is what returns the user to the
+   * landing page when the open FAILS (a 404, a refused CRS) rather than
+   * stranding them on an empty globe with no drop zone. On success the new
+   * layer keeps the shell mounted on its own.
    */
   const holdEngine = useCallback(
     async <T,>(open: () => Promise<T>): Promise<T> => {
@@ -666,40 +661,6 @@ export function App({
       }
     },
     [],
-  );
-
-  /**
-   * Run a layer open with the 3D engine mounted, when the source needs it.
-   *
-   * `.fcb` only: a stream's layer cannot exist before the engine does, and
-   * `.fcb` is the one format that ALWAYS streams. A CityParquet source streams
-   * only when large, which is known only after sizing, so it takes
-   * {@link holdEngine} itself at that point (`addCityParquetLayer.ts`). Every
-   * other encoding parses to a `CityModel` first and mounts the viewport as a
-   * consequence, so booting for those would put a globe behind the landing
-   * page for no reason.
-   *
-   * The hold is released in `finally`, which is what returns the user to the
-   * landing page when the open FAILS (a 404, a refused CRS) rather than
-   * stranding them on an empty globe with no drop zone. On success the new
-   * layer keeps the shell mounted on its own.
-   */
-  const withEngineBooting = useCallback(
-    async <T,>(
-      source: string,
-      open: () => Promise<T>,
-      encoding?: CityModelEncoding,
-    ): Promise<T> => {
-      // The OVERRIDE first, when the caller has one: the Add Layer dialog lets
-      // a user correct a `.json` that is really FlatCityBuf, and a boot gate
-      // that re-derived the format from the name would leave that add waiting
-      // for an engine nobody started.
-      if ((encoding ?? detectEncoding(source)) !== "flatcitybuf") {
-        return await open();
-      }
-      return await holdEngine(open);
-    },
-    [holdEngine],
   );
 
   // File loading
@@ -958,22 +919,17 @@ export function App({
     async (file: File, override?: DetectedSource) => {
       clearError();
       const encoding = cityEncoding(override);
-      await withEngineBooting(
-        file.name,
-        () => addLayerFromFile(file, encoding ? { encoding } : undefined),
-        encoding,
-      );
+      await addLayerFromFile(file, encoding ? { encoding } : undefined);
     },
-    [addLayerFromFile, clearError, withEngineBooting],
+    [addLayerFromFile, clearError],
   );
 
   /**
    * Several picked files as ONE layer — a CityParquet package folder.
    *
-   * No `withEngineBooting` hold here: a group is never `.fcb`, and a folder
-   * large enough to STREAM takes {@link holdEngine} inside the loader, once
-   * it has been sized (`addCityParquetLayer.ts`). Errors land in `loadError`,
-   * exactly as for {@link handleFile}.
+   * A folder large enough to STREAM takes {@link holdEngine} inside the
+   * loader, once it has been sized (`addCityParquetLayer.ts`). Errors land in
+   * `loadError`, exactly as for {@link handleFile}.
    */
   const handleFiles = useCallback(
     async (files: File[], override?: DetectedSource) => {
@@ -996,14 +952,13 @@ export function App({
     async (url: string, override?: DetectedSource): Promise<boolean> => {
       clearError();
       const encoding = cityEncoding(override);
-      const layerId = await withEngineBooting(
+      const layerId = await addLayerFromUrl(
         url,
-        () => addLayerFromUrl(url, encoding ? { encoding } : undefined),
-        encoding,
+        encoding ? { encoding } : undefined,
       );
       return layerId !== null;
     },
-    [addLayerFromUrl, clearError, withEngineBooting],
+    [addLayerFromUrl, clearError],
   );
 
   /**
@@ -1240,7 +1195,8 @@ export function App({
           let addedId: string | null = null;
           try {
             const name = (sl.name as string | undefined) ?? "Untitled layer";
-            const modelRef = sl.modelRef as CityModelReference | undefined;
+            // Validated by `normalizeLayers`.
+            const modelRef = sl.modelRef;
             if (!modelRef) continue; // malformed saved entry — nothing to restore
 
             const rules = (sl.rules as Rule[] | undefined) ?? [];
@@ -1266,6 +1222,7 @@ export function App({
                 id: crypto.randomUUID(),
                 name,
                 fileName,
+                encoding: modelRef.encoding,
                 rules,
                 colorBy,
                 singleColor,
@@ -1287,41 +1244,22 @@ export function App({
 
             hasUrlLayer = true;
 
-            let layerId: string;
-            if (detectEncoding(modelRef.url) === "flatcitybuf") {
-              layerId = await withEngineBooting(modelRef.url, async () =>
-                openStreamingLayer({
-                  plugin: await resolveStreamPlugin(),
-                  source: { url: modelRef.url },
+            // The format it was opened as rides the reference, so a layer the
+            // user corrected once is not guessed again from its name.
+            const layerId = await openCityLayer(
+              {
+                source: { kind: "url", url: modelRef.url },
+                encoding: modelRef.encoding,
+                settings: {
                   name,
-                  modelRef,
                   rules,
                   colorBy,
                   singleColor,
                   unmatchedColor,
                   visible,
-                  hiddenTypes,
-                  attributeOrders,
-                  tablePresentation,
-                  selectedAppearance: appearance,
-                }),
-              );
-            } else if (isCityParquetUrl(modelRef.url)) {
-              // Mirrors `useLayerFileLoader.addLayerFromUrl` — and by
-              // `isCityParquetUrl`, not `detectEncoding`, because a saved
-              // `gs://` bucket or package directory has no extension. Any
-              // throw (including the unlistable-wildcard explanation) is
-              // caught by this loop's per-layer `catch` and counted. The
-              // static/stream decision re-runs: a large source streams.
-              layerId = await addCityParquetLayerFromUrl(
-                modelRef.url,
-                {
-                  name,
-                  visible,
-                  rules,
-                  colorBy,
-                  singleColor,
-                  unmatchedColor,
+                  lodMode,
+                  selectedLod,
+                  selectedLods: sl.selectedLods,
                   hiddenTypes,
                   attributeOrders,
                   tablePresentation,
@@ -1329,40 +1267,9 @@ export function App({
                   // Validated against the families this open resolves (S4).
                   families: sl.families,
                 },
-                { resolveStreamPlugin, holdEngine },
-              );
-            } else {
-              const parsed = await loadFromUrl(modelRef.url);
-              await ensureModelCrsLoadable(parsed.model);
-              layerId = addCityLayer({
-                name,
-                model: parsed.model,
-                modelRef,
-                visible,
-                rules,
-                colorBy,
-                singleColor,
-                unmatchedColor,
-                hiddenTypes,
-                attributeOrders,
-                tablePresentation,
-                selectedAppearance: appearance,
-                duckdb: modelTableSource({
-                  model: parsed.model,
-                  bytes: parsed.bytes,
-                  encoding: parsed.encoding,
-                  refetch: urlSourceProvider(modelRef.url),
-                }),
-              });
-            }
-            if (sl.selectedLods !== undefined) {
-              useLayerStore.getState().setLayerLods(layerId, sl.selectedLods);
-            } else if (selectedLod !== null) {
-              useLayerStore.getState().setLayerLod(layerId, selectedLod);
-            }
-            if (lodMode === "manual") {
-              useLayerStore.getState().setLodMode(layerId, "manual");
-            }
+              },
+              { resolveStreamPlugin, holdEngine },
+            );
             addedId = layerId;
           } catch {
             // Skip this one layer; keep restoring the rest of the workspace.
@@ -1474,7 +1381,6 @@ export function App({
       clearError,
       resolveStreamPlugin,
       holdEngine,
-      withEngineBooting,
       applyCameraWhenReady,
       showToast,
     ],
@@ -1524,6 +1430,7 @@ export function App({
         .map((l) => ({
           name: l.name,
           modelUrl: (l.modelRef as { type: "url"; url: string }).url,
+          encoding: l.modelRef.encoding,
           selectedLods: l.selectedLods,
           rules: [...l.rules],
           // The USER's rules plus the mode; the synthetic catch-alls are
@@ -1597,67 +1504,25 @@ export function App({
           const { colorBy, singleColor, unmatchedColor } = sl;
           const visible = sl.visible ?? true;
 
-          if (detectEncoding(sl.modelUrl) === "flatcitybuf") {
-            const modelUrl = sl.modelUrl;
-            await withEngineBooting(modelUrl, async () =>
-              openStreamingLayer({
-                plugin: await resolveStreamPlugin(),
-                source: { url: modelUrl },
+          await openCityLayer(
+            {
+              source: { kind: "url", url: sl.modelUrl },
+              encoding: sl.encoding,
+              settings: {
                 name,
-                modelRef: { type: "url", url: modelUrl },
                 rules,
                 colorBy,
                 singleColor,
                 unmatchedColor,
                 visible,
-                attributeOrders: sl.attributeOrders,
-                tablePresentation: sl.tablePresentation,
-              }),
-            );
-          } else if (isCityParquetUrl(sl.modelUrl)) {
-            // Same arm as the snapshot restore above and the loader hook: a
-            // shared CityParquet link would otherwise hand parquet bytes to
-            // `JSON.parse`. Failures are counted by this loop's `catch`. A
-            // large source streams, decided afresh for this link.
-            await addCityParquetLayerFromUrl(
-              sl.modelUrl,
-              {
-                name,
                 selectedLods: sl.selectedLods,
-                visible,
                 attributeOrders: sl.attributeOrders,
                 tablePresentation: sl.tablePresentation,
-                rules,
-                colorBy,
-                singleColor,
-                unmatchedColor,
                 families: sl.families,
               },
-              { resolveStreamPlugin, holdEngine },
-            );
-          } else {
-            const parsed = await loadFromUrl(sl.modelUrl);
-            await ensureModelCrsLoadable(parsed.model);
-            addCityLayer({
-              name,
-              model: parsed.model,
-              modelRef: { type: "url", url: sl.modelUrl },
-              selectedLods: sl.selectedLods,
-              visible,
-              attributeOrders: sl.attributeOrders,
-              tablePresentation: sl.tablePresentation,
-              rules,
-              colorBy,
-              singleColor,
-              unmatchedColor,
-              duckdb: modelTableSource({
-                model: parsed.model,
-                bytes: parsed.bytes,
-                encoding: parsed.encoding,
-                refetch: urlSourceProvider(sl.modelUrl),
-              }),
-            });
-          }
+            },
+            { resolveStreamPlugin, holdEngine },
+          );
         } catch {
           failedCount++;
         }
@@ -1806,27 +1671,26 @@ export function App({
       const releaseAutoFit = pendingCamera ? suppressAutoFit() : () => {};
       void (async () => {
         try {
-          const layerId = await withEngineBooting(file.name, () =>
-            addLayerFromFile(
-              file,
-              entry
-                ? {
-                    rules: entry.rules,
-                    colorBy: entry.colorBy,
-                    singleColor: entry.singleColor,
-                    unmatchedColor: entry.unmatchedColor,
-                    visible: entry.visible,
-                    lodMode: entry.lodMode,
-                    selectedLod: entry.selectedLod,
-                    selectedLods: entry.selectedLods,
-                    hiddenTypes: entry.hiddenTypes,
-                    attributeOrders: entry.attributeOrders,
-                    tablePresentation: entry.tablePresentation,
-                    selectedAppearance: entry.appearance,
-                    families: entry.families,
-                  }
-                : undefined,
-            ),
+          const layerId = await addLayerFromFile(
+            file,
+            entry
+              ? {
+                  encoding: entry.encoding,
+                  rules: entry.rules,
+                  colorBy: entry.colorBy,
+                  singleColor: entry.singleColor,
+                  unmatchedColor: entry.unmatchedColor,
+                  visible: entry.visible,
+                  lodMode: entry.lodMode,
+                  selectedLod: entry.selectedLod,
+                  selectedLods: entry.selectedLods,
+                  hiddenTypes: entry.hiddenTypes,
+                  attributeOrders: entry.attributeOrders,
+                  tablePresentation: entry.tablePresentation,
+                  selectedAppearance: entry.appearance,
+                  families: entry.families,
+                }
+              : undefined,
           );
           if (
             layerId &&
@@ -1852,7 +1716,6 @@ export function App({
       unavailableLayers,
       addLayerFromFile,
       clearError,
-      withEngineBooting,
       applyCameraWhenReady,
       showToast,
     ],

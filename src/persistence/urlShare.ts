@@ -1,3 +1,7 @@
+import {
+  isSupportedCityModelEncoding,
+  type CityModelEncoding,
+} from "@cityjson/navara-core";
 import { normalizeSelectedLods } from "../features/layers/selectedLods";
 import {
   normalizeTablePresentation,
@@ -33,6 +37,12 @@ import {
 export interface ShareableLayerState {
   readonly name: string;
   readonly modelUrl: string;
+  /**
+   * The format the layer was opened as (`UrlModelRef.encoding`). OPTIONAL on
+   * the terms `colorBy` sets below, so the hash schema stays v3; dropped by
+   * {@link readShareHash} when it names no format this build knows.
+   */
+  readonly encoding?: CityModelEncoding;
   /** The USER's rules. A shared link never carries the synthetic catch-alls
    *  the modes below are drawn with: they are derived on the other side, from
    *  the three fields under them. */
@@ -258,6 +268,11 @@ export function readShareHash(hash: string): ShareHashResult {
                 l.tablePresentation,
               ),
               families: normalizeFamiliesSnapshot(l.families),
+              encoding:
+                typeof l.encoding === "string" &&
+                isSupportedCityModelEncoding(l.encoding)
+                  ? l.encoding
+                  : undefined,
             }
           : l,
       )

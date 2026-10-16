@@ -22,8 +22,9 @@ Keep this file short: commands, workflow, hard rules. Decision records and engin
 ```
 src/
   app/          # App shell (App.tsx owns the viewport ref + toasts)
-  domain/       # Format-agnostic types: citymodel (parsers, detectEncoding,
-                #   cityGmlArchive), selection, geometry, roofMetrics
+  domain/       # Format-agnostic types: citymodel (parsers, formats/ — the
+                #   format registry and detection — cityGmlArchive),
+                #   selection, geometry, roofMetrics
   features/     # Zustand stores + hooks: layers, geoLayers, selection, solar,
                 #   rules, streaming (FCB store), stac, cityparquet (sourcing),
                 #   tiles, atmosphere, debug, theme

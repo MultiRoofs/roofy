@@ -164,7 +164,11 @@ export async function addCityParquetLayerFromUrl(
   settings: CityParquetLayerSettings,
   deps: CityParquetLayerDeps,
 ): Promise<string> {
-  const modelRef: CityModelReference = { type: "url", url };
+  const modelRef: CityModelReference = {
+    type: "url",
+    url,
+    encoding: "cityparquet",
+  };
   const mode = await decideCityParquetMode({
     kind: "url",
     url,
@@ -194,7 +198,11 @@ export async function addCityParquetLayerFromFiles(
   settings: CityParquetLayerSettings,
   deps: CityParquetLayerDeps,
 ): Promise<string> {
-  const modelRef: CityModelReference = { type: "file", fileName };
+  const modelRef: CityModelReference = {
+    type: "file",
+    fileName,
+    encoding: "cityparquet",
+  };
   const mode = await decideCityParquetMode({ kind: "files", files });
   if (mode.mode === "stream") {
     return openStream(mode, modelRef, settings, deps);

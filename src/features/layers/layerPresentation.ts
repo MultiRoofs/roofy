@@ -23,6 +23,7 @@ import type { ActiveLayer } from "../workspace/activeLayer";
 import type { StreamStatus } from "../streaming/streamStore";
 import { presentStreamStatus } from "../streaming/streamStatusPresentation";
 import { extractCrsCode } from "./crsCode";
+import { cityFormat } from "../../domain/citymodel/formats";
 
 export type LayerKind = "city" | "streaming" | "vector" | "raster" | "tiles";
 
@@ -203,16 +204,8 @@ function streamingStateLine(input: LayerStateInput): string {
  * `CityModelEncoding` upstream is a type error here rather than a silent
  * `undefined` in a panel.
  */
-const ENCODING_LABELS: Readonly<Record<CityModelEncoding, string>> = {
-  cityjson: "CityJSON",
-  cityjsonseq: "CityJSONSeq",
-  flatcitybuf: "FlatCityBuf",
-  citygml: "CityGML",
-  cityparquet: "CityParquet",
-};
-
 export function encodingLabel(encoding: CityModelEncoding): string {
-  return ENCODING_LABELS[encoding];
+  return cityFormat(encoding).label;
 }
 
 /**
@@ -221,8 +214,8 @@ export function encodingLabel(encoding: CityModelEncoding): string {
  *
  * The format comes from `model.sourceEncoding`, which every parser sets (and
  * `openStreamingLayer` sets on its stub), NOT from re-detecting the file
- * name: `detectEncoding` guesses from an extension and answers "cityjson" for
- * anything it does not recognise, so a signed or extensionless URL would wear
+ * name: a name is a guess from an extension, and says nothing at all for
+ * a signed or extensionless URL, so a signed or extensionless URL would wear
  * the wrong badge. A raster tile template and a 3D tileset name no encoding
  * at all, so their lines are one phrase.
  */

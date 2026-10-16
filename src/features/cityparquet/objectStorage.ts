@@ -15,7 +15,7 @@
  */
 
 import type { HttpClient } from "../../platform/types";
-import type { StorageRef } from "./sourceClassify";
+import type { StorageRef } from "../../domain/citymodel/formats/cityParquetUrl";
 
 /**
  * How many tables one CityParquet source may expand to.

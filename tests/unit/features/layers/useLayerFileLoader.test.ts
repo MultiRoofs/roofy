@@ -10,7 +10,7 @@ import { renderHook, act } from "@testing-library/react";
 import { gzipSync } from "node:zlib";
 import { zipSync, strToU8 } from "fflate";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
-import { classifyCityParquetUrl } from "../../../../src/features/cityparquet/sourceClassify";
+import { classifyCityParquetUrl } from "../../../../src/domain/citymodel/formats/cityParquetUrl";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { useLayerFileLoader } from "../../../../src/features/layers/useLayerFileLoader";
@@ -19,7 +19,7 @@ import type { StreamPlugin } from "../../../../src/features/streaming/streamPlug
 import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
 import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
 
-/** The CityParquet READER is faked, its ROUTING is not: `sourceClassify` and
+/** The CityParquet READER is faked, its ROUTING is not: `cityParquetUrl` and
  *  `cityParquetLayerNameFromUrl` stay real (that is what decides which arm a
  *  URL takes and what the layer is called), while the two I/O entry points are
  *  replaced — parsing real parquet bytes is `navara-cityparquet`'s own test. */
@@ -252,6 +252,7 @@ describe("useLayerFileLoader — .fcb routing", () => {
     expect(layers[0]!.modelRef).toEqual({
       type: "file",
       fileName: "local.fcb",
+      encoding: "flatcitybuf",
     });
   });
 
@@ -441,8 +442,8 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
 });
 
 // ---------------------------------------------------------------------------
-// CityParquet routing. The arm is chosen by `isCityParquetUrl`, NOT by
-// `detectEncoding`: a `gs://` bucket or a package directory has no extension
+// CityParquet routing. The arm is chosen by `isCityParquetUrl` (inside
+// `formatFromName`): a `gs://` bucket or a package directory has no extension
 // to detect, and handing either to the CityJSON path would parse a listing —
 // or parquet bytes — as JSON.
 // ---------------------------------------------------------------------------
@@ -479,6 +480,7 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     expect(layer.modelRef).toEqual({
       type: "file",
       fileName: "building.parquet",
+      encoding: "cityparquet",
     });
     expect(result.current.error).toBeNull();
   });
@@ -495,7 +497,11 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("cityparquet");
     expect(layer.name).toBe("building");
-    expect(layer.modelRef).toEqual({ type: "url", url });
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url,
+      encoding: "cityparquet",
+    });
   });
 
   it("addLayerFromUrl routes an extension-less gs:// package directory too", async () => {
@@ -526,7 +532,11 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
     expect(layers[0]!.name).toBe("delft");
-    expect(layers[0]!.modelRef).toEqual({ type: "file", fileName: "delft" });
+    expect(layers[0]!.modelRef).toEqual({
+      type: "file",
+      fileName: "delft",
+      encoding: "cityparquet",
+    });
     expect(layers[0]!.model.sourceEncoding).toBe("cityparquet");
   });
 
@@ -668,6 +678,7 @@ describe("useLayerFileLoader — streaming large CityParquet sources", () => {
     expect(layer.modelRef).toEqual({
       type: "url",
       url: "https://x/yokohama-shi/",
+      encoding: "cityparquet",
     });
     expect(layer.attributeOrders).toEqual({ Building: ["height"] });
     expect(result.current.error).toBeNull();
@@ -719,6 +730,7 @@ describe("useLayerFileLoader — streaming large CityParquet sources", () => {
     expect(layer.modelRef).toEqual({
       type: "file",
       fileName: "yokohama.parquet",
+      encoding: "cityparquet",
     });
   });
 
@@ -753,7 +765,11 @@ describe("useLayerFileLoader — streaming large CityParquet sources", () => {
     expect(opts.visible).toBe(false);
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.name).toBe("yokohama-shi");
-    expect(layer.modelRef).toEqual({ type: "file", fileName: "yokohama-shi" });
+    expect(layer.modelRef).toEqual({
+      type: "file",
+      fileName: "yokohama-shi",
+      encoding: "cityparquet",
+    });
   });
 });
 
@@ -794,7 +810,11 @@ describe("useLayerFileLoader — CityGML ZIP routing", () => {
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("citygml");
     expect(Object.keys(layer.model.objects)).toEqual(["zipped-b1"]);
-    expect(layer.modelRef).toEqual({ type: "file", fileName: "lod2.zip" });
+    expect(layer.modelRef).toEqual({
+      type: "file",
+      fileName: "lod2.zip",
+      encoding: "citygml",
+    });
     // Never the streaming or CityParquet arm.
     expect(openStream).not.toHaveBeenCalled();
     expect(cityparquet.loadCityParquetFromFiles).not.toHaveBeenCalled();

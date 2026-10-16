@@ -15,6 +15,10 @@ import {
   sourceKey,
   type DetectedSource,
 } from "../../../../src/features/layers/detectSource";
+import {
+  UNKNOWN_SOURCE,
+  detectSourceFromFile,
+} from "../../../../src/features/layers/detectSource";
 
 /** The table. Left: what the user dropped or pasted. Right: what it is. */
 const CASES: ReadonlyArray<readonly [string, DetectedSource]> = [
@@ -148,5 +152,36 @@ describe("SOURCE_OVERRIDES", () => {
     expect(options).toContain(sourceKey(zip));
     // Every option is distinct, so a `<select>` value identifies exactly one.
     expect(new Set(options).size).toBe(options.length);
+  });
+});
+
+describe("detectSourceFromFile", () => {
+  const file = (bytes: ArrayLike<number> | string, name: string): File =>
+    new File([typeof bytes === "string" ? bytes : new Uint8Array(bytes)], name);
+
+  it("names a file the name says nothing about from its bytes", async () => {
+    expect(
+      await detectSourceFromFile(file([0x50, 0x41, 0x52, 0x31, 0], "blob")),
+    ).toMatchObject({ kind: "city", encoding: "cityparquet" });
+  });
+
+  it("leaves an unknown name unknown when the bytes say nothing either", async () => {
+    expect(await detectSourceFromFile(file("hello", "notes.txt"))).toEqual(
+      UNKNOWN_SOURCE,
+    );
+  });
+
+  it("keeps a GeoJSON a GeoJSON, whatever its bytes look like", async () => {
+    expect(
+      await detectSourceFromFile(
+        file('{"type":"FeatureCollection"}', "a.geojson"),
+      ),
+    ).toMatchObject({ kind: "geo", geoKind: "geojson" });
+  });
+
+  it("keeps the archive's own label for a ZIP", async () => {
+    expect(
+      await detectSourceFromFile(file([0x50, 0x4b, 0x03, 0x04], "lod2.zip")),
+    ).toMatchObject({ encoding: "citygml", label: "CityGML (zip)" });
   });
 });

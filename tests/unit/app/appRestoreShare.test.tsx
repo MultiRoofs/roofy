@@ -723,6 +723,56 @@ async function mountShellWithLayer(): Promise<void> {
   );
 }
 
+describe("App restore keeps the format a layer was opened as", () => {
+  /** A FlatCityBuf behind a name that says CityJSON: only the saved format
+   *  can send it to the stream. */
+  const MISNAMED = "https://example.test/download.json";
+
+  it("reopens a saved layer as its saved format, not its name's", async () => {
+    const snapshot = snapshotWithUrlLayer();
+    render(
+      <App
+        persistenceStore={storeWith({
+          ...snapshot,
+          layers: [
+            {
+              ...snapshot.layers![0]!,
+              modelRef: { type: "url", url: MISNAMED, encoding: "flatcitybuf" },
+            },
+          ],
+        })}
+      />,
+    );
+    await clickRestore();
+    await waitFor(() => expect(openCalls).toHaveLength(1));
+    expect(loadFromUrl).not.toHaveBeenCalled();
+  });
+
+  it("reopens a shared layer as its shared format", async () => {
+    location.hash =
+      "#" +
+      encodeShareState({
+        v: 3,
+        layers: [
+          {
+            name: "download.json",
+            modelUrl: MISNAMED,
+            encoding: "flatcitybuf",
+            rules: [],
+            rulesEnabled: true,
+            visible: true,
+          },
+        ],
+        cam: CAM,
+        dt: "2025-06-21T12:00:00.000Z",
+        pm: "object",
+      });
+    render(<App persistenceStore={storeWith(null)} />);
+    await waitFor(() => expect(openCalls).toHaveLength(1));
+    expect(loadFromUrl).not.toHaveBeenCalled();
+  });
+});
+
 describe("App save with a camera that is not readable yet", () => {
   it("reports the transiently-null camera instead of silently saving nothing", async () => {
     const save = vi.fn(async () => "snap-2");

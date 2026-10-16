@@ -319,7 +319,11 @@ describe("addCityParquetLayerFromUrl", () => {
     expect(layer.visible).toBe(false);
     expect(layer.model.sourceEncoding).toBe("cityparquet");
     expect(layer.model.metadata.referenceSystem).toBe(HEADER.referenceSystem);
-    expect(layer.modelRef).toEqual({ type: "url", url: URL_ });
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url: URL_,
+      encoding: "cityparquet",
+    });
   });
 
   it("runs a streamed open inside the hold, and releases it when the open is refused", async () => {

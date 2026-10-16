@@ -38,7 +38,7 @@ import {
   type CityParquetFileTargets,
   type CityParquetTargets,
 } from "./loadCityParquet";
-import { classifyCityParquetUrl } from "./sourceClassify";
+import { classifyCityParquetUrl } from "../../domain/citymodel/formats/cityParquetUrl";
 import { familyKeyFromName } from "../layers/familyStore";
 
 /** Above this many bytes of object tables a CityParquet source streams. */

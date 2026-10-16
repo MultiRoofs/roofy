@@ -15,7 +15,11 @@ import {
  * Tauri-native implementations without changing feature-level code.
  */
 
-import type { AppearanceTheme } from "@cityjson/navara-core";
+import {
+  isSupportedCityModelEncoding,
+  type AppearanceTheme,
+  type CityModelEncoding,
+} from "@cityjson/navara-core";
 import type { Rule } from "../features/rules/types";
 import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
@@ -38,14 +42,54 @@ import {
 export interface UrlModelRef {
   readonly type: "url";
   readonly url: string;
+  /**
+   * The format the layer was opened as — detected, or the user's correction.
+   *
+   * Restored as the format, so a CityJSONSeq served as `.json` that the user
+   * corrected once does not come back as a failed CityJSON parse. OPTIONAL,
+   * and the snapshot version stays: a reference saved without it restores by
+   * detection, which is what it was opened by. Validated by
+   * {@link normalizeModelRef}.
+   */
+  readonly encoding?: CityModelEncoding;
 }
 
 export interface FileModelRef {
   readonly type: "file";
   readonly fileName: string;
+  /** As {@link UrlModelRef.encoding}; carried into the re-link. */
+  readonly encoding?: CityModelEncoding;
 }
 
 export type CityModelReference = UrlModelRef | FileModelRef;
+
+/**
+ * A saved reference, validated: `null` when it is no reference at all, and
+ * without its `encoding` when that names no format this build knows (a
+ * hand-edited document, or one written by a build with a format this one
+ * lacks — the restore then detects, rather than refusing the layer).
+ */
+export function normalizeModelRef(value: unknown): CityModelReference | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as {
+    type?: unknown;
+    url?: unknown;
+    fileName?: unknown;
+    encoding?: unknown;
+  };
+  const encoding =
+    typeof raw.encoding === "string" &&
+    isSupportedCityModelEncoding(raw.encoding)
+      ? { encoding: raw.encoding }
+      : {};
+  if (raw.type === "url" && typeof raw.url === "string" && raw.url !== "") {
+    return { type: "url", url: raw.url, ...encoding };
+  }
+  if (raw.type === "file" && typeof raw.fileName === "string") {
+    return { type: "file", fileName: raw.fileName, ...encoding };
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Per-layer snapshot data
@@ -191,6 +235,9 @@ export interface RawLayersDocument {
 }
 
 export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
+  /** Validated by `normalizeModelRef`; absent when the saved entry had none
+   *  usable, and such an entry is skipped by the restore. */
+  readonly modelRef?: CityModelReference;
   readonly selectedLods?: readonly string[];
   /** Validated by `normalizeLayers`; `undefined` when the document said nothing
    *  usable, which restores at the R-D default. */
@@ -236,6 +283,7 @@ export function normalizeLayers(
     const attributeOrders = normalizeAttributeOrders(l.attributeOrders);
     const tablePresentation = normalizeTablePresentation(l.tablePresentation);
     const families = normalizeFamiliesSnapshot(l.families);
+    const modelRef = normalizeModelRef(l.modelRef) ?? undefined;
     // The same validator the share hash and the store use, so one document
     // cannot restore differently depending on which door it came through.
     const colorBy = normalizeColorBy({
@@ -248,6 +296,7 @@ export function normalizeLayers(
     return l.stream?.kind === "file"
       ? {
           ...l,
+          modelRef,
           selectedLods: normalizeSelectedLods(l.selectedLods),
           lodMode,
           hiddenTypes,
@@ -259,6 +308,7 @@ export function normalizeLayers(
         }
       : {
           ...l,
+          modelRef,
           selectedLods: normalizeSelectedLods(l.selectedLods),
           lodMode,
           hiddenTypes,

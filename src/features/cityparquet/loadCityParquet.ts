@@ -1,7 +1,7 @@
 /**
  * Turning a CityParquet URL (or a picked folder) into a `CityModel`.
  *
- * This is the I/O half of the CityParquet path: `sourceClassify` decides what a
+ * This is the I/O half of the CityParquet path: `cityParquetUrl` decides what a
  * URL MEANS, `objectStorage` knows how to list and address a bucket, and
  * `@cityjson/navara-cityparquet` knows what the bytes ARE. Nothing here parses
  * parquet or interprets a manifest beyond "which files do I fetch"; the model
@@ -35,7 +35,7 @@ import {
 import { parseEpsgCode, type CityModel } from "@cityjson/navara-core";
 import type { ParquetTableSource } from "../../insights/layerTables";
 import { normalizeCityParquetCrs } from "./normalizeCityParquetCrs";
-import { detectEncoding } from "../../domain/citymodel/detectEncoding";
+import { formatFromName } from "../../domain/citymodel/formats";
 import { browserPlatform } from "../../platform/browser";
 import type { HttpClient } from "../../platform/types";
 import {
@@ -50,7 +50,7 @@ import {
   type CityParquetSource,
   type StorageRef,
   classifyCityParquetUrl,
-} from "./sourceClassify";
+} from "../../domain/citymodel/formats/cityParquetUrl";
 
 /** The package manifest filename, at the root of a CityParquet directory. */
 const MANIFEST_FILENAME = "metadata.json";
@@ -570,7 +570,7 @@ export async function loadCityParquetFromUrl(
 ): Promise<LoadedCityParquet> {
   const source = classifyCityParquetUrl(rawUrl);
   if (source === null) {
-    // `detectEncoding` matches on a name, `classifyCityParquetUrl` on a URL, so
+    // `formatFromName` matches on a name, `classifyCityParquetUrl` on a URL, so
     // a `.parquet` string that is not a parsable http(s)/gs/s3 URL at all (a
     // bare relative path, another scheme) is CityParquet to the router and
     // nothing to the classifier. Fetching it as a single table keeps the two in
@@ -578,7 +578,7 @@ export async function loadCityParquetFromUrl(
     // be read as Parquet" — instead of this function claiming the URL was never
     // CityParquet at all. (A `.parquet.gz` no longer lands here: the classifier
     // owns it as a table, for the same reason.)
-    if (detectEncoding(rawUrl) === "cityparquet") {
+    if (formatFromName(rawUrl) === "cityparquet") {
       const table = await fetchTable(rawUrl, baseName(rawUrl), http);
       return loaded(await assembleCityParquetModel([table]), [
         { bytes: table.bytes },

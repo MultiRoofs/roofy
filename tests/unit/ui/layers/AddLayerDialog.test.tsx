@@ -235,6 +235,40 @@ describe("AddLayerDialog — the File tab", () => {
     });
   });
 
+  it("believes a file's first bytes over its name", async () => {
+    const onAddFile = vi.fn();
+    openDialog({ onAddFile });
+
+    const fcb = new Uint8Array([
+      0x66, 0x63, 0x62, 0x01, 0x66, 0x63, 0x62, 0x00,
+    ]);
+    const file = new File([fcb], "download.json");
+    drop(file);
+    // The name answers at once, the bytes a moment later.
+    expect(detectionLine()).toContain("CityJSON");
+    await waitFor(() => expect(detectionLine()).toContain("FlatCityBuf"));
+
+    fireEvent.click(addLayerButton());
+    expect(onAddFile.mock.calls[0]![1]).toMatchObject({
+      kind: "city",
+      encoding: "flatcitybuf",
+    });
+  });
+
+  it("keeps the user's correction when the bytes arrive after it", async () => {
+    const onAddFile = vi.fn();
+    openDialog({ onAddFile });
+
+    const fcb = new Uint8Array([
+      0x66, 0x63, 0x62, 0x01, 0x66, 0x63, 0x62, 0x00,
+    ]);
+    drop(new File([fcb], "download.json"));
+    fireEvent.change(changeSelect(), { target: { value: "city:cityjsonseq" } });
+    // Let the byte read settle; it must not undo the choice.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(detectionLine()).toContain("CityJSONSeq");
+  });
+
   it("says so — and refuses to add — when it cannot tell what a file is", () => {
     openDialog();
 

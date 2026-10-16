@@ -7,12 +7,12 @@
  *     of the loader hook's routing, so each has to be pinned separately — the
  *     fcb equivalents are in `appRestoreShare.test.tsx` for the same reason.
  *     Both use a `gs://` source on purpose: it carries no extension at all, so
- *     a site that classified with `detectEncoding` would read it as CityJSON
+ *     a site that classified by extension alone would read it as CityJSON
  *     and hand parquet bytes (or a bucket listing) to `JSON.parse`.
  *
  * The engine is never imported (`NavaraViewport` is mocked — jsdom has no
  * WebGL and `@navaramap/three` crashes at module scope under Node), and the
- * CityParquet READER is mocked while its ROUTING (`sourceClassify`) stays
+ * CityParquet READER is mocked while its ROUTING (`cityParquetUrl`) stays
  * real: which arm a URL takes is precisely what is under test.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,8 +47,8 @@ window.matchMedia ??= ((query: string) =>
     dispatchEvent: () => false,
   }) as unknown as MediaQueryList) as typeof window.matchMedia;
 
-/** A package directory in a bucket: no extension, so `detectEncoding` reads
- *  it as "cityjson" and only `isCityParquetUrl` gets it right. */
+/** A package directory in a bucket: no extension, so only
+ *  `isCityParquetUrl` (inside `formatFromName`) gets it right. */
 const PARQUET_URL = "gs://city3d/delft/";
 const JSON_URL = "https://example.test/delft.city.json";
 
@@ -380,7 +380,11 @@ describe("App snapshot restore — CityParquet layers", () => {
 
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("cityparquet");
-    expect(layer.modelRef).toEqual({ type: "url", url: PARQUET_URL });
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url: PARQUET_URL,
+      encoding: "cityparquet",
+    });
     expect(layer.rules).toEqual([RULE]);
     expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
@@ -481,7 +485,11 @@ describe("App share-link restore — CityParquet layers", () => {
     expect(loadFromUrl).not.toHaveBeenCalled();
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("cityparquet");
-    expect(layer.modelRef).toEqual({ type: "url", url: PARQUET_URL });
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url: PARQUET_URL,
+      encoding: "cityparquet",
+    });
   });
 
   it("counts a failing shared CityParquet layer without dropping the rest of the link", async () => {

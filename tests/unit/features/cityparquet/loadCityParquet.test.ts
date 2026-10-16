@@ -20,7 +20,7 @@ import {
   loadCityParquetFromUrl,
 } from "../../../../src/features/cityparquet/loadCityParquet";
 import { MAX_CITYPARQUET_FILES } from "../../../../src/features/cityparquet/objectStorage";
-import { classifyCityParquetUrl } from "../../../../src/features/cityparquet/sourceClassify";
+import { classifyCityParquetUrl } from "../../../../src/domain/citymodel/formats/cityParquetUrl";
 import type { HttpClient } from "../../../../src/platform/types";
 
 /**
