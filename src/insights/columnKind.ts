@@ -100,8 +100,15 @@ export function isDroppedColumn(name: string): boolean {
 /**
  * The prefix of the presence markers {@link readerTableSelectList} adds: one
  * BOOLEAN per `geometry_lod*` column the reader had, named after it.
+ *
+ * Random per session, so no attribute in a file can carry a marker's name: a
+ * fixed prefix would let an attribute spelled like a marker add an LoD the
+ * file does not have, and be dropped with the markers.
  */
-export const LOD_MARKER_PREFIX = "__roofy_has_";
+export const LOD_MARKER_PREFIX = `__roofy_has_${Array.from(
+  crypto.getRandomValues(new Uint8Array(4)),
+  (b) => b.toString(16).padStart(2, "0"),
+).join("")}_`;
 
 /**
  * The select list that builds a layer table from a reader in ONE read of the

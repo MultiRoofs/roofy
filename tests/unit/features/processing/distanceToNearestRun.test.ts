@@ -68,7 +68,10 @@ vi.mock("../../../../src/insights/duckdb", () => {
           { column_name: "id", column_type: "VARCHAR" },
           { column_name: "feature_id", column_type: "VARCHAR" },
           // The build's marker for an LoD 0 rung, so §7.7's footprint proxy is on offer at all.
-          { column_name: "__roofy_has_geometry_lod0", column_type: "BOOLEAN" },
+          {
+            column_name: `${(await import("../../../../src/insights/columnKind")).LOD_MARKER_PREFIX}geometry_lod0`,
+            column_type: "BOOLEAN",
+          },
         ],
       };
     }

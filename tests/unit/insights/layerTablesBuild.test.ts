@@ -171,6 +171,7 @@ import type {
   SourceProvider,
 } from "../../../src/insights/layerTables";
 import { FLAT_PREFIX_COLUMNS } from "../../../src/insights/layerRows";
+import { LOD_MARKER_PREFIX as MARKER } from "../../../src/insights/columnKind";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
 /** The flat table's `bbox` column type, spelled once: `layerTables` declares it
@@ -192,9 +193,9 @@ const READER_DESCRIBE = [
   { column_name: "bbox", column_type: "STRUCT(xmin DOUBLE)" },
   { column_name: "b3_h_dak_max", column_type: "DOUBLE" },
   { column_name: "bouwjaar", column_type: "BIGINT" },
-  { column_name: "__roofy_has_id", column_type: "BOOLEAN" },
-  { column_name: "__roofy_has_geometry_lod1_2", column_type: "BOOLEAN" },
-  { column_name: "__roofy_has_geometry_lod2_2", column_type: "BOOLEAN" },
+  { column_name: `${MARKER}id`, column_type: "BOOLEAN" },
+  { column_name: `${MARKER}geometry_lod1_2`, column_type: "BOOLEAN" },
+  { column_name: `${MARKER}geometry_lod2_2`, column_type: "BOOLEAN" },
 ];
 
 const FALLBACK_DESCRIBE = [
@@ -299,7 +300,7 @@ describe("reader-backed layer table", () => {
     expect(sql[0]).toBe(
       'CREATE OR REPLACE TABLE "layer_1" AS SELECT ' +
         "COLUMNS(c -> NOT (c IN ('template', 'geometry') OR regexp_matches(c, '^(geometry|geometry_properties|material|texture)_lod\\d+(_\\d+)?$'))), " +
-        "COLUMNS('^(id|geometry_lod\\d+(?:_\\d+)?)$') IS NOT NULL AS '__roofy_has_\\1' " +
+        `COLUMNS('^(id|geometry_lod\\d+(?:_\\d+)?)$') IS NOT NULL AS '${MARKER}\\1' ` +
         "FROM read_cityjson('layer_1.city.json')",
     );
     expect(sql.some((s) => s.startsWith("DESCRIBE SELECT"))).toBe(false);
@@ -309,9 +310,9 @@ describe("reader-backed layer table", () => {
     await build();
     expect(sql.slice(1, 5)).toEqual([
       'DESCRIBE "layer_1"',
-      'ALTER TABLE "layer_1" DROP COLUMN "__roofy_has_id"',
-      'ALTER TABLE "layer_1" DROP COLUMN "__roofy_has_geometry_lod1_2"',
-      'ALTER TABLE "layer_1" DROP COLUMN "__roofy_has_geometry_lod2_2"',
+      `ALTER TABLE "layer_1" DROP COLUMN "${MARKER}id"`,
+      `ALTER TABLE "layer_1" DROP COLUMN "${MARKER}geometry_lod1_2"`,
+      `ALTER TABLE "layer_1" DROP COLUMN "${MARKER}geometry_lod2_2"`,
     ]);
   });
 

@@ -69,7 +69,7 @@ vi.mock("../../../../src/insights/duckdb", () => {
           { column_name: "id", column_type: "VARCHAR" },
           { column_name: "feature_id", column_type: "VARCHAR" },
           {
-            column_name: "__roofy_has_geometry_lod2_2",
+            column_name: `${(await import("../../../../src/insights/columnKind")).LOD_MARKER_PREFIX}geometry_lod2_2`,
             column_type: "BOOLEAN",
           },
         ],
