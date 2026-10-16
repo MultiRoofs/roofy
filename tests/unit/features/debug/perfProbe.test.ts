@@ -10,7 +10,9 @@ function fakeGlPrototype() {
     drawArraysInstanced: () => calls.push("drawArraysInstanced"),
     drawElementsInstanced: () => calls.push("drawElementsInstanced"),
     bufferData: (_t: number, data: ArrayBufferView | number) =>
-      calls.push(`bufferData:${typeof data === "number" ? data : data.byteLength}`),
+      calls.push(
+        `bufferData:${typeof data === "number" ? data : data.byteLength}`,
+      ),
     bufferSubData: () => calls.push("bufferSubData"),
     texImage2D: () => calls.push("texImage2D"),
     texSubImage2D: () => calls.push("texSubImage2D"),
@@ -37,17 +39,27 @@ describe("perfProbe", () => {
   it("counts draw calls and still calls through to the original methods", () => {
     const { proto, calls } = fakeGlPrototype();
     const clock = manualClock();
-    const probe = createPerfProbe({ glPrototype: proto, schedule: clock.schedule });
+    const probe = createPerfProbe({
+      glPrototype: proto,
+      schedule: clock.schedule,
+    });
     proto.drawArrays();
     proto.drawElements();
     proto.drawElementsInstanced();
-    expect(calls).toEqual(["drawArrays", "drawElements", "drawElementsInstanced"]);
+    expect(calls).toEqual([
+      "drawArrays",
+      "drawElements",
+      "drawElementsInstanced",
+    ]);
     expect(probe.snapshot().drawCalls).toBe(3);
   });
 
   it("sums uploaded bytes from typed arrays and sized allocations", () => {
     const { proto } = fakeGlPrototype();
-    const probe = createPerfProbe({ glPrototype: proto, schedule: manualClock().schedule });
+    const probe = createPerfProbe({
+      glPrototype: proto,
+      schedule: manualClock().schedule,
+    });
     proto.bufferData(0, new Float32Array(10));
     proto.bufferData(0, 64);
     (proto.bufferSubData as (t: number, o: number, d: ArrayBufferView) => void)(
@@ -55,14 +67,27 @@ describe("perfProbe", () => {
       0,
       new Uint8Array(5),
     );
-    (proto.texSubImage2D as (...a: unknown[]) => void)(0, 0, 0, 0, 2, 2, 0, 0, new Uint8Array(16));
+    (proto.texSubImage2D as (...a: unknown[]) => void)(
+      0,
+      0,
+      0,
+      0,
+      2,
+      2,
+      0,
+      0,
+      new Uint8Array(16),
+    );
     expect(probe.snapshot().uploadedBytes).toBe(40 + 64 + 5 + 16);
   });
 
   it("counts a frame only for a tick in which something was drawn", () => {
     const { proto } = fakeGlPrototype();
     const clock = manualClock();
-    const probe = createPerfProbe({ glPrototype: proto, schedule: clock.schedule });
+    const probe = createPerfProbe({
+      glPrototype: proto,
+      schedule: clock.schedule,
+    });
     clock.tick(); // nothing drawn
     proto.drawArrays();
     clock.tick();
@@ -76,7 +101,10 @@ describe("perfProbe", () => {
 
   it("counts synchronous readbacks", () => {
     const { proto } = fakeGlPrototype();
-    const probe = createPerfProbe({ glPrototype: proto, schedule: manualClock().schedule });
+    const probe = createPerfProbe({
+      glPrototype: proto,
+      schedule: manualClock().schedule,
+    });
     proto.readPixels();
     expect(probe.snapshot().readbacks).toBe(1);
   });
@@ -84,7 +112,10 @@ describe("perfProbe", () => {
   it("reset zeroes every counter", () => {
     const { proto } = fakeGlPrototype();
     const clock = manualClock();
-    const probe = createPerfProbe({ glPrototype: proto, schedule: clock.schedule });
+    const probe = createPerfProbe({
+      glPrototype: proto,
+      schedule: clock.schedule,
+    });
     proto.drawArrays();
     proto.bufferData(0, 8);
     clock.tick();
@@ -102,9 +133,16 @@ describe("perfProbe", () => {
 
   it("records long tasks it is told about", () => {
     const { proto } = fakeGlPrototype();
-    const probe = createPerfProbe({ glPrototype: proto, schedule: manualClock().schedule });
+    const probe = createPerfProbe({
+      glPrototype: proto,
+      schedule: manualClock().schedule,
+    });
     probe.recordLongTask(120);
     probe.recordLongTask(60);
-    expect(probe.snapshot()).toMatchObject({ longTasks: 2, longTaskMs: 180, longestTaskMs: 120 });
+    expect(probe.snapshot()).toMatchObject({
+      longTasks: 2,
+      longTaskMs: 180,
+      longestTaskMs: 120,
+    });
   });
 });

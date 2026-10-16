@@ -62,14 +62,22 @@ function byteSize(value: unknown): number {
   if (typeof value === "number") return value;
   if (ArrayBuffer.isView(value)) return value.byteLength;
   if (value instanceof ArrayBuffer) return value.byteLength;
-  if (value && typeof value === "object" && "width" in value && "height" in value) {
+  if (
+    value &&
+    typeof value === "object" &&
+    "width" in value &&
+    "height" in value
+  ) {
     const { width, height } = value as { width: number; height: number };
     return width * height * 4;
   }
   return 0;
 }
 
-function uploadBytes(args: readonly unknown[], positions: readonly number[]): number {
+function uploadBytes(
+  args: readonly unknown[],
+  positions: readonly number[],
+): number {
   // Calls come in several overloads; the data sits at the last of the listed
   // positions that holds a sized value, or at the final argument.
   for (let i = positions.length - 1; i >= 0; i--) {
@@ -103,7 +111,8 @@ export function createPerfProbe(options: PerfProbeOptions): PerfProbe {
   };
 
   for (const name of DRAW_METHODS) wrap(name, () => void counts.drawCalls++);
-  for (const name of READBACK_METHODS) wrap(name, () => void counts.readbacks++);
+  for (const name of READBACK_METHODS)
+    wrap(name, () => void counts.readbacks++);
   for (const [name, positions] of Object.entries(UPLOAD_METHODS)) {
     wrap(name, (args) => {
       counts.uploadedBytes += uploadBytes(args, positions);
@@ -121,7 +130,8 @@ export function createPerfProbe(options: PerfProbeOptions): PerfProbe {
   return {
     snapshot: () => ({ ...counts }),
     reset: () => {
-      for (const key of Object.keys(counts) as (keyof typeof counts)[]) counts[key] = 0;
+      for (const key of Object.keys(counts) as (keyof typeof counts)[])
+        counts[key] = 0;
       drawsAtLastTick = 0;
     },
     recordLongTask: (durationMs) => {
@@ -145,7 +155,9 @@ declare global {
 export function installPerfProbe(): void {
   if (typeof window === "undefined" || window.__roofyPerf) return;
   const glPrototype =
-    typeof WebGL2RenderingContext === "undefined" ? null : WebGL2RenderingContext.prototype;
+    typeof WebGL2RenderingContext === "undefined"
+      ? null
+      : WebGL2RenderingContext.prototype;
   if (!glPrototype) return;
   const probe = createPerfProbe({
     glPrototype,
@@ -154,7 +166,8 @@ export function installPerfProbe(): void {
   let resourceMark = 0;
   try {
     new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) probe.recordLongTask(entry.duration);
+      for (const entry of list.getEntries())
+        probe.recordLongTask(entry.duration);
     }).observe({ type: "longtask", buffered: false });
   } catch {
     // Long-task timing is Chromium-only; the other counters still work.
@@ -168,6 +181,10 @@ export function installPerfProbe(): void {
     fetchedBytes: () =>
       (performance.getEntriesByType("resource") as PerformanceResourceTiming[])
         .slice(resourceMark)
-        .reduce((sum, entry) => sum + (entry.transferSize || entry.encodedBodySize || 0), 0),
+        .reduce(
+          (sum, entry) =>
+            sum + (entry.transferSize || entry.encodedBodySize || 0),
+          0,
+        ),
   };
 }

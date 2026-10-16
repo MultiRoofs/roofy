@@ -31,7 +31,8 @@ const APP = args.app ?? "http://127.0.0.1:5173";
 const DATA = args.data;
 const SCENARIO = args.scenario ?? "delft-seq";
 const OUT = args.out ?? `perf-${SCENARIO}.jsonl`;
-const CHROME = args.chrome ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+const CHROME =
+  args.chrome ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const CDP_PORT = Number(args.cdp ?? 9333);
 const DATA_PORT = Number(args.dataPort ?? 8765);
 const WIDTH = 1280;
@@ -42,29 +43,48 @@ const SCENARIOS = {
   "delft-fcb": { file: "delft.fcb", name: "Delft" },
   "delft-json": { file: "delft.city.json", name: "Delft" },
 };
-const DELFT_CAMERA = { lng: 4.3571, lat: 52.0116, height: 1200, heading: 0, pitch: -45, roll: 0 };
+const DELFT_CAMERA = {
+  lng: 4.3571,
+  lat: 52.0116,
+  height: 1200,
+  heading: 0,
+  pitch: -45,
+  roll: 0,
+};
 
 if (!DATA || !SCENARIOS[SCENARIO]) {
-  console.error(`usage: --data <dir> --scenario ${Object.keys(SCENARIOS).join("|")}`);
+  console.error(
+    `usage: --data <dir> --scenario ${Object.keys(SCENARIOS).join("|")}`,
+  );
   process.exit(2);
 }
 
 // --- data server: Range, CORS and Timing-Allow-Origin, nothing else ---------
 const dataServer = http.createServer((req, res) => {
-  const file = path.join(DATA, decodeURIComponent(new URL(req.url, "http://x").pathname));
+  const file = path.join(
+    DATA,
+    decodeURIComponent(new URL(req.url, "http://x").pathname),
+  );
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Range");
-  res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+  res.setHeader(
+    "Access-Control-Expose-Headers",
+    "Content-Length, Content-Range, Accept-Ranges",
+  );
   res.setHeader("Timing-Allow-Origin", "*");
   res.setHeader("Accept-Ranges", "bytes");
   if (req.method === "OPTIONS") return res.writeHead(204).end();
-  if (!file.startsWith(path.resolve(DATA)) || !fs.existsSync(file)) return res.writeHead(404).end();
+  if (!file.startsWith(path.resolve(DATA)) || !fs.existsSync(file))
+    return res.writeHead(404).end();
   const size = fs.statSync(file).size;
   const range = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? "");
   if (range) {
     const start = Number(range[1]);
     const end = range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
-    res.writeHead(206, { "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": end - start + 1 });
+    res.writeHead(206, {
+      "Content-Range": `bytes ${start}-${end}/${size}`,
+      "Content-Length": end - start + 1,
+    });
     if (req.method === "HEAD") return res.end();
     return fs.createReadStream(file, { start, end }).pipe(res);
   }
@@ -72,10 +92,14 @@ const dataServer = http.createServer((req, res) => {
   if (req.method === "HEAD") return res.end();
   fs.createReadStream(file).pipe(res);
 });
-await new Promise((resolve) => dataServer.listen(DATA_PORT, "127.0.0.1", resolve));
+await new Promise((resolve) =>
+  dataServer.listen(DATA_PORT, "127.0.0.1", resolve),
+);
 
 // --- browser ---------------------------------------------------------------
-const profile = fs.mkdtempSync(path.join(process.env.TMPDIR ?? "/tmp", "roofy-perf-"));
+const profile = fs.mkdtempSync(
+  path.join(process.env.TMPDIR ?? "/tmp", "roofy-perf-"),
+);
 const chrome = spawn(
   CHROME,
   [
@@ -91,7 +115,10 @@ const chrome = spawn(
     // for the basemap and terrain tiles, and never for the local servers.
     ...(process.getuid?.() === 0 ? ["--no-sandbox"] : []),
     ...(process.env.HTTPS_PROXY
-      ? [`--proxy-server=${process.env.HTTPS_PROXY}`, "--proxy-bypass-list=127.0.0.1;localhost"]
+      ? [
+          `--proxy-server=${process.env.HTTPS_PROXY}`,
+          "--proxy-bypass-list=127.0.0.1;localhost",
+        ]
       : []),
     "--no-default-browser-check",
     "about:blank",
@@ -102,10 +129,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let version;
 for (let i = 0; i < 50 && !version; i++) {
   await sleep(200);
-  version = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`).then((r) => r.json()).catch(() => null);
+  version = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)
+    .then((r) => r.json())
+    .catch(() => null);
 }
 if (!version) throw new Error("Chromium did not start");
-const tab = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: "PUT" })).json();
+const tab = await (
+  await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, {
+    method: "PUT",
+  })
+).json();
 const ws = new WebSocket(tab.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => {
   ws.onopen = resolve;
@@ -122,7 +155,10 @@ ws.onmessage = (event) => {
     if (message.error) call?.reject(new Error(JSON.stringify(message.error)));
     else call?.resolve(message.result);
   } else if (message.method === "Runtime.exceptionThrown") {
-    exceptions.push(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text);
+    exceptions.push(
+      message.params.exceptionDetails.exception?.description ??
+        message.params.exceptionDetails.text,
+    );
   }
 };
 const send = (method, params = {}) =>
@@ -132,12 +168,24 @@ const send = (method, params = {}) =>
     ws.send(JSON.stringify({ id, method, params }));
   });
 const evaluate = async (expression) => {
-  const result = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? "eval failed");
+  const result = await send("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  if (result.exceptionDetails)
+    throw new Error(
+      result.exceptionDetails.exception?.description ?? "eval failed",
+    );
   return result.result.value;
 };
 await send("Runtime.enable");
-await send("Emulation.setDeviceMetricsOverride", { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
+await send("Emulation.setDeviceMetricsOverride", {
+  width: WIDTH,
+  height: HEIGHT,
+  deviceScaleFactor: 1,
+  mobile: false,
+});
 
 // --- the page --------------------------------------------------------------
 const scenario = SCENARIOS[SCENARIO];
@@ -161,8 +209,11 @@ const started = Date.now();
 await send("Page.navigate", { url: `${APP}/?perf#share=${hash}` });
 
 const snapshot = () =>
-  evaluate("window.__roofyPerf ? { ...window.__roofyPerf.snapshot(), fetchedBytes: window.__roofyPerf.fetchedBytes() } : null");
-const reset = () => evaluate("window.__roofyPerf && window.__roofyPerf.reset()");
+  evaluate(
+    "window.__roofyPerf ? { ...window.__roofyPerf.snapshot(), fetchedBytes: window.__roofyPerf.fetchedBytes() } : null",
+  );
+const reset = () =>
+  evaluate("window.__roofyPerf && window.__roofyPerf.reset()");
 
 // Ready = the probe exists and nothing has been uploaded or fetched for 5 s.
 let last = null;
@@ -180,7 +231,13 @@ while (Date.now() - started < 240_000) {
 const lines = [];
 const record = async (phase, extra = {}) => {
   const counters = await snapshot();
-  const line = { scenario: SCENARIO, phase, ...extra, ...counters, at: new Date().toISOString() };
+  const line = {
+    scenario: SCENARIO,
+    phase,
+    ...extra,
+    ...counters,
+    at: new Date().toISOString(),
+  };
   lines.push(line);
   console.log(JSON.stringify(line));
 };
@@ -191,14 +248,25 @@ const mouse = (type, x, y, extra = {}) =>
   send("Input.dispatchMouseEvent", { type, x, y, button: "none", ...extra });
 async function drag(from, to, button = "left", steps = 20) {
   await mouse("mouseMoved", from[0], from[1]);
-  await mouse("mousePressed", from[0], from[1], { button, buttons: button === "left" ? 1 : 2, clickCount: 1 });
+  await mouse("mousePressed", from[0], from[1], {
+    button,
+    buttons: button === "left" ? 1 : 2,
+    clickCount: 1,
+  });
   for (let i = 1; i <= steps; i++) {
     const x = from[0] + ((to[0] - from[0]) * i) / steps;
     const y = from[1] + ((to[1] - from[1]) * i) / steps;
-    await mouse("mouseMoved", x, y, { button, buttons: button === "left" ? 1 : 2 });
+    await mouse("mouseMoved", x, y, {
+      button,
+      buttons: button === "left" ? 1 : 2,
+    });
     await sleep(30);
   }
-  await mouse("mouseReleased", to[0], to[1], { button, buttons: 0, clickCount: 1 });
+  await mouse("mouseReleased", to[0], to[1], {
+    button,
+    buttons: 0,
+    clickCount: 1,
+  });
 }
 async function wheel(deltaY, times) {
   for (let i = 0; i < times; i++) {
@@ -219,7 +287,11 @@ const phases = [
     "hover",
     async () => {
       for (let i = 0; i <= 120; i++) {
-        await mouse("mouseMoved", 200 + (880 * i) / 120, 250 + 300 * Math.sin(i / 10));
+        await mouse(
+          "mouseMoved",
+          200 + (880 * i) / 120,
+          250 + 300 * Math.sin(i / 10),
+        );
         await sleep(25);
       }
     },
@@ -235,8 +307,12 @@ for (const [phase, act] of phases) {
   await record(phase, { phaseMs: Date.now() - t0 });
 }
 
-fs.writeFileSync(OUT, lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
-if (exceptions.length) console.error(`page exceptions:\n${exceptions.join("\n")}`);
+fs.writeFileSync(
+  OUT,
+  lines.map((line) => JSON.stringify(line)).join("\n") + "\n",
+);
+if (exceptions.length)
+  console.error(`page exceptions:\n${exceptions.join("\n")}`);
 ws.close();
 chrome.kill();
 dataServer.closeAllConnections();
