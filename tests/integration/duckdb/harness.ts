@@ -7,6 +7,12 @@
  * never answer, and a `LOAD '<path>'` hangs). What the suite proves is
  * therefore about the exact builds a deploy serves.
  *
+ * The node runtime caches what it installs under
+ * `~/.duckdb/extensions/<last segment of the repository URL>/` and loads that
+ * copy ever after: `FORCE INSTALL` does not refresh it and `extension_directory`
+ * does not move it. So the repository's last segment carries a hash of the
+ * manifest, and a re-vendored build is downloaded afresh.
+ *
  * The BLOCKING node bindings, not the app's async browser ones: the app's
  * module boots a `Worker` from a jsDelivr blob, which Node has no equivalent
  * for. Reads over `registerFileBuffer` share the code path with the browser
@@ -29,6 +35,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,7 +51,9 @@ const SERVER = `
 const http = require("node:http"), fs = require("node:fs"), path = require("node:path");
 const root = process.argv[1];
 const server = http.createServer((req, res) => {
-  const file = path.join(root, decodeURIComponent(new URL(req.url, "http://x").pathname));
+  // "/duckdb-ext-<hash>/…" is "/duckdb-ext/…" under public/.
+  const asked = new URL(req.url, "http://x").pathname.replace(/^\\/duckdb-ext-[0-9a-f]+\\//, "/duckdb-ext/");
+  const file = path.join(root, decodeURIComponent(asked));
   if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, bytes) => {
     if (err) { res.writeHead(404).end(); return; }
@@ -70,7 +79,11 @@ async function serveExtensions(): Promise<{
       done(chunk.toString().trim()),
     );
   });
-  return { repository: `http://127.0.0.1:${port}/duckdb-ext`, child };
+  const key = createHash("sha256")
+    .update(readFileSync(resolve(PUBLIC_DIR, "duckdb-ext/manifest.json")))
+    .digest("hex")
+    .slice(0, 16);
+  return { repository: `http://127.0.0.1:${port}/duckdb-ext-${key}`, child };
 }
 
 /** `fixtures/`, resolved from THIS file rather than from the cwd. */

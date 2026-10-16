@@ -4,14 +4,14 @@
   "duckdbWasm": "1.33.1-dev64.0",
   "extensions": {
     "cityjson": {
-      "source": "https://community-extensions.duckdb.org/v1.5.5/wasm_eh/cityjson.duckdb_extension.wasm",
-      "sha256": "bebabd249e1bacd4c97c7d3949c4cc0920369f1af2c42222c70577c242798ba8",
-      "footer": ["CPP", "a1455e1", "v1.5.5", "wasm_eh", "4"]
+      "source": "CI artefact cityjson-v1.5.5-extension-wasm_eh of cityjson/duckdb-cityjson develop 294a595 (Actions run 38545349235). Unsigned.",
+      "sha256": "415a0c69dec9b77564515dc0369eeca02745ce1c3520cc179a4c65c5ac9c719e",
+      "footer": ["CPP", "294a595", "v1.5.5", "wasm_eh", "4"]
     },
     "three_d": {
-      "source": "https://community-extensions.duckdb.org/v1.5.5/wasm_eh/three_d.duckdb_extension.wasm",
-      "sha256": "0bf8080fc14e55da75b057c747973d865bcfd8730453120ee736393c5a94d45c",
-      "footer": ["CPP", "679ee09", "v1.5.5", "wasm_eh", "4"]
+      "source": "CI artefact three_d-v1.5.5-extension-wasm_eh of cityjson/duckdb-3d develop 0d85321 (Actions run 38264025449). Unsigned.",
+      "sha256": "031cd2b2d10dafcc97c980eb35e7bc93d4c16b1e5adc518c1a8f343a0fabe452",
+      "footer": ["CPP", "0d85321", "v1.5.5", "wasm_eh", "4"]
     },
     "spatial": {
       "source": "https://extensions.duckdb.org/v1.5.5/wasm_eh/spatial.duckdb_extension.wasm",

@@ -518,6 +518,16 @@ async function doInit(): Promise<void> {
       created.terminate();
       return;
     }
+    // The vendored cityjson and three_d are CI builds of their develop
+    // branches, which no repository has signed. Safe because the app's own
+    // origin is the only extension repository (below) and no user-written SQL
+    // reaches the engine: `insights/sql.ts` quotes every identifier and
+    // literal it builds.
+    await instance.open({ allowUnsignedExtensions: true });
+    if (stale()) {
+      created.terminate();
+      return;
+    }
     const connection = await instance.connect();
     if (stale()) {
       created.terminate();

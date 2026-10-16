@@ -79,6 +79,7 @@ vi.mock("@duckdb/duckdb-wasm", () => {
         if (holdInstantiate) await holdInstantiate;
         if (failInstantiate) throw new Error("wasm refused");
       }
+      async open() {}
       async connect() {
         return new FakeConnection();
       }

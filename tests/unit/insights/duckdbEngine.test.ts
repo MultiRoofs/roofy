@@ -132,6 +132,8 @@ interface EngineHarness {
   /** Every `registerFileURL` / `registerFileHandle` call, arguments and all —
    *  the protocol and the `directIO` flag are the contract of those two. */
   readonly registrations: unknown[][];
+  /** Every `open` config, in order. */
+  readonly opened: unknown[];
 }
 
 const EXTENSION_REFUSED = "Catalog Error: extension is not available";
@@ -147,6 +149,7 @@ async function bootEngine(): Promise<EngineHarness> {
 
   const sql: string[] = [];
   const registrations: unknown[][] = [];
+  const opened: unknown[] = [];
   // What `duckdb_extensions()` reports; a successful LOAD adds to it, the way
   // a real database would.
   const loaded = new Set<string>(["parquet"]);
@@ -188,6 +191,9 @@ async function bootEngine(): Promise<EngineHarness> {
     LogLevel: { WARNING: 2 },
     AsyncDuckDB: class {
       async instantiate() {}
+      async open(config: unknown) {
+        opened.push(config);
+      }
       async connect() {
         return connection;
       }
@@ -257,6 +263,7 @@ async function bootEngine(): Promise<EngineHarness> {
 
   sql.length = 0; // Init's own statements are not what these tests are about.
   return {
+    opened,
     engine,
     sql,
     failWhen: (match) => (failMatch = match),
@@ -285,6 +292,11 @@ describe("ensureExtension", () => {
     if (status.state !== "ready") throw new Error("unreachable");
     expect(status.loadedExtensions.map((e) => e.name)).toContain("spatial");
     expect(status.extensions.spatial).toEqual({ state: "loaded" });
+  });
+
+  it("opens the database allowing the vendored builds, which are unsigned", async () => {
+    const { opened } = await bootEngine();
+    expect(opened).toEqual([{ allowUnsignedExtensions: true }]);
   });
 
   it("installs three_d from the vendored repository", async () => {
