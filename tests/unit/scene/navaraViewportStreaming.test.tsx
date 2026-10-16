@@ -22,7 +22,7 @@
  *    `suppressSettleThenCommit`, so it neither fetches along its flight path
  *    nor leaves its destination unfetched.
  */
-import { createRef } from "react";
+import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
@@ -614,6 +614,44 @@ describe("NavaraViewport streaming wiring", () => {
       await Promise.resolve();
     });
     await expect(pending).resolves.toBe(flatPluginInstance);
+  });
+
+  it("answers a getStreamingPlugin() call made before StrictMode's remount", async () => {
+    // The share link's path in a dev build: the handle is attached before the
+    // engine effect runs, the call queues behind that mount's gate, and
+    // StrictMode's simulated unmount rejects the gate and re-arms it. The call
+    // must follow the live gate, not fail with "unmounted".
+    let pending: Promise<unknown> | null = null;
+    const capture = (handle: CitySceneHandle | null) => {
+      if (handle && !pending) pending = handle.getStreamingPlugin();
+    };
+    render(
+      <StrictMode>
+        <NavaraViewport ref={capture} onTriangleCount={() => {}} />
+      </StrictMode>,
+    );
+    expect(pending).not.toBeNull();
+    await expect(pending).resolves.toBe(flatPluginInstance);
+  });
+
+  it("still rejects getStreamingPlugin() when the viewport really unmounts", async () => {
+    let release!: () => void;
+    init.mockImplementationOnce(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+          pendingInitRelease = r;
+        }),
+    );
+    const ref = createRef<CitySceneHandle>();
+    const { unmount } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    const pending = ref.current!.getStreamingPlugin();
+    unmount();
+    await expect(pending).rejects.toThrow(/unmounted before the 3D engine/);
+    release();
   });
 
   it("rejects getStreamingPlugin() if the engine never comes up, instead of hanging", async () => {

@@ -1441,6 +1441,11 @@ export const NavaraViewport = memo(
       // promise rather than a dead one.
       const readyRef = useRef<ReadyGate | null>(null);
       readyRef.current ??= createReadyGate();
+      /** True while the engine lifecycle effect is set up. StrictMode's
+       *  simulated unmount clears and sets it again in one synchronous pass, so
+       *  a gate rejected by that pass finds it set; a real unmount leaves it
+       *  clear. */
+      const lifecycleLiveRef = useRef(false);
 
       // --- Engine lifecycle (StrictMode-safe, see navaraSession.ts) ---
       useEffect(() => {
@@ -1462,6 +1467,7 @@ export const NavaraViewport = memo(
         }
 
         mountedViewports += 1;
+        lifecycleLiveRef.current = true;
         if (import.meta.env.DEV && mountedViewports > 1) {
           console.warn(
             `NavaraViewport: ${mountedViewports} instances are mounted at once. ` +
@@ -1669,6 +1675,7 @@ export const NavaraViewport = memo(
         return () => {
           cancelled = true;
           mountedViewports -= 1;
+          lifecycleLiveRef.current = false;
           setEngineReady(false);
           // The tiles layer died with the view, so the credit for it has to go
           // too — the geoid lines stay, because they are unconditional.
@@ -3764,7 +3771,18 @@ export const NavaraViewport = memo(
        */
       const getStreamingPlugin =
         useCallback(async (): Promise<FlatCityBufPlugin> => {
-          await readyRef.current!.promise;
+          const gate = readyRef.current!;
+          try {
+            await gate.promise;
+          } catch (error) {
+            // StrictMode's simulated unmount rejected the gate this call queued
+            // behind and re-armed a fresh one for the mount that follows; the
+            // engine coming up now is the one the caller wants. A real unmount
+            // leaves nothing to wait for, so its rejection stands.
+            if (!lifecycleLiveRef.current || readyRef.current === gate)
+              throw error;
+            await readyRef.current!.promise;
+          }
           const plugin = flatPluginRef.current;
           if (plugin) return plugin;
           const cause = flatPluginErrorRef.current;
