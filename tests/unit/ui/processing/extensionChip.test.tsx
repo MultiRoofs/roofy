@@ -62,6 +62,7 @@ vi.mock("@duckdb/duckdb-wasm", () => {
   return {
     AsyncDuckDB: class {
       async instantiate() {}
+      async open() {}
       async connect() {
         return new FakeConnection();
       }
