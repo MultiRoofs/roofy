@@ -16,6 +16,8 @@
     "test:watch": "vp test",
     "format": "vp fmt .",
     "format:check": "vp fmt --check .",
+    "vendor:ext": "node scripts/vendor-extensions.mjs",
+    "check:lockstep": "node scripts/check-lockstep.mjs",
     "prepare": "vp config"
   },
   "dependencies": {

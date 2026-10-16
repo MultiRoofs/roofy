@@ -1,12 +1,15 @@
 /**
- * DuckDB-wasm integration with the cityjson community extension.
+ * DuckDB-wasm integration with the cityjson extension.
  *
  * Provides a lazy-initialized singleton DuckDB instance that attempts
  * to load the cityjson extension for analytical SQL queries over city
  * model files.
  *
- * If extension loading fails (e.g., WASM build unavailable in the
- * community repo), the module reports the failure via getDuckDBStatus()
+ * Every extension comes from the app's own origin: `public/duckdb-ext/` holds
+ * the builds for the pinned DuckDB version (`scripts/vendor-extensions.mjs`,
+ * checked by `scripts/check-lockstep.mjs`), never DuckDB's CDN at runtime.
+ *
+ * If extension loading fails, the module reports the failure via getDuckDBStatus()
  * and all query functions return null. The M4.2 pure-function stats
  * remain fully functional as the primary analytics path.
  *
@@ -29,10 +32,9 @@ export type ExtensionStatus =
   | { readonly state: "unloaded" | "loading" | "loaded" }
   | { readonly state: "failed"; readonly error: string };
 
-/** One row of `duckdb_extensions() WHERE loaded`, for the status tooltip. The
- *  community slot for a DuckDB version can be REBUILT under us — the
- *  duckdb-wasm pin is what pins the extension build — so a schema drift has to
- *  be diagnosable from the UI without a console. */
+/** One row of `duckdb_extensions() WHERE loaded`, for the status tooltip, so
+ *  the vendored build the session runs is diagnosable from the UI without a
+ *  console. */
 export interface LoadedExtension {
   readonly name: string;
   readonly version: string;
@@ -322,13 +324,21 @@ export function formatDuckDBError(error: unknown): string {
 // Extensions
 // ---------------------------------------------------------------------------
 
-/** `spatial` is a CORE extension — `INSTALL spatial FROM community` fails
- *  outright — while `cityjson` and `three_d` come from the community repo.
- *  Neither `spatial` nor `three_d` autoloads in wasm. */
+/** The vendored extensions, served by the app itself at
+ *  `<base>/duckdb-ext/<duckdb version>/<platform>/`. A CDN path carries no
+ *  extension version, so a new upstream release would change behaviour
+ *  without a deploy. Only `wasm_eh` is vendored: a browser without wasm
+ *  exceptions gets the mvp bundle and no extensions, and the status says so. */
+const EXTENSION_REPOSITORY = new URL(
+  `${import.meta.env.BASE_URL}duckdb-ext`,
+  location.href,
+).href;
+
+/** Plain `INSTALL`: the session's repositories point at the vendored
+ *  directory before any extension is installed. Neither `spatial` nor
+ *  `three_d` autoloads in wasm. */
 function installStatement(name: ExtensionName): string {
-  return name === "spatial"
-    ? "INSTALL spatial"
-    : `INSTALL ${name} FROM community`;
+  return `INSTALL ${name}`;
 }
 
 /** The boot passes its OWN connection, rather than letting this read `conn`
@@ -401,8 +411,7 @@ function failLazyExtensionsIfOffline(): void {
 }
 
 /** `PRAGMA platform` — "wasm_eh" or "wasm_mvp". Which one a session got
- *  decides WHICH extension artefacts the community repo served it, so a
- *  schema-drift report is unactionable without it. Best effort. */
+ *  decides which vendored directory its extensions come from. Best effort. */
 async function readPlatform(
   connection: duckdb.AsyncDuckDBConnection | null = conn,
 ): Promise<string | null> {
@@ -461,10 +470,8 @@ async function doInit(): Promise<void> {
     // Bundles come from jsDelivr, not from our own dist/: the mvp wasm alone
     // is 38 MB, which is over Cloudflare Workers' 25 MiB per-asset limit —
     // self-hosting it made the app undeployable there. DuckDB analytics
-    // already needs the network at runtime regardless (the cityjson
-    // community extension below is fetched from DuckDB's CDN), and this
-    // whole module degrades gracefully offline, so the CDN is not a new
-    // point of failure. `selectBundle` picks eh over mvp where the browser
+    // degrades gracefully offline, so the CDN is not a point of failure the
+    // app cannot survive. `selectBundle` picks eh over mvp where the browser
     // supports wasm exceptions; neither needs COOP/COEP.
     const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
 
@@ -520,6 +527,18 @@ async function doInit(): Promise<void> {
     // read it in between.
     db = instance;
     conn = connection;
+
+    // Both repositories, before anything installs: `INSTALL` reads the
+    // custom one, and an autoload (`parquet`, for `read_parquet`) the
+    // autoinstall one. Left at its default, an autoload would still reach
+    // DuckDB's CDN.
+    await connection.query(
+      `SET custom_extension_repository = '${EXTENSION_REPOSITORY}'`,
+    );
+    await connection.query(
+      `SET autoinstall_extension_repository = '${EXTENSION_REPOSITORY}'`,
+    );
+    if (stale()) return;
 
     // `cityjson` at init, because every layer table wants it. `spatial` and
     // `three_d` are lazy (`ensureExtension`): nothing in this feature needs

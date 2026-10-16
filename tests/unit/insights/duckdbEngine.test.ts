@@ -138,9 +138,9 @@ const EXTENSION_REFUSED = "Catalog Error: extension is not available";
 
 /**
  * A module instance whose `AsyncDuckDB` connects to a fake connection that
- * RECORDS its SQL. It is the only way to pin the INSTALL spellings: `spatial`
- * is a CORE extension and `INSTALL spatial FROM community` fails outright
- * against a real DuckDB, so a regression here is invisible until a browser.
+ * RECORDS its SQL. It is the only way to pin the repository settings and the
+ * INSTALL spellings: a `FROM community` would reach DuckDB's CDN instead of
+ * the vendored builds, and nothing short of a browser would notice.
  */
 async function bootEngine(): Promise<EngineHarness> {
   vi.resetModules();
@@ -271,7 +271,7 @@ describe("ensureExtension", () => {
     vi.resetModules();
   });
 
-  it("installs spatial as a CORE extension, never FROM community", async () => {
+  it("installs every extension from the vendored repository, never a CDN", async () => {
     const { engine, sql } = await bootEngine();
 
     expect(await engine.ensureExtension("spatial")).toBe(true);
@@ -287,14 +287,11 @@ describe("ensureExtension", () => {
     expect(status.extensions.spatial).toEqual({ state: "loaded" });
   });
 
-  it("installs three_d from the community repo", async () => {
+  it("installs three_d from the vendored repository", async () => {
     const { engine, sql } = await bootEngine();
 
     expect(await engine.ensureExtension("three_d")).toBe(true);
-    expect(sql.slice(0, 2)).toEqual([
-      "INSTALL three_d FROM community",
-      "LOAD three_d",
-    ]);
+    expect(sql.slice(0, 2)).toEqual(["INSTALL three_d", "LOAD three_d"]);
   });
 
   it("costs one INSTALL for two concurrent calls", async () => {

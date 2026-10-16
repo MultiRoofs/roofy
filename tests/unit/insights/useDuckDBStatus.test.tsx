@@ -196,7 +196,15 @@ describe("duckdb.ts publishes every transition", () => {
     stop();
     expect(seen).toEqual(["initializing", "ready:unloaded"]);
     expect(duckdb.getDuckDBStatus().state).toBe("ready");
-    expect(queries).toContain("INSTALL cityjson FROM community");
+    // The repository is this origin's vendored copy, set before any
+    // extension is asked for, and autoloading (parquet) reads it too.
+    const repository = `${location.origin}/duckdb-ext`;
+    expect(queries.slice(0, 4)).toEqual([
+      `SET custom_extension_repository = '${repository}'`,
+      `SET autoinstall_extension_repository = '${repository}'`,
+      "INSTALL cityjson",
+      "LOAD cityjson",
+    ]);
   });
 
   it("announces a FAILED boot: initializing, then failed, once", async () => {

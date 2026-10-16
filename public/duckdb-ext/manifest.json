@@ -1,0 +1,27 @@
+{
+  "duckdb": "v1.5.5",
+  "platform": "wasm_eh",
+  "duckdbWasm": "1.33.1-dev64.0",
+  "extensions": {
+    "cityjson": {
+      "source": "https://community-extensions.duckdb.org/v1.5.5/wasm_eh/cityjson.duckdb_extension.wasm",
+      "sha256": "bebabd249e1bacd4c97c7d3949c4cc0920369f1af2c42222c70577c242798ba8",
+      "footer": ["CPP", "a1455e1", "v1.5.5", "wasm_eh", "4"]
+    },
+    "three_d": {
+      "source": "https://community-extensions.duckdb.org/v1.5.5/wasm_eh/three_d.duckdb_extension.wasm",
+      "sha256": "0bf8080fc14e55da75b057c747973d865bcfd8730453120ee736393c5a94d45c",
+      "footer": ["CPP", "679ee09", "v1.5.5", "wasm_eh", "4"]
+    },
+    "spatial": {
+      "source": "https://extensions.duckdb.org/v1.5.5/wasm_eh/spatial.duckdb_extension.wasm",
+      "sha256": "9f313e5294a272b67ddfe56b387cd75fb10492f87e6a707f30c4be56e47c02b3",
+      "footer": ["CPP", "eb1e57c", "v1.5.5", "wasm_eh", "4"]
+    },
+    "parquet": {
+      "source": "https://extensions.duckdb.org/v1.5.5/wasm_eh/parquet.duckdb_extension.wasm",
+      "sha256": "31b294da2ef96f61e87246a0b1aa7580d20ad7ae37aa1e912fa0c7488192c5c6",
+      "footer": ["CPP", "v1.5.5", "v1.5.5", "wasm_eh", "4"]
+    }
+  }
+}
