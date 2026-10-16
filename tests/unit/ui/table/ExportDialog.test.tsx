@@ -134,7 +134,7 @@ const FAMILY_TABLE = {
 
 function open(over: Record<string, unknown> = {}) {
   const onClose = vi.fn();
-  render(
+  const { unmount } = render(
     <ExportDialog
       layerId="L"
       layerName="delft"
@@ -146,7 +146,7 @@ function open(over: Record<string, unknown> = {}) {
       {...over}
     />,
   );
-  return { onClose };
+  return { onClose, unmount };
 }
 
 beforeEach(() => {
@@ -287,14 +287,54 @@ describe("ExportDialog", () => {
     ).toBeTruthy();
   });
 
-  it("offers CityJSON, CityJSONSeq and FlatCityBuf DISABLED, with the reason", async () => {
-    open();
+  it("exports CityJSON, CityJSONSeq and FlatCityBuf with the LoD and the chosen types", async () => {
+    const cases = [
+      ["CityJSON", "cityjson", "delft.city.json"],
+      ["CityJSONSeq", "cityjsonseq", "delft.city.jsonl"],
+      ["FlatCityBuf", "flatcitybuf", "delft.fcb"],
+    ] as const;
+    for (const [label, format, fileName] of cases) {
+      runExport.mockClear();
+      const view = open();
+      await waitFor(() =>
+        expect(screen.getByLabelText("Building")).toBeTruthy(),
+      );
+      fireEvent.click(screen.getByLabelText("SolitaryVegetationObject"));
+      fireEvent.click(screen.getByLabelText(label));
+      fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+      await waitFor(() => expect(runExport).toHaveBeenCalled());
+      const request = runExport.mock.calls[0]![0] as {
+        kind: string;
+        format: string;
+        lodSuffix: string;
+        rootTypes: string[];
+        allRootTypes: string[];
+        attributes: string[];
+        reader: string;
+        fileName: string;
+      };
+      expect(request.kind).toBe("geometry");
+      expect(request.format).toBe(format);
+      expect(request.lodSuffix).toBe("2_2");
+      expect(request.rootTypes).toEqual(["Building"]);
+      expect(request.allRootTypes).toEqual([
+        "Building",
+        "SolitaryVegetationObject",
+      ]);
+      expect(request.attributes).toEqual(["b3_h_dak_max"]);
+      expect(request.reader).toBe("read_cityjson");
+      expect(request.fileName).toBe(fileName);
+      view.unmount();
+    }
+  });
+
+  it("offers the geometry formats without an EPSG code: the source carries its own CRS", async () => {
+    open({ epsg: null });
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     for (const label of ["CityJSON", "CityJSONSeq", "FlatCityBuf"]) {
-      const radio = screen.getByLabelText(label) as HTMLInputElement;
-      expect(radio.disabled).toBe(true);
-      expect(radio.closest("label")!.title).toBe(
-        "Not available in the browser build of the cityjson extension (writes an empty file)",
+      expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(
+        false,
       );
     }
   });

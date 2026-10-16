@@ -158,6 +158,58 @@ describe("validateExportBytes", () => {
   });
 });
 
+describe("validateExportBytes for the geometry formats", () => {
+  const enc = (text: string) => new TextEncoder().encode(text);
+
+  it("takes a CityJSON document and refuses a truncated one", () => {
+    expect(
+      validateExportBytes(
+        "a",
+        "cityjson",
+        enc('{"type":"CityJSON","CityObjects":{}}\n'),
+      ).ok,
+    ).toBe(true);
+    expect(
+      validateExportBytes("a", "cityjson", enc('{"type":"CityJSON","CityObj'))
+        .ok,
+    ).toBe(false);
+    expect(validateExportBytes("a", "cityjson", enc("[1, 2]")).ok).toBe(false);
+  });
+
+  it("takes a CityJSONSeq whose first line is the CityJSON header", () => {
+    expect(
+      validateExportBytes(
+        "a",
+        "cityjsonseq",
+        enc(
+          '{"type":"CityJSON","version":"2.0"}\n{"type":"CityJSONFeature"}\n',
+        ),
+      ).ok,
+    ).toBe(true);
+    expect(
+      validateExportBytes(
+        "a",
+        "cityjsonseq",
+        enc('{"type":"CityJSONFeature"}\n'),
+      ).ok,
+    ).toBe(false);
+    expect(
+      validateExportBytes("a", "cityjsonseq", enc('{"type":"CityJSON"')).ok,
+    ).toBe(false);
+  });
+
+  it("takes a FlatCityBuf by its magic bytes", () => {
+    const magic = [0x66, 0x63, 0x62, 0x01, 0x66, 0x63, 0x62, 0x00];
+    expect(
+      validateExportBytes("a", "flatcitybuf", new Uint8Array([...magic, 0, 0]))
+        .ok,
+    ).toBe(true);
+    expect(
+      validateExportBytes("a", "flatcitybuf", enc("PAR1 not an fcb")).ok,
+    ).toBe(false);
+  });
+});
+
 describe("attribute export", () => {
   it("COPYs to a fresh VFS name, reads it back, and drops it", async () => {
     const result = await runExport({

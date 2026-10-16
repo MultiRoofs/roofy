@@ -53,3 +53,11 @@ Guidelines:
   CompositeSolid's WKB type name is `GeometryCollection Z` and that
   `ST_3DTryFromWKB` parses it, and for Measure solids' roll-up test over a
   CompositeSolid.
+- `geometry-templates.city.json` (1.8 KB): two SolitaryVegetationObjects drawn
+  only as GeometryInstances of two `geometry-templates`, with a material, in
+  EPSG:7415. The same JSON as duckdb-cityjson's
+  `test/data/geometry_templates.city.json` (642e389), reformatted, so it is a fixture the
+  app's own exporter did not produce. FOR the geometry-export probe
+  (`tests/integration/duckdb/geometryExport.test.ts`), which pins that an
+  export carries `implicit_geometry` back out as instances of the source's own
+  templates.

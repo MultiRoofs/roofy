@@ -6,9 +6,8 @@
  * the rows a filter matched would routinely produce a file of semantics with
  * no shapes in it.
  *
- * CityJSON, CityJSONSeq and FlatCityBuf are deliberately absent: their wasm
- * writers produce ZERO BYTES, silently, and a format that hands back an empty
- * file is worse than one that is not offered.
+ * The geometry formats (CityJSON, CityJSONSeq, FlatCityBuf, CityParquet) need
+ * the layer's source: the browsing table has no geometry in it.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -70,10 +69,24 @@ const FIXED_COLUMNS = new Set([
   "other",
 ]);
 
-type Format = "cityparquet" | "parquet" | "csv" | "json";
+type GeometryFormat = "cityjson" | "cityjsonseq" | "flatcitybuf";
+type Format = "cityparquet" | GeometryFormat | "parquet" | "csv" | "json";
+
+const GEOMETRY_FORMATS: ReadonlyArray<GeometryFormat> = [
+  "cityjson",
+  "cityjsonseq",
+  "flatcitybuf",
+];
+
+function isGeometryFormat(format: Format): format is GeometryFormat {
+  return (GEOMETRY_FORMATS as ReadonlyArray<Format>).includes(format);
+}
 
 const FORMAT_LABELS: Readonly<Record<Format, string>> = {
   cityparquet: "CityParquet package (.zip)",
+  cityjson: "CityJSON",
+  cityjsonseq: "CityJSONSeq",
+  flatcitybuf: "FlatCityBuf",
   parquet: "Parquet",
   csv: "CSV",
   json: "JSON",
@@ -81,29 +94,13 @@ const FORMAT_LABELS: Readonly<Record<Format, string>> = {
 
 const EXTENSIONS: Readonly<Record<Format, string>> = {
   cityparquet: "cityparquet.zip",
+  cityjson: "city.json",
+  cityjsonseq: "city.jsonl",
+  flatcitybuf: "fcb",
   parquet: "parquet",
   csv: "csv",
   json: "json",
 };
-
-/**
- * Shown, and greyed out, so the user learns the capability EXISTS and why they
- * cannot have it — an absent option teaches nothing and invites the same
- * question again next release.
- *
- * The sinks bypass DuckDB's VFS entirely: browser-confirmed 2026-09-04 that no
- * file is created at all (the missing-file signature), for all three formats,
- * with and without a pre-registered empty buffer, while the same extension
- * writes fine through `cityparquet_write`.
- */
-const DISABLED_FORMATS: ReadonlyArray<string> = [
-  "CityJSON",
-  "CityJSONSeq",
-  "FlatCityBuf",
-];
-
-const DISABLED_FORMAT_REASON =
-  "Not available in the browser build of the cityjson extension (writes an empty file)";
 
 const NO_EPSG_REASON =
   "This layer has no EPSG code, so a CityParquet package cannot be written.";
@@ -222,16 +219,20 @@ export function ExportDialog({
     [table.columns],
   );
 
-  /** A CityParquet package needs a reader (the geometry comes from the source,
-   *  not the browsing table), an LoD, and an EPSG code for its CRS. */
-  const canCityParquet =
-    table.reader !== null &&
-    table.source !== null &&
-    table.lods.length > 0 &&
-    epsg !== null;
-  const formats: ReadonlyArray<Format> = canCityParquet
-    ? ["cityparquet", "parquet", "csv", "json"]
-    : ["parquet", "csv", "json"];
+  /** A geometry format needs a reader (the geometry comes from the source, not
+   *  the browsing table) and an LoD to write. The CityJSON-family writers take
+   *  the CRS from the source itself; a CityParquet package also needs an EPSG
+   *  code to state its CRS. */
+  const canGeometry =
+    table.reader !== null && table.source !== null && table.lods.length > 0;
+  const canCityParquet = canGeometry && epsg !== null;
+  const formats: ReadonlyArray<Format> = [
+    ...(canCityParquet ? (["cityparquet"] as const) : []),
+    ...(canGeometry ? GEOMETRY_FORMATS : []),
+    "parquet",
+    "csv",
+    "json",
+  ];
   /**
    * A reader-backed layer whose bytes can no longer be obtained.
    *
@@ -506,6 +507,30 @@ export function ExportDialog({
           epsg,
           fileName: exportFileName(layerName, EXTENSIONS.cityparquet),
         };
+      } else if (isGeometryFormat(format)) {
+        const { reader, source } = table;
+        if (reader === null || source === null || lod === null) {
+          throw new Error(
+            "This layer no longer has a CityJSON source with an LoD, so its geometry cannot be written. Pick another format.",
+          );
+        }
+        request = {
+          kind: "geometry",
+          format,
+          table: table.table,
+          reader,
+          source,
+          sourceExtension:
+            reader === "read_cityjsonseq" ? "city.jsonl" : "city.json",
+          lodSuffix: lod.suffix,
+          attributes,
+          computedAttributes,
+          where,
+          sourceFeatureIds: table.sourceFeatureIds,
+          rootTypes: chosenTypes,
+          allRootTypes: rootTypes,
+          fileName: exportFileName(layerName, EXTENSIONS[format]),
+        };
       } else {
         request = {
           kind: "attributes",
@@ -696,23 +721,6 @@ export function ExportDialog({
                 <span>{FORMAT_LABELS[f]}</span>
               </label>
             ))}
-            {/* Only where a source exists to write geometry FROM: on a
-                fallback layer the honest message is the sentence below, not a
-                greyed-out option whose reason is a different one. */}
-            {table.reader !== null &&
-              DISABLED_FORMATS.map((label) => (
-                <label key={label} title={DISABLED_FORMAT_REASON}>
-                  <input
-                    type="radio"
-                    name="export-format"
-                    aria-label={label}
-                    disabled
-                    checked={false}
-                    onChange={() => {}}
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
           </fieldset>
 
           {table.reader === null && (
