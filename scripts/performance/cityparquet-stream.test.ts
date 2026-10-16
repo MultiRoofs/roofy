@@ -438,7 +438,6 @@ it.skipIf(!present)(
               level,
               cells: missing,
               lod,
-              hiddenTypes: [],
               rules: [],
               rulesEnabled: false,
             });

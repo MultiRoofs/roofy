@@ -369,9 +369,9 @@ export interface StreamSyncMemo {
  * `syncStyles`, which both skip these layers by design.
  *
  * Memoised on the values actually pushed, because none of them is free:
- * `setRules` re-bakes every resident cell in the worker, `setLod` and
- * `setHiddenTypes` force a commit (so either refetches even for a camera that
- * has not moved), and `setVisible` fans out to every resident cell mesh. The
+ * `setRules` re-bakes every resident cell in the worker, `setLod` forces a
+ * commit (so it refetches even for a camera that has not moved), and
+ * `setVisible` and `setHiddenTypes` write every resident cell mesh. The
  * viewport's reconciliation effect re-runs on every `layers` change — a hover,
  * a rename, another layer's toggle — so without the memo each of those would
  * cost a full round trip per streaming layer.
