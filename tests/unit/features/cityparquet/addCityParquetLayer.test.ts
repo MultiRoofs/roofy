@@ -374,7 +374,8 @@ describe("addCityParquetLayerFromUrl", () => {
       objects: {},
       vertexCount: 0,
     };
-    mocks.loadUrl.mockResolvedValue(model);
+    const tables = [{ bytes: new Uint8Array([1]) }];
+    mocks.loadUrl.mockResolvedValue({ model, tables, sourceCrs: "EPSG:28992" });
     const resolveStreamPlugin = vi.fn();
     const holdEngine = vi.fn(<T>(open: () => Promise<T>) => open());
     const layerId = await addCityParquetLayerFromUrl(
@@ -395,9 +396,11 @@ describe("addCityParquetLayerFromUrl", () => {
     expect(layer.isStreaming).toBe(false);
     expect(layer.visible).toBe(false);
     expect(layer.name).toBe("delft");
+    // The table reads the fetched Parquet, never the model's JSON.
     expect(mocks.enqueue).toHaveBeenCalledWith(layerId, {
-      kind: "model",
-      model,
+      kind: "parquet",
+      tables,
+      sourceCrs: "EPSG:28992",
     });
   });
 });

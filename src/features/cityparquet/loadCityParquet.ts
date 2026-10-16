@@ -32,7 +32,8 @@ import {
   assembleCityParquetModel,
   parseCityParquetManifest,
 } from "@cityjson/navara-cityparquet";
-import type { CityModel } from "@cityjson/navara-core";
+import { parseEpsgCode, type CityModel } from "@cityjson/navara-core";
+import type { ParquetTableSource } from "../../insights/layerTables";
 import { normalizeCityParquetCrs } from "./normalizeCityParquetCrs";
 import { detectEncoding } from "../../domain/citymodel/detectEncoding";
 import { browserPlatform } from "../../platform/browser";
@@ -62,6 +63,32 @@ const MANIFEST_FILENAME = "metadata.json";
  * not the thing being tested.
  */
 const FETCH_CONCURRENCY = 6;
+
+/**
+ * A static load: the model the viewer draws, and the object tables the layer's
+ * DuckDB table is read from.
+ *
+ * `sourceCrs` is the CRS the FILES are in — what their `bbox` columns
+ * measure — which is not the model's after {@link normalizeCityParquetCrs}
+ * has moved a geographic package into metres.
+ */
+export interface LoadedCityParquet {
+  readonly model: CityModel;
+  readonly tables: ReadonlyArray<ParquetTableSource>;
+  readonly sourceCrs: string | null;
+}
+
+function loaded(
+  assembled: CityModel,
+  tables: ReadonlyArray<ParquetTableSource>,
+): LoadedCityParquet {
+  const epsg = parseEpsgCode(assembled.metadata.referenceSystem);
+  return {
+    model: normalizeCityParquetCrs(assembled),
+    tables,
+    sourceCrs: epsg === null ? null : `EPSG:${String(epsg)}`,
+  };
+}
 
 /** One fetched file, in the shape `assembleCityParquetModel` takes. */
 interface FetchedTable {
@@ -540,7 +567,7 @@ async function fetchSidecars(
 export async function loadCityParquetFromUrl(
   rawUrl: string,
   http: HttpClient = browserPlatform.http,
-): Promise<CityModel> {
+): Promise<LoadedCityParquet> {
   const source = classifyCityParquetUrl(rawUrl);
   if (source === null) {
     // `detectEncoding` matches on a name, `classifyCityParquetUrl` on a URL, so
@@ -552,11 +579,10 @@ export async function loadCityParquetFromUrl(
     // CityParquet at all. (A `.parquet.gz` no longer lands here: the classifier
     // owns it as a table, for the same reason.)
     if (detectEncoding(rawUrl) === "cityparquet") {
-      return normalizeCityParquetCrs(
-        await assembleCityParquetModel([
-          await fetchTable(rawUrl, baseName(rawUrl), http),
-        ]),
-      );
+      const table = await fetchTable(rawUrl, baseName(rawUrl), http);
+      return loaded(await assembleCityParquetModel([table]), [
+        { bytes: table.bytes },
+      ]);
     }
     throw new Error(
       `"${rawUrl}" is not a CityParquet source — expected a .parquet file, a package directory containing ${MANIFEST_FILENAME}, or a gs:// / s3:// pattern.`,
@@ -567,8 +593,9 @@ export async function loadCityParquetFromUrl(
     fetchAll(targets.tables, http),
     fetchSidecars(targets.sidecars, http),
   ]);
-  return normalizeCityParquetCrs(
+  return loaded(
     await assembleCityParquetModel(tables, { sidecars }),
+    tables.map(({ bytes }) => ({ bytes })),
   );
 }
 
@@ -729,7 +756,7 @@ export async function cityParquetFileTargets(
  */
 export async function loadCityParquetFromFiles(
   files: ReadonlyArray<File>,
-): Promise<CityModel> {
+): Promise<LoadedCityParquet> {
   const targets = await cityParquetFileTargets(files);
   const tables: FetchedTable[] = [];
   for (const { name, file } of targets.tables) {
@@ -741,8 +768,9 @@ export async function loadCityParquetFromFiles(
     const file = targets.sidecars[kind];
     if (file) sidecars[kind] = new Uint8Array(await file.arrayBuffer());
   }
-  return normalizeCityParquetCrs(
+  return loaded(
     await assembleCityParquetModel(tables, { sidecars }),
+    targets.tables.map(({ file }) => ({ file })),
   );
 }
 

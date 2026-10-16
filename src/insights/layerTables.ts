@@ -40,7 +40,9 @@ import {
   initDuckDB as bootEngine,
   onEngineDeath,
   registerBuffer as sendRegisterBuffer,
+  registerParquetFile as sendRegisterParquetFile,
   runQuery as sendQuery,
+  type RegisterOutcome,
   type QueryOutcome,
 } from "./duckdb";
 import { EngineDeadError, racedWithDeath } from "./engineAwait";
@@ -53,6 +55,9 @@ import {
 } from "./layerRows";
 import {
   buildCountSql,
+  buildOtherStructureSql,
+  buildParquetTableSql,
+  buildUnpackOtherSql,
   quoteIdent,
   quoteLiteral,
   READ_JSON_OPTIONS,
@@ -88,6 +93,13 @@ function ddl(sql: string): Promise<QueryOutcome> {
 
 function registerBuffer(name: string, bytes: Uint8Array): Promise<boolean> {
   return racedWithDeath(sendRegisterBuffer(name, bytes));
+}
+
+function registerParquetFile(
+  name: string,
+  file: File,
+): Promise<RegisterOutcome> {
+  return racedWithDeath(sendRegisterParquetFile(name, file));
 }
 
 function dropBuffer(name: string): Promise<void> {
@@ -131,6 +143,12 @@ export type SourceProvider = () => Promise<Uint8Array>;
  */
 export type ReaderExtension = "city.json" | "city.jsonl";
 
+/** One object table of a static CityParquet package: the bytes a URL load
+ *  fetched, or the `File` a picked folder holds. */
+export type ParquetTableSource =
+  | { readonly bytes: Uint8Array }
+  | { readonly file: File };
+
 export type LayerTableSource =
   | {
       readonly kind: "bytes";
@@ -155,6 +173,22 @@ export type LayerTableSource =
        *  refused with that reason. Each call returns a FRESH array, because
        *  registering one consumes it and an export may re-register. */
       readonly provider: SourceProvider | null;
+    }
+  | {
+      /**
+       * A static CityParquet package's object tables, read straight from the
+       * Parquet by `read_parquet` — no JSON round trip through the model.
+       *
+       * NEVER CONSUMED, unlike `bytes`: a `File` is registered by reference,
+       * and fetched bytes are COPIED before `registerBuffer` detaches them —
+       * the layer's model may still hold views into the original array. So a
+       * parked source replays as it is.
+       */
+      readonly kind: "parquet";
+      readonly tables: ReadonlyArray<ParquetTableSource>;
+      /** The CRS the files' own `bbox` columns are in, as for a family view
+       *  (`LayerTable.sourceCrs`). */
+      readonly sourceCrs: string | null;
     }
   | { readonly kind: "model"; readonly model: CityModel }
   | {
@@ -928,6 +962,72 @@ async function releaseBuffer(scratch: BuildScratch, name: string) {
  */
 export const READ_CITYJSON_TABLE_LIMIT_BYTES = 150 * 1024 * 1024;
 
+/**
+ * Describe a table built with {@link readerTableSelectList}, and drop its LoD
+ * markers.
+ *
+ * The ladder comes from the markers: the `geometry_lod*` columns it is read
+ * from are exactly the ones the table leaves out.
+ */
+async function dropLodMarkers(
+  table: string,
+): Promise<{ kept: ColumnInfo[]; lods: LodColumn[] }> {
+  const described = await runQuery(`DESCRIBE ${quoteIdent(table)}`);
+  if (!described.ok) throw new BuildError(described.message);
+  const all = columnsFromDescribe(described.rows);
+  const markers = all.filter((c) => c.name.startsWith(LOD_MARKER_PREFIX));
+  for (const marker of markers) {
+    const dropped = await ddl(
+      `ALTER TABLE ${quoteIdent(table)} DROP COLUMN ${quoteIdent(marker.name)}`,
+    );
+    if (!dropped.ok) throw new BuildError(dropped.message);
+  }
+  return {
+    kept: all.filter((c) => !c.name.startsWith(LOD_MARKER_PREFIX)),
+    lods: [
+      ...lodsFromColumnNames(
+        markers.map((c) => c.name.slice(LOD_MARKER_PREFIX.length)),
+      ),
+    ],
+  };
+}
+
+async function describeTable(table: string): Promise<ColumnInfo[]> {
+  const described = await runQuery(`DESCRIBE ${quoteIdent(table)}`);
+  if (!described.ok) throw new BuildError(described.message);
+  return columnsFromDescribe(described.rows);
+}
+
+/**
+ * Give each member of a package's `other` column a column of its own.
+ *
+ * The CityParquet reader merges `other`'s members into an object's
+ * attributes, so the model's table had them as columns; a table read from the
+ * Parquet has to unpack them to match. Their types are inferred over the whole
+ * column (`json_group_structure`); a member whose type varies is `JSON`.
+ *
+ * Which members come out is {@link buildUnpackOtherSql}'s rule. Resolves
+ * whether the table was rebuilt.
+ */
+async function unpackOther(
+  table: string,
+  columns: ReadonlyArray<ColumnInfo>,
+): Promise<boolean> {
+  if (!columns.some((c) => c.name === "other")) return false;
+  const result = await runQuery(buildOtherStructureSql(table));
+  if (!result.ok) throw new BuildError(result.message);
+  const structure = result.rows[0]?.s;
+  const unpack = buildUnpackOtherSql(
+    table,
+    columns.map((c) => c.name),
+    typeof structure === "string" ? structure : null,
+  );
+  if (unpack === null) return false;
+  const rebuilt = await ddl(unpack);
+  if (!rebuilt.ok) throw new BuildError(rebuilt.message);
+  return true;
+}
+
 async function buildFromReader(
   table: string,
   source: Extract<LayerTableSource, { kind: "bytes" }>,
@@ -961,17 +1061,7 @@ async function buildFromReader(
     );
     if (!created.ok) throw new BuildError(created.message);
 
-    const described = await runQuery(`DESCRIBE ${quoteIdent(table)}`);
-    if (!described.ok) throw new BuildError(described.message);
-    const all = columnsFromDescribe(described.rows);
-    const markers = all.filter((c) => c.name.startsWith(LOD_MARKER_PREFIX));
-    for (const marker of markers) {
-      const dropped = await ddl(
-        `ALTER TABLE ${quoteIdent(table)} DROP COLUMN ${quoteIdent(marker.name)}`,
-      );
-      if (!dropped.ok) throw new BuildError(dropped.message);
-    }
-    const kept = all.filter((c) => !c.name.startsWith(LOD_MARKER_PREFIX));
+    const { kept, lods } = await dropLodMarkers(table);
 
     return {
       table,
@@ -981,11 +1071,7 @@ async function buildFromReader(
       extension: source.extension,
       sourceBytes,
       columns: kept,
-      // From the markers: the `geometry_lod*` columns the ladder is read from
-      // are exactly the ones the table leaves out.
-      lods: lodsFromColumnNames(
-        markers.map((c) => c.name.slice(LOD_MARKER_PREFIX.length)),
-      ),
+      lods,
       // An ordinary build holds the WHOLE source; only a derived layer's
       // adopted table carries a cut (`adoptLayerTable`).
       sourceFeatureIds: null,
@@ -1001,6 +1087,71 @@ async function buildFromReader(
     // ALWAYS, success or not: the table (if it was made) survives this, and a
     // failed build must not leave a multi-megabyte buffer in the VFS.
     await releaseBuffer(scratch, sourceName);
+  }
+}
+
+/**
+ * A static CityParquet package's table, from its own Parquet files.
+ *
+ * Every object table goes into ONE table, matched by column name: the
+ * reserved columns are the same in every family, and an attribute only one
+ * family has is NULL in the others' rows. The same select list as a reader
+ * build, so the geometry is left out and the LoD ladder survives.
+ *
+ * No reader and no provider: the table is browsable, filterable and
+ * exportable as attributes, and nothing re-reads its geometry.
+ */
+async function buildFromParquet(
+  table: string,
+  source: Extract<LayerTableSource, { kind: "parquet" }>,
+  scratch: BuildScratch,
+): Promise<LayerTable> {
+  const names: string[] = [];
+  let sourceBytes = 0;
+  try {
+    for (const [index, part] of source.tables.entries()) {
+      const name = `${table}_${String(index)}.parquet`;
+      if ("file" in part) {
+        sourceBytes += part.file.size;
+        const outcome = await registerParquetFile(name, part.file);
+        if (!outcome.ok) throw new BuildError(outcome.message);
+      } else {
+        sourceBytes += part.bytes.byteLength;
+        if (!(await registerBuffer(name, part.bytes.slice()))) {
+          throw new BuildError(
+            "The package's tables could not be handed to DuckDB.",
+          );
+        }
+      }
+      names.push(name);
+      scratch.add(name);
+    }
+    if (names.length === 0) {
+      throw new BuildError("The package has no object tables.");
+    }
+    const created = await ddl(buildParquetTableSql(table, names));
+    if (!created.ok) throw new BuildError(created.message);
+    const { kept, lods } = await dropLodMarkers(table);
+    const columns = (await unpackOther(table, kept))
+      ? await describeTable(table)
+      : kept;
+    return {
+      table,
+      sourceName: null,
+      source: null,
+      reader: null,
+      extension: null,
+      sourceBytes,
+      columns,
+      lods,
+      sourceFeatureIds: null,
+      rowCount: await countTableRows(table),
+      fileBacked: false,
+      familyKey: null,
+      sourceCrs: source.sourceCrs,
+    };
+  } finally {
+    for (const name of names) await releaseBuffer(scratch, name);
   }
 }
 
@@ -1542,13 +1693,15 @@ export function enqueueLayerTable(
       const info =
         source.kind === "bytes"
           ? await buildFromReader(table, source, scratch)
-          : await buildFromRows(
-              table,
-              source.kind === "model"
-                ? flatRowsFromModel(source.model)
-                : flatRowsFromRecords(source.records()),
-              scratch,
-            );
+          : source.kind === "parquet"
+            ? await buildFromParquet(table, source, scratch)
+            : await buildFromRows(
+                table,
+                source.kind === "model"
+                  ? flatRowsFromModel(source.model)
+                  : flatRowsFromRecords(source.records()),
+                scratch,
+              );
       // NOTE what is NOT kept: `info` carries the PROVIDER, never the source
       // object, so the (now detached) `bytes` array and the `model`/`records`
       // closure are both released with the caller's reference. A rebuild

@@ -12,7 +12,11 @@
  * `runQuery`/`ddl` from `insights/duckdb.ts`.
  */
 
-import { isTextColumn, type ColumnInfo } from "./columnKind";
+import {
+  isTextColumn,
+  readerTableSelectList,
+  type ColumnInfo,
+} from "./columnKind";
 import type {
   FilterCondition,
   FilterGroup,
@@ -973,4 +977,73 @@ export function buildGeometryExportSql(
  */
 export function buildFlatCityBufLossSql(input: GeometryExportScope): string {
   return `SELECT count(*) FILTER (WHERE "implicit_geometry" IS NOT NULL) AS "implicit", count(*) FILTER (WHERE len("address") > 0) AS "address" ${geometryExportFrom(input)}`;
+}
+
+// ---------------------------------------------------------------------------
+// A static CityParquet package's table
+// ---------------------------------------------------------------------------
+
+/**
+ * Every object table of a package in ONE table, matched by column name: the
+ * reserved columns are the same in every family, and an attribute only one
+ * family has is NULL in the others' rows. The reader builds' select list, so
+ * the geometry is left out and the LoD markers are made.
+ */
+export function buildParquetTableSql(
+  table: string,
+  files: ReadonlyArray<string>,
+): string {
+  const list = files.map((name) => quoteLiteral(name)).join(", ");
+  return `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT ${readerTableSelectList()} FROM read_parquet([${list}], union_by_name = true)`;
+}
+
+/** The merged JSON structure of a table's `other` column, as text. */
+export function buildOtherStructureSql(table: string): string {
+  return `SELECT json_group_structure("other")::VARCHAR AS "s" FROM ${quoteIdent(table)}`;
+}
+
+/**
+ * Rebuild `table` with each member of `other` as a column of its own, or
+ * `null` when no member can come out.
+ *
+ * `structure` is {@link buildOtherStructureSql}'s answer. A member whose name
+ * is taken — by a column, or by another member differing only in case, since
+ * DuckDB's names are case-insensitive — stays packed: `unnest` would otherwise
+ * silently REPLACE the column of that name. `other` itself is dropped only
+ * when every member came out.
+ */
+export function buildUnpackOtherSql(
+  table: string,
+  columns: ReadonlyArray<string>,
+  structure: string | null,
+): string | null {
+  if (structure === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(structure);
+  } catch {
+    return null;
+  }
+  // "NULL" for an all-NULL column, "JSON" for members that are not objects.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  const taken = new Set(columns.map((c) => c.toLowerCase()));
+  const seen = new Map<string, number>();
+  for (const [key] of entries) {
+    const lower = key.toLowerCase();
+    seen.set(lower, (seen.get(lower) ?? 0) + 1);
+  }
+  const unpacked = Object.create(null) as Record<string, unknown>;
+  let packed = false;
+  for (const [key, type] of entries) {
+    const lower = key.toLowerCase();
+    if (taken.has(lower) || (seen.get(lower) ?? 0) > 1) packed = true;
+    else unpacked[key] = type;
+  }
+  if (Object.keys(unpacked).length === 0) return null;
+  const t = quoteIdent(table);
+  const keep = packed ? "*" : `* EXCLUDE (${quoteIdent("other")})`;
+  return `CREATE OR REPLACE TABLE ${t} AS SELECT ${keep}, unnest(json_transform(${quoteIdent("other")}, ${quoteLiteral(JSON.stringify(unpacked))})) FROM ${t}`;
 }

@@ -321,9 +321,17 @@ beforeEach(() => {
   loadFromUrl.mockReset();
   loadFromUrl.mockResolvedValue(jsonLoaded);
   loadCityParquetFromUrl.mockReset();
-  loadCityParquetFromUrl.mockResolvedValue(parquetModel);
+  loadCityParquetFromUrl.mockResolvedValue({
+    model: parquetModel,
+    tables: [{ bytes: new Uint8Array([1]) }],
+    sourceCrs: null,
+  });
   loadCityParquetFromFiles.mockReset();
-  loadCityParquetFromFiles.mockResolvedValue(parquetModel);
+  loadCityParquetFromFiles.mockResolvedValue({
+    model: parquetModel,
+    tables: [{ bytes: new Uint8Array([1]) }],
+    sourceCrs: null,
+  });
   useLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
   enqueued.length = 0;
@@ -602,7 +610,7 @@ describe("App — a failed group add is reported", () => {
 });
 
 describe("DuckDB layer tables", () => {
-  it("builds a CityParquet layer's table from the parsed MODEL — there is no reader for it", async () => {
+  it("builds a CityParquet layer's table from its Parquet files, not from the model", async () => {
     location.hash = shareHash([
       {
         name: "pkg",
@@ -614,7 +622,7 @@ describe("DuckDB layer tables", () => {
     ]);
     render(<App persistenceStore={storeWith(null)} />);
     await waitFor(() => expect(enqueued).toHaveLength(1));
-    expect(enqueued[0]!.kind).toBe("model");
+    expect(enqueued[0]!.kind).toBe("parquet");
   });
 
   it("builds an ordinary CityJSON URL layer's table from the decoded BYTES", async () => {

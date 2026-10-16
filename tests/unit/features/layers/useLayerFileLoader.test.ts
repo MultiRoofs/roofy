@@ -145,6 +145,14 @@ const PARQUET_MODEL: CityModel = {
   vertexCount: 0,
 };
 
+/** What the loader resolves: the model, and the tables its DuckDB table is
+ *  read from. */
+const PARQUET_LOADED = {
+  model: PARQUET_MODEL,
+  tables: [{ bytes: new Uint8Array([1]) }],
+  sourceCrs: null,
+};
+
 const HEADER: FcbHeaderModel = {
   version: "1.0",
   featuresCount: 10,
@@ -452,8 +460,8 @@ describe("useLayerFileLoader — CityParquet routing", () => {
   beforeEach(() => {
     cityparquet.loadCityParquetFromUrl.mockReset();
     cityparquet.loadCityParquetFromFiles.mockReset();
-    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
-    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_MODEL);
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_LOADED);
+    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_LOADED);
   });
 
   it("addLayerFromFile routes a .parquet File through loadCityParquetFromFiles", async () => {
@@ -543,7 +551,7 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     // for the fetching that would follow if it did not.
     cityparquet.loadCityParquetFromUrl.mockImplementation((url: string) => {
       classifyCityParquetUrl(url);
-      return Promise.resolve(PARQUET_MODEL);
+      return Promise.resolve(PARQUET_LOADED);
     });
 
     await act(async () => {
@@ -601,8 +609,8 @@ describe("useLayerFileLoader — streaming large CityParquet sources", () => {
   beforeEach(() => {
     cityparquet.loadCityParquetFromUrl.mockReset();
     cityparquet.loadCityParquetFromFiles.mockReset();
-    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
-    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_MODEL);
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_LOADED);
+    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_LOADED);
   });
 
   it("streams a package the decision sizes over the threshold, never reading it whole", async () => {
@@ -1122,7 +1130,7 @@ describe("useLayerFileLoader — the encoding override", () => {
   });
 
   it("routes an extensionless URL into the CityParquet arm when the override says so", async () => {
-    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_LOADED);
     const { result } = renderHook(() => useLayerFileLoader());
 
     await act(async () => {

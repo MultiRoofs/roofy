@@ -135,16 +135,22 @@ function manifestOf(count: number): string {
 
 describe("loadCityParquetFromUrl", () => {
   it("loads a single table url", async () => {
-    const model = await loadCityParquetFromUrl(
+    const { model, tables, sourceCrs } = await loadCityParquetFromUrl(
       "https://x.org/p/building.parquet",
       await packageHttp(),
     );
     expect(Object.keys(model.objects).length).toBe(3);
     expect(model.sourceEncoding).toBe("cityparquet");
+    // The fetched bytes, so the layer table does not download them again.
+    expect(tables).toHaveLength(1);
+    expect("bytes" in tables[0]! && tables[0].bytes.byteLength).toBeGreaterThan(
+      0,
+    );
+    expect(sourceCrs).toBe("EPSG:7415");
   });
 
   it("loads a package directory via metadata.json", async () => {
-    const model = await loadCityParquetFromUrl(
+    const { model } = await loadCityParquetFromUrl(
       "https://x.org/p/",
       await packageHttp(),
     );
@@ -213,7 +219,7 @@ describe("loadCityParquetFromUrl", () => {
 
   it("loads one object out of a bucket (storage-table)", async () => {
     const { http, fetched } = await bucketHttp([]);
-    const model = await loadCityParquetFromUrl(
+    const { model } = await loadCityParquetFromUrl(
       "gs://bkt/delft/building.parquet",
       http,
     );
@@ -230,7 +236,7 @@ describe("loadCityParquetFromUrl", () => {
       "delft/notes.txt",
       "delft/sub/other.parquet", // deeper than the prefix
     ]);
-    const model = await loadCityParquetFromUrl("gs://bkt/delft/", http);
+    const { model } = await loadCityParquetFromUrl("gs://bkt/delft/", http);
     expect(Object.keys(model.objects).length).toBe(3);
     expect(fetched).toEqual([
       "https://storage.googleapis.com/bkt/delft/building.parquet",
@@ -242,7 +248,7 @@ describe("loadCityParquetFromUrl", () => {
       ["delft/metadata.json", "delft/building.parquet", "delft/stray.parquet"],
       { withManifest: true },
     );
-    const model = await loadCityParquetFromUrl("gs://bkt/delft/", http);
+    const { model } = await loadCityParquetFromUrl("gs://bkt/delft/", http);
     expect(Object.keys(model.objects).length).toBe(3);
     // The manifest declares one table; "stray.parquet" is NOT loaded.
     expect(fetched).toEqual([
@@ -283,7 +289,7 @@ describe("loadCityParquetFromUrl", () => {
       "tiles/b/notes.txt",
       "other/c/building.parquet",
     ]);
-    const model = await loadCityParquetFromUrl(
+    const { model } = await loadCityParquetFromUrl(
       "gs://bkt/tiles/*/building.parquet",
       http,
     );
@@ -534,13 +540,16 @@ describe("loadCityParquetFromFiles", () => {
       new File([parquet], "building.parquet"),
       new File([meta], "metadata.json"),
     ];
-    const model = await loadCityParquetFromFiles(files);
+    const { model, tables } = await loadCityParquetFromFiles(files);
     expect(Object.keys(model.objects).length).toBe(3);
+    // The object tables as FILES, for the layer table to read by reference;
+    // the manifest is not one of them.
+    expect(tables).toEqual([{ file: files[0] }]);
   });
 
   it("takes every .parquet when the folder has no manifest", async () => {
     const parquet = await readFile(`${FIX}/building.parquet`);
-    const model = await loadCityParquetFromFiles([
+    const { model } = await loadCityParquetFromFiles([
       new File([parquet], "building.parquet"),
       new File([new Uint8Array()], "materials.parquet"),
       new File(["x"], "readme.txt"),
@@ -553,7 +562,7 @@ describe("loadCityParquetFromFiles", () => {
     const meta = await readFile(`${FIX}/metadata.json`);
     // A folder picker prefixes every path with the folder the user chose; the
     // manifest's "building.parquet" must still resolve through it.
-    const model = await loadCityParquetFromFiles([
+    const { model } = await loadCityParquetFromFiles([
       pickedFile(parquet, "delft/building.parquet"),
       pickedFile(meta, "delft/metadata.json"),
     ]);
@@ -562,12 +571,13 @@ describe("loadCityParquetFromFiles", () => {
 
   it("loads a nested (tiled) package by path, not by base name", async () => {
     const parquet = await readFile(`${FIX}/building.parquet`);
-    const model = await loadCityParquetFromFiles([
+    const { model, tables } = await loadCityParquetFromFiles([
       pickedFile(parquet, "tiled/a/building.parquet"),
       pickedFile(parquet, "tiled/b/building.parquet"),
       pickedFile(tiledManifest(), "tiled/metadata.json"),
     ]);
     expect(Object.keys(model.objects).length).toBe(3);
+    expect(tables).toHaveLength(2);
   });
 
   // The sharp end of the same bug: keying by base name kept only the LAST
@@ -678,7 +688,11 @@ describe("geographic CityParquet load integration", () => {
       const local = await loadCityParquetFromFiles([
         new File(["fixture"], "building.parquet"),
       ]);
-      for (const model of [remote, local]) {
+      // The TABLE reads the file itself, so it is told the file's own CRS,
+      // not the projected one the model was moved into.
+      expect(remote.sourceCrs).toBe("EPSG:6697");
+      expect(local.sourceCrs).toBe("EPSG:6697");
+      for (const { model } of [remote, local]) {
         expect(model.metadata.referenceSystem).toBe(
           "https://www.opengis.net/def/crs/EPSG/0/32654",
         );

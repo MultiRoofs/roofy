@@ -8,6 +8,8 @@ const dropped: string[] = [];
 /** `DESCRIBE` answers, keyed by the substring that identifies the query. */
 let describeRows: Record<string, unknown>[] = [];
 let countValue = 0;
+/** What `json_group_structure("other")` answers, or null for a NULL. */
+let otherStructure: string | null = null;
 /** SQL substrings that must FAIL, mapped to their message. */
 let failures: Record<string, string> = {};
 /** The engine's readiness, and a gate to hold `initDuckDB` open with. */
@@ -75,6 +77,13 @@ vi.mock("../../../src/insights/duckdb", () => {
     }
     if (statement.startsWith("DESCRIBE")) {
       return { ok: true as const, columns: [], rows: describeRows };
+    }
+    if (statement.includes("json_group_structure")) {
+      return {
+        ok: true as const,
+        columns: ["s"],
+        rows: [{ s: otherStructure }],
+      };
     }
     if (statement.includes("COUNT(*)")) {
       return { ok: true as const, columns: ["n"], rows: [{ n: countValue }] };
@@ -145,6 +154,10 @@ vi.mock("../../../src/insights/duckdb", () => {
       }
       registered.push({ name, length: bytes.length });
       return true;
+    }),
+    registerParquetFile: vi.fn(async (name: string, file: File) => {
+      registered.push({ name, length: file.size });
+      return { ok: true as const };
     }),
     dropBuffer: vi.fn(async (name: string) => {
       dropped.push(name);
@@ -268,6 +281,7 @@ beforeEach(() => {
   dropped.length = 0;
   describeRows = READER_DESCRIBE;
   countValue = 2231;
+  otherStructure = null;
   failures = {};
   engineReady = true;
   engineDead = false;
@@ -416,6 +430,125 @@ describe("reader-backed layer table", () => {
       "layer_1.city.json",
       "layer_2.city.jsonl",
     ]);
+  });
+});
+
+describe("a CityParquet package's table", () => {
+  const original = new Uint8Array([1, 2, 3, 4]);
+  function packageSource() {
+    return {
+      kind: "parquet" as const,
+      tables: [
+        { bytes: original },
+        { file: new File([new Uint8Array(6)], "vegetation.parquet") },
+      ],
+      sourceCrs: "EPSG:6697",
+    };
+  }
+
+  it("reads every object table in ONE CREATE TABLE AS, matched by column name", async () => {
+    await enqueueLayerTable("L1", packageSource());
+    expect(registered).toEqual([
+      { name: "layer_1_0.parquet", length: 4 },
+      { name: "layer_1_1.parquet", length: 6 },
+    ]);
+    expect(sql[0]).toBe(
+      'CREATE OR REPLACE TABLE "layer_1" AS SELECT ' +
+        "COLUMNS(c -> NOT regexp_matches(c, '^(geometry|geometry_properties|material|texture)_lod(0|[1-9][0-9]*)_(0|[1-9][0-9]*)$')), " +
+        `COLUMNS('^(id|geometry_lod(0|[1-9][0-9]*)_(0|[1-9][0-9]*))$') IS NOT NULL AS '${MARKER}\\1' ` +
+        "FROM read_parquet(['layer_1_0.parquet', 'layer_1_1.parquet'], union_by_name = true)",
+    );
+    expect(sql.some((s) => s.includes("read_json_auto"))).toBe(false);
+  });
+
+  it("hands DuckDB a COPY of fetched bytes, so a parked source still replays", async () => {
+    await enqueueLayerTable("L1", packageSource());
+    expect(Array.from(original)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("publishes the LoD ladder and the file's CRS, with no reader to re-read it", async () => {
+    await enqueueLayerTable("L1", packageSource());
+    expect(getLayerTable("L1")).toMatchObject({
+      table: "layer_1",
+      reader: null,
+      source: null,
+      extension: null,
+      sourceName: null,
+      sourceBytes: 10,
+      sourceCrs: "EPSG:6697",
+      fileBacked: false,
+      lods: [
+        { label: "1.2", suffix: "1_2" },
+        { label: "2.2", suffix: "2_2" },
+      ],
+    });
+    expect(
+      getLayerTable("L1")!.columns.some((c) => c.name.startsWith(MARKER)),
+    ).toBe(false);
+  });
+
+  it("asks for the structure of `other` only when the files have one", async () => {
+    await enqueueLayerTable("L1", packageSource());
+    expect(sql.some((q) => q.includes("json_group_structure"))).toBe(false);
+  });
+
+  describe("with an `other` column", () => {
+    beforeEach(() => {
+      describeRows = [
+        ...READER_DESCRIBE,
+        { column_name: "other", column_type: "JSON" },
+      ];
+    });
+
+    it("unpacks its members into columns of their own, as the model's attributes are", async () => {
+      otherStructure = '{"roofType":"VARCHAR","storeys":"UBIGINT"}';
+      await enqueueLayerTable("L1", packageSource());
+      const structure = sql.findIndex((q) =>
+        q.includes("json_group_structure"),
+      );
+      expect(sql[structure]).toBe(
+        'SELECT json_group_structure("other")::VARCHAR AS "s" FROM "layer_1"',
+      );
+      expect(sql[structure + 1]).toBe(
+        `CREATE OR REPLACE TABLE "layer_1" AS SELECT * EXCLUDE ("other"), unnest(json_transform("other", '{"roofType":"VARCHAR","storeys":"UBIGINT"}')) FROM "layer_1"`,
+      );
+      // Described again: the table's columns changed.
+      expect(sql[structure + 2]).toBe('DESCRIBE "layer_1"');
+    });
+
+    it("keeps a member packed when it would take an existing column's name, in any case", async () => {
+      // An `id` member would silently REPLACE the id column, and DuckDB's
+      // names are case-insensitive, so `H` and `h` cannot both be columns.
+      otherStructure =
+        '{"id":"VARCHAR","BOUWJAAR":"UBIGINT","H":"UBIGINT","h":"DOUBLE","roofType":"VARCHAR"}';
+      await enqueueLayerTable("L1", packageSource());
+      expect(sql.find((q) => q.includes("unnest(json_transform"))).toBe(
+        `CREATE OR REPLACE TABLE "layer_1" AS SELECT *, unnest(json_transform("other", '{"roofType":"VARCHAR"}')) FROM "layer_1"`,
+      );
+    });
+
+    it("leaves an `other` that holds no object members alone", async () => {
+      for (const structure of ['"NULL"', '"JSON"', null, '{"id":"VARCHAR"}']) {
+        sql.length = 0;
+        otherStructure = structure;
+        await enqueueLayerTable("L1", packageSource());
+        expect(sql.some((q) => q.includes("unnest("))).toBe(false);
+      }
+    });
+  });
+
+  it("releases every registration, on success and on failure", async () => {
+    await enqueueLayerTable("L1", packageSource());
+    expect(dropped).toEqual(["layer_1_0.parquet", "layer_1_1.parquet"]);
+
+    dropped.length = 0;
+    failures = { "CREATE OR REPLACE TABLE": "Binder Error: nope" };
+    await enqueueLayerTable("L2", packageSource());
+    expect(stateOf("L2")).toEqual({
+      state: "failed",
+      message: "Binder Error: nope",
+    });
+    expect(dropped).toEqual(["layer_2_0.parquet", "layer_2_1.parquet"]);
   });
 });
 

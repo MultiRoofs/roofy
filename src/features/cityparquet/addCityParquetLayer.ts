@@ -8,7 +8,8 @@
  * {@link decideCityParquetMode} here rather than pinning an earlier answer.
  *
  * Static: `loadCityParquet` reads the object tables into one resident model
- * (the table panel and processing see all of it). Stream: the source's object
+ * (the table panel and processing see all of it), and the layer's DuckDB table
+ * is read from the same Parquet files. Stream: the source's object
  * tables open in the CityParquet stream worker behind the FlatCityBuf plugin,
  * and the layer is a stub model filled by viewport commits.
  */
@@ -174,13 +175,13 @@ export async function addCityParquetLayerFromUrl(
   if (mode.mode === "stream") {
     return openStream(mode, modelRef, settings, deps);
   }
-  const model = await loadCityParquetFromUrl(url);
+  const { model, tables, sourceCrs } = await loadCityParquetFromUrl(url);
   await ensureModelCrsLoadable(model);
   return addCityLayer({
     ...settings,
     model,
     modelRef,
-    duckdb: { kind: "model", model },
+    duckdb: { kind: "parquet", tables, sourceCrs },
   });
 }
 
@@ -198,12 +199,12 @@ export async function addCityParquetLayerFromFiles(
   if (mode.mode === "stream") {
     return openStream(mode, modelRef, settings, deps);
   }
-  const model = await loadCityParquetFromFiles(files);
+  const { model, tables, sourceCrs } = await loadCityParquetFromFiles(files);
   await ensureModelCrsLoadable(model);
   return addCityLayer({
     ...settings,
     model,
     modelRef,
-    duckdb: { kind: "model", model },
+    duckdb: { kind: "parquet", tables, sourceCrs },
   });
 }
