@@ -68,8 +68,8 @@ vi.mock("../../../../src/insights/duckdb", () => {
         rows: [
           { column_name: "id", column_type: "VARCHAR" },
           { column_name: "feature_id", column_type: "VARCHAR" },
-          // An LoD 0 rung, so §7.5's footprint proxy is on offer at all.
-          { column_name: "geometry_lod0", column_type: "BLOB" },
+          // The build's marker for an LoD 0 rung, so §7.5's footprint proxy is on offer at all.
+          { column_name: "__roofy_has_geometry_lod0", column_type: "BOOLEAN" },
         ],
       };
     }

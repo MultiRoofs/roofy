@@ -68,7 +68,10 @@ vi.mock("../../../../src/insights/duckdb", () => {
         rows: [
           { column_name: "id", column_type: "VARCHAR" },
           { column_name: "feature_id", column_type: "VARCHAR" },
-          { column_name: "geometry_lod2_2", column_type: "BLOB" },
+          {
+            column_name: "__roofy_has_geometry_lod2_2",
+            column_type: "BOOLEAN",
+          },
         ],
       };
     }
