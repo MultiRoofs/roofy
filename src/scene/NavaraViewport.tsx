@@ -3881,18 +3881,21 @@ export const NavaraViewport = memo(
       );
 
       // --- render on demand ---
-      // Every frame while the sun animates or the clouds drift; otherwise the
-      // engine draws only when asked.
+      // Every frame while the sun animates, the clouds drift or rain or snow
+      // falls; otherwise the engine draws only when asked.
       const timeAnimating = useSolarStore((s) => s.timeAnimating);
       const cloudsShown = cloudsWanted && postProcessingEnabled;
+      // The precipitation effect's own condition for adding its mesh.
+      const precipitationShown = precipitation !== "none" && latLon !== null;
       useEffect(() => {
         const view = viewRef.current;
         if (!engineReady || !view) return;
         view.animation = wantsContinuousRendering({
           timeAnimating,
           cloudsShown,
+          precipitationShown,
         });
-      }, [engineReady, timeAnimating, cloudsShown]);
+      }, [engineReady, timeAnimating, cloudsShown, precipitationShown]);
 
       // The catch-all, and deliberately the LAST effect: whatever the effects
       // above wrote into three objects the engine does not watch (a shader swap,

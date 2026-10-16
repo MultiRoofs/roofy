@@ -465,7 +465,12 @@ beforeEach(() => {
     cloudsEnabled: false,
     postProcessingEnabled: true,
   });
-  useAtmosphereStore.setState({ cloudCoverage: 0.3, lensFlareEnabled: true });
+  useAtmosphereStore.setState({
+    cloudCoverage: 0.3,
+    lensFlareEnabled: true,
+    precipitation: "none",
+  });
+  useSolarStore.setState({ latLon: null });
   addEffect.mockClear();
   updateEffect.mockClear();
   deleteEffect.mockClear();
@@ -673,6 +678,21 @@ describe("NavaraViewport lifecycle", () => {
     act(() => useSolarStore.getState().setTimeAnimating(true));
     expect(view.animation).toBe(true);
     act(() => useSolarStore.getState().setTimeAnimating(false));
+    expect(view.animation).toBe(false);
+  });
+
+  it("renders continuously while rain falls over a site", async () => {
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    const view = viewInstances[0] as { animation: boolean };
+    act(() => useAtmosphereStore.getState().setPrecipitation("rain"));
+    // No site, no rain mesh: nothing falls, so nothing needs a frame.
+    expect(view.animation).toBe(false);
+    act(() => useSolarStore.getState().setLatLon({ lat: 52, lon: 4.36 }));
+    expect(view.animation).toBe(true);
+    act(() => useAtmosphereStore.getState().setPrecipitation("none"));
     expect(view.animation).toBe(false);
   });
 
