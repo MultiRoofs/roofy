@@ -230,7 +230,9 @@ function StoreLayerRow({
   // residentModel.ts), so the walk would be wasted. Memoised on the model
   // reference for the static case, where the walk is real.
   const model =
-    item.kind === "city" && !item.layer.isStreaming ? item.layer.model : null;
+    item.kind === "city" && item.layer.source.access !== "stream"
+      ? item.layer.model
+      : null;
   const counts = useMemo(
     () => (model === null ? undefined : countRootObjects(model)),
     [model],

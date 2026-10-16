@@ -41,6 +41,7 @@ import type {
 import { useStreamStore } from "./streamStore";
 import type { StreamPlugin } from "./streamPlugin";
 import { useLayerStore } from "../layers/layerStore";
+import { STREAMED_SOURCE } from "../layers/cityLayerSource";
 import type { CityModel } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
@@ -179,7 +180,7 @@ export async function openStreamingLayer(
     hiddenTypes: input.hiddenTypes ?? [],
     attributeOrders: input.attributeOrders,
     tablePresentation: input.tablePresentation,
-    isStreaming: true,
+    source: STREAMED_SOURCE,
     // A streaming layer's model is a stub, so the store cannot pick a load
     // default here; `onAppearanceThemes` below does, once themes are known.
     selectedAppearance: input.selectedAppearance ?? null,

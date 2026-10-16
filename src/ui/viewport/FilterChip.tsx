@@ -26,10 +26,10 @@ export function FilterChip() {
     active.kind === "geo" && active.layer.kind === "geojson"
       ? `${formatCount(visible?.size ?? 0)} matching features`
       : counts.matching === null
-        ? active.kind === "city" && active.layer.isStreaming
+        ? active.kind === "city" && active.layer.source.access === "stream"
           ? "Filtered · table only"
           : "Filtered"
-        : active.kind === "city" && active.layer.isStreaming
+        : active.kind === "city" && active.layer.source.access === "stream"
           ? `${formatCount(counts.matching)} listed (table only)`
           : `${formatCount(counts.matching)} matching ${layerQuery(useQueryStore.getState(), queryKey ?? active.layer.id).view === "raw" ? "objects" : "buildings"}`;
   return (

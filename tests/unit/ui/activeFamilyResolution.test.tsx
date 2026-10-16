@@ -11,6 +11,10 @@
  * The UI these readers feed is Task 4's; what is asserted here is only which
  * table each of them ends up on.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
@@ -117,7 +121,7 @@ function seedTwoFamilyLayer(): string {
     modelRef: { type: "url", url: "https://x.test/" },
     visible: true,
     rules: [],
-    isStreaming: true,
+    source: STREAMED_SOURCE,
   });
   useLayerTableStore.setState({
     tables: {
@@ -279,6 +283,7 @@ describe("eligibilityContextFor", () => {
       name: "delft",
       model: MODEL,
       visible: true,
+      source: RESIDENT_SOURCE,
     } as unknown as Layer;
     useLayerTableStore.setState({
       tables: { plain: { state: "ready", info: table("layer_1") } },

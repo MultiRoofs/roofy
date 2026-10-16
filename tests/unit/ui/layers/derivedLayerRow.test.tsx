@@ -6,6 +6,7 @@
  * need the row rendered, because what is being pinned is that both read
  * `derivedFrom` rather than a name or a heuristic.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { layerStateLine } from "../../../../src/features/layers/layerPresentation";
@@ -96,7 +97,7 @@ function cityItem(overrides: Partial<Layer> = {}): ActiveLayer {
       id: "l1",
       name: "Delft · solids",
       visible: true,
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
       derivedFrom: null,
       ...overrides,
     } as unknown as Layer,

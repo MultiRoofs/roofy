@@ -211,7 +211,7 @@ afterEach(() => {
 });
 
 describe("useLayerFileLoader — .fcb routing", () => {
-  it("addLayerFromUrl routes a .fcb URL through openStreamingLayer, producing an isStreaming layer", async () => {
+  it("addLayerFromUrl routes a .fcb URL through openStreamingLayer, producing a streamed layer", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
     await act(async () => {
@@ -226,7 +226,7 @@ describe("useLayerFileLoader — .fcb routing", () => {
 
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
-    expect(layers[0]!.isStreaming).toBe(true);
+    expect(layers[0]!.source.access).toBe("stream");
     expect(layers[0]!.attributeOrders).toEqual({
       Building: ["height", "name"],
     });
@@ -248,7 +248,7 @@ describe("useLayerFileLoader — .fcb routing", () => {
 
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
-    expect(layers[0]!.isStreaming).toBe(true);
+    expect(layers[0]!.source.access).toBe("stream");
     expect(layers[0]!.modelRef).toEqual({
       type: "file",
       fileName: "local.fcb",
@@ -670,7 +670,7 @@ describe("useLayerFileLoader — streaming large CityParquet sources", () => {
     expect(holds).toBe(1);
 
     const layer = useLayerStore.getState().layers[0]!;
-    expect(layer.isStreaming).toBe(true);
+    expect(layer.source.access).toBe("stream");
     expect(layer.name).toBe("yokohama-shi");
     expect(layer.model.sourceEncoding).toBe("cityparquet");
     // The modelRef is the URL the user gave, so save/share/restore re-run
@@ -1093,7 +1093,7 @@ describe("useLayerFileLoader — the encoding override", () => {
     expect(
       (openStream.mock.calls[0]![0] as { source: unknown }).source,
     ).toEqual({ url: "https://x/model.json" });
-    expect(useLayerStore.getState().layers[0]!.isStreaming).toBe(true);
+    expect(useLayerStore.getState().layers[0]!.source.access).toBe("stream");
   });
 
   it("takes the STREAMING route for a `.json` FILE overridden to FlatCityBuf, as a Blob", async () => {
@@ -1125,7 +1125,7 @@ describe("useLayerFileLoader — the encoding override", () => {
     expect(openStream).not.toHaveBeenCalled();
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
-    expect(layers[0]!.isStreaming).toBe(false);
+    expect(layers[0]!.source.access).toBe("resident");
     expect(layers[0]!.model.sourceEncoding).toBe("cityjson");
   });
 
@@ -1231,6 +1231,6 @@ describe("useLayerFileLoader — the encoding override", () => {
     // Twice: the retry took the streaming route too. Without the override in
     // the closure it would have fetched `/model.json` as CityJSON instead.
     expect(openStream).toHaveBeenCalledTimes(2);
-    expect(useLayerStore.getState().layers[0]!.isStreaming).toBe(true);
+    expect(useLayerStore.getState().layers[0]!.source.access).toBe("stream");
   });
 });

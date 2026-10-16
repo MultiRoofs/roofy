@@ -2407,9 +2407,10 @@ export const NavaraViewport = memo(
           if (!view || !layer) return;
           // A stream only retains cells near the camera. A missing selection must
           // stay unavailable; falling back to its header would be a whole-layer fit.
-          const streamHandle = layer.isStreaming
-            ? useStreamStore.getState().streams[layerId]?.handle
-            : undefined;
+          const streamHandle =
+            layer.source.access === "stream"
+              ? useStreamStore.getState().streams[layerId]?.handle
+              : undefined;
           const model = streamHandle
             ? streamHandle.getResidentModel()
             : layer.model;
@@ -2702,7 +2703,7 @@ export const NavaraViewport = memo(
           geoRows.length === 0;
 
         for (const layer of layers) {
-          if (!layer.isStreaming) continue;
+          if (layer.source.access !== "stream") continue;
           // The plugin opened the stream (`openStreamingLayer`), so a layer whose
           // handle is not registered yet is simply one whose open is still in
           // flight: `streamIds` brings this effect back when it lands.
@@ -2852,7 +2853,7 @@ export const NavaraViewport = memo(
         };
 
         for (const layer of layers) {
-          if (!layer.isStreaming) continue;
+          if (layer.source.access !== "stream") continue;
           const handle: StreamInteractionHandle | undefined = store.get(
             layer.id,
           )?.handle;

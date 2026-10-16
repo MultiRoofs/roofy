@@ -207,7 +207,7 @@ const STATUS_TOAST_MS = 3000;
 
 /** How a streaming layer's `.fcb` source was opened, for the save/restore
  *  round-trip (`LayerSnapshot.stream`, `normalizeLayers`' `unavailable`
- *  flag). Only meaningful for `l.isStreaming` layers — see handleSave. */
+ *  flag). Only meaningful for streamed (`source.access === "stream"`) layers — see handleSave. */
 function streamSourceSnapshot(
   modelRef: CityModelReference,
 ): StreamSourceSnapshot {
@@ -1034,7 +1034,9 @@ export function App({
         // Ruling S4: which object families were open, and which one the table
         // panel was showing. Absent for every layer that has none.
         ...familiesField(l.id),
-        ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
+        ...(l.source.access === "stream"
+          ? { stream: streamSourceSnapshot(l.modelRef) }
+          : {}),
       })),
       // Stripped of anything that cannot survive a reload — an inline GeoJSON
       // document above all; see `geoLayerSnapshot`.
@@ -2228,17 +2230,17 @@ export function App({
               objectCount={totalObjects.loaded}
               totalObjectCount={totalObjects.total}
               streamStatus={
-                activeCityLayer?.isStreaming
+                activeCityLayer?.source.access === "stream"
                   ? (activeStreamStatus ?? "idle")
                   : null
               }
               streamMessage={
-                activeCityLayer?.isStreaming
+                activeCityLayer?.source.access === "stream"
                   ? (activeStreamMessage ?? null)
                   : null
               }
               residentCellCount={
-                activeCityLayer?.isStreaming
+                activeCityLayer?.source.access === "stream"
                   ? activeStream?.handle.getResidentModel().cellCount
                   : undefined
               }

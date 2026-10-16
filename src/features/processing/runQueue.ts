@@ -1234,7 +1234,7 @@ async function execute(
     if (
       request.destination === "new" &&
       target.kind === "city" &&
-      target.layer.isStreaming
+      target.layer.source.access === "stream"
     ) {
       patch(id, {
         status: "failed",
@@ -1659,7 +1659,7 @@ async function execute(
         // Nothing matched, so there is nothing to publish: a copy whose
         // declared columns hold no value anywhere would be a layer made of
         // the run's failure to measure.
-        doneWithNothing(result, layer.isStreaming);
+        doneWithNothing(result, layer.source.coverage === "viewport");
         return;
       }
       patch(id, { phase: "write" });
@@ -1790,7 +1790,7 @@ async function execute(
         // here would replace it with the SOURCE's number (§6.2's "312
         // buildings" is a CITY copy's, and a city copy holds the scope).
         vectorParent === null ? scope.count : null,
-        { streaming: layer.isStreaming },
+        { streaming: layer.source.coverage === "viewport" },
       );
       const notes = [
         // [adapted copy A15] — §10 scenario 12's "the card says so".
@@ -1867,7 +1867,7 @@ async function execute(
       const result = canonicalise(raw, existingProperties);
       if (result.rows.size === 0) {
         // Nothing matched, so there is nothing to merge and no column to own.
-        doneWithNothing(result, layer.isStreaming);
+        doneWithNothing(result, layer.source.coverage === "viewport");
         return;
       }
       patch(id, { phase: "write" });
@@ -1926,7 +1926,7 @@ async function execute(
       // Evicted while it ran: no card, so nothing can press Undo.
       if (!runById(id)) discardUndo(id);
       const summary = summarise(result, elapsed(), {
-        streaming: layer.isStreaming,
+        streaming: layer.source.coverage === "viewport",
       });
       patch(id, {
         status: "done",
@@ -1969,7 +1969,7 @@ async function execute(
 
     if (result.rows.size === 0) {
       // Nothing to write.
-      doneWithNothing(result, layer.isStreaming);
+      doneWithNothing(result, layer.source.coverage === "viewport");
       return;
     }
 
@@ -2132,7 +2132,7 @@ async function execute(
     }
 
     const summary = summarise(result, elapsed(), {
-      streaming: layer.isStreaming,
+      streaming: layer.source.coverage === "viewport",
     });
     patch(id, {
       status: "done",

@@ -25,6 +25,7 @@ import type {
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
 import { normalizeColorBy, type ColorBy } from "../rules/colorBy";
+import { RESIDENT_SOURCE, type SourceCapabilities } from "./cityLayerSource";
 
 /**
  * Where a DERIVED layer came from (spec §6, "What a derived layer is").
@@ -93,11 +94,10 @@ export interface Layer {
    * they keep panning is the whole point of having it.
    */
   readonly cameraSync: boolean;
-  /** True once a layer's stream has been opened and admitted (Task 8's
-   *  `checkAdmission`) for viewport streaming, i.e. it has per-cell state
-   *  in `useStreamStore` rather than one resident `model`. Defaults to
-   *  false: every layer starts as a plain, fully-resident layer. */
-  readonly isStreaming: boolean;
+  /** What the layer's source can do: where its objects live, what they cover
+   *  and when its LoDs and types are known (`cityLayerSource.ts`). A streamed
+   *  layer's `model` is a stub, and its objects are its resident cells. */
+  readonly source: SourceCapabilities;
   /**
    * First-level object groups whose geometry this layer leaves out — hiding
    * "Building" hides its BuildingParts too, because in real data the
@@ -170,7 +170,7 @@ export interface LayerStoreActions {
       | "selectedLod"
       | "availableLods"
       | "lodMode"
-      | "isStreaming"
+      | "source"
       | "derivedFrom"
       | "cameraSync"
       | "hiddenTypes"
@@ -187,10 +187,10 @@ export interface LayerStoreActions {
        *  minted first — the layer and the handle must share one id or every
        *  `plugin.getHandle(layer.id)` lookup misses. */
       readonly id?: string;
-      /** Defaults to false. Set true for a layer opened via viewport
-       *  streaming (Task 17's `openStreamingLayer`) — its `model` is a stub
-       *  (bbox only, empty objects) rather than a fully-parsed model. */
-      readonly isStreaming?: boolean;
+      /** Defaults to {@link RESIDENT_SOURCE}. `openStreamingLayer` passes
+       *  {@link STREAMED_SOURCE}: its `model` is a stub (bbox only, empty
+       *  objects) rather than a fully-parsed model. */
+      readonly source?: SourceCapabilities;
       /** Defaults to null. Supplied only by a New-layer run's publication
        *  (Tasks 21 and 23). */
       readonly derivedFrom?: DerivedFrom | null;
@@ -364,15 +364,18 @@ export const useLayerStore = create<LayerStore>((set) => ({
 
   addLayer: (input) => {
     const id = input.id ?? crypto.randomUUID();
+    const source = input.source ?? RESIDENT_SOURCE;
+    // A source discovered cell by cell has a stub model: nothing to fold.
+    const discovered = source.discovery === "progressive";
     const availableLods = computeAvailableLods(input.model);
     const selectedLods =
-      input.isStreaming || availableLods.length === 0
+      discovered || availableLods.length === 0
         ? undefined
         : (normalizeSelectedLods(input.selectedLods) ?? availableLods).filter(
             (lod) => availableLods.includes(lod),
           );
     const selectedLod = (selectedLods ?? availableLods)[0] ?? null;
-    const appearanceThemes = input.isStreaming
+    const appearanceThemes = discovered
       ? []
       : computeAppearanceThemes(input.model);
     // A restored choice survives only if this model has that theme — a
@@ -408,7 +411,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
         // Every layer starts following the camera: that is what streaming
         // has always done, and freezing an extract is a deliberate act.
         cameraSync: true,
-        isStreaming: input.isStreaming ?? false,
+        source,
         derivedFrom: input.derivedFrom ?? null,
         hiddenTypes: input.hiddenTypes ?? [],
         attributeOrders: normalizeAttributeOrders(input.attributeOrders),
@@ -418,7 +421,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
         // A streaming layer's `model` is a stub (bbox only), so there is
         // nothing to fold here; `useStreamStore`'s `types` carries its
         // groups instead.
-        availableObjectTypes: input.isStreaming
+        availableObjectTypes: discovered
           ? []
           : computeAvailableObjectTypes(input.model),
         appearanceThemes,
@@ -506,7 +509,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
   setLayerLods: (layerId, lods) =>
     set((state) => ({
       layers: state.layers.map((l) => {
-        if (l.id !== layerId || l.isStreaming) return l;
+        if (l.id !== layerId || l.source.discovery === "progressive") return l;
         const selectedLods = l.availableLods.filter((lod) =>
           lods.includes(lod),
         );

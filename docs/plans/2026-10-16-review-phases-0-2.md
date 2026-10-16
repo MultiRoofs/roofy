@@ -158,6 +158,10 @@ One handle over `CityModelHandle` and `FcbStreamLayerHandle`, with `SourceCapabi
 `isStreaming` switches; one reconciler. Tests per replaced switch family (fit, table, details,
 export, summary, LoD rule).
 
+Done as: app-side `SourceCapabilities` (`access`, `coverage`, `discovery`) on `Layer.source`
+and the `layerObjects` accessor. The scene-side handle merge and single reconciler move to
+Task 2.3, which cuts static layers into cells and so unifies the two handle types anyway.
+
 ### Task 1.5: package re-cut
 
 `navara-stream` (worker core, residency, cells, one worker entry loading adapters by id) out of

@@ -15,6 +15,7 @@
  *    so a re-added pill would show something and fail, rather than passing
  *    vacuously against an empty store.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -389,7 +390,7 @@ function loadedLayer(): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   };
 }
 

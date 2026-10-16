@@ -19,6 +19,7 @@
  *  - no pose is exposed until the engine has a camera to report, and it is
  *    cleared once the engine is gone.
  */
+import { RESIDENT_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
@@ -271,7 +272,7 @@ function makeLayer(id: string): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   } as Layer;
 }
 

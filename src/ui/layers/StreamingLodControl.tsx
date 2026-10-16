@@ -49,7 +49,7 @@ export function StreamingLodControl({
   const setLodMode = useLayerStore((s) => s.setLodMode);
   const streams = useStreamStore((s) => s.streams);
 
-  const streamingLayers = layers.filter((l) => l.isStreaming);
+  const streamingLayers = layers.filter((l) => l.source.access === "stream");
   if (streamingLayers.length === 0) return null;
 
   // The union of every ladder discovered so far, highest detail first — the

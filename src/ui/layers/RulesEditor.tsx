@@ -84,7 +84,7 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   // store — but if one ever did, it is a rendering device, not something the
   // user wrote, and an Edit or a Delete on it would mean nothing.
   const visibleRules = rules.filter((r) => !isSyntheticRule(r));
-  const isStreaming = layer?.isStreaming ?? false;
+  const streamed = layer?.source.access === "stream";
   const unmatchedColor = layer?.unmatchedColor ?? UNMATCHED_COLOR_HEX;
   // Under a texture theme the images cover their faces outright (the mesh
   // whites those vertices out), so a rule colour shows only on faces that
@@ -124,7 +124,7 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   // resident model instead: object attribute keys collected from the
   // records themselves, unioned with `surfaceAttrKeys` (already unioned
   // and sorted per cell by the worker — see residentModel.ts).
-  const attributeFields = isStreaming
+  const attributeFields = streamed
     ? collectAttributeFieldsFromResidentModel(
         getResidentModel(layerId, streamVersion ?? 0),
       )

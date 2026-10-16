@@ -16,6 +16,7 @@
  */
 
 import { useLayerStore } from "../../features/layers/layerStore";
+import type { SourceCapabilities } from "../../features/layers/cityLayerSource";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import {
   cellSize,
@@ -28,7 +29,8 @@ interface LodSelectorProps {
   readonly availableLods: ReadonlyArray<string>;
   readonly selectedLod: string | null;
   readonly selectedLods?: readonly string[];
-  readonly isStreaming: boolean;
+  /** A streamed layer picks its LoD from the stream's ladder. */
+  readonly access: SourceCapabilities["access"];
   readonly lodMode: "auto" | "manual";
 }
 
@@ -37,7 +39,7 @@ export function LodSelector({
   availableLods,
   selectedLod,
   selectedLods,
-  isStreaming,
+  access,
   lodMode,
 }: LodSelectorProps) {
   const setLayerLods = useLayerStore((s) => s.setLayerLods);
@@ -56,7 +58,7 @@ export function LodSelector({
 
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
-  if (!isStreaming) {
+  if (access !== "stream") {
     if (availableLods.length === 0) return null;
     const selected =
       selectedLods ?? (selectedLod === null ? availableLods : [selectedLod]);

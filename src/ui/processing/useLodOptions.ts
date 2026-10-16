@@ -50,7 +50,7 @@ export function useLodOptions(
     target === null ? 0 : (s.streams[target.id]?.version ?? 0),
   );
   const model = target?.model ?? null;
-  const isStreaming = target?.isStreaming ?? false;
+  const streamed = target?.source.access === "stream";
   return useMemo(() => {
     if (!tool.needsLod || !tool.implemented || target === null) return NO_LOD;
     if (tool.id === "roof-metrics") {
@@ -89,7 +89,7 @@ export function useLodOptions(
     tool.implemented,
     tool.id,
     target?.id,
-    isStreaming,
+    streamed,
     model,
     version,
   ]);

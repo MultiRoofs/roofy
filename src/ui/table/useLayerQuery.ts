@@ -47,7 +47,7 @@ import {
   parentsIndexOf,
   rootFeatureId,
 } from "../../domain/citymodel/featureId";
-import { getResidentModel } from "../../features/streaming/residentModel";
+import { layerObjects } from "../../features/layers/cityLayerSource";
 import { useStreamStore } from "../../features/streaming/streamStore";
 
 export interface LayerQueryView {
@@ -159,9 +159,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     .map((selection) => selection.objectId);
   const selectedFeatureIds = useMemo(() => {
     if (viewMode !== "buildings" || layer === null) return selectedIds;
-    const objects = layer.isStreaming
-      ? getResidentModel(layer.id, streamVersion ?? 0).objects
-      : layer.model.objects;
+    const objects = layerObjects(layer, streamVersion ?? 0);
     const parents = parentsIndexOf(objects);
     return selectedIds.map((id) => rootFeatureId(id, parents));
   }, [layer, selectedIds.join("\u0000"), streamVersion, viewMode]);

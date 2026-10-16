@@ -18,6 +18,7 @@
  * same for both solids tools. What differs is the statement the gate catches
  * and the columns the run publishes.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -277,7 +278,7 @@ function layer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     derivedFrom: null,
   };
 }

@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
@@ -72,7 +76,7 @@ beforeEach(() => {
     layers: [
       {
         id: "L",
-        isStreaming: false,
+        source: RESIDENT_SOURCE,
         model: {
           objects: {
             B1: { id: "B1", parents: [], children: ["P1"] },
@@ -129,7 +133,9 @@ describe("useLayerCounts", () => {
       tablePanelOpen: false,
     });
     useLayerStore.setState({
-      layers: [{ id: "L", isStreaming: true, model: { objects: {} } }] as never,
+      layers: [
+        { id: "L", source: STREAMED_SOURCE, model: { objects: {} } },
+      ] as never,
     });
     runQuery.mockResolvedValue({ ok: true, columns: ["n"], rows: [{ n: 1 }] });
     useSelectionStore

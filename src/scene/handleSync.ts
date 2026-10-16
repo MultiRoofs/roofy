@@ -136,7 +136,9 @@ export function syncLayers(
   onError: (layerId: string, error: unknown) => void,
   themeStyle?: ThemeStyle,
 ): void {
-  const wanted = new Set(layers.filter((l) => !l.isStreaming).map((l) => l.id));
+  const wanted = new Set(
+    layers.filter((l) => l.source.access !== "stream").map((l) => l.id),
+  );
 
   for (const [id, entry] of live) {
     if (wanted.has(id)) continue;
@@ -145,7 +147,7 @@ export function syncLayers(
   }
 
   for (const layer of layers) {
-    if (layer.isStreaming) continue;
+    if (layer.source.access === "stream") continue;
 
     let entry = live.get(layer.id);
     if (!entry) {
@@ -239,7 +241,7 @@ export function syncStyles(
   live: ReadonlyMap<string, LiveLayer>,
 ): void {
   for (const layer of layers) {
-    if (layer.isStreaming) continue;
+    if (layer.source.access === "stream") continue;
     const entry = live.get(layer.id);
     // No entry means the add was refused (CRS gate) or has not happened yet;
     // when it does, `styledRules` is undefined on the new entry and the style

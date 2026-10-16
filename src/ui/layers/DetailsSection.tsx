@@ -225,7 +225,7 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
                   availableLods={layer.availableLods}
                   selectedLod={layer.selectedLod}
                   selectedLods={layer.selectedLods}
-                  isStreaming={false}
+                  access="resident"
                   lodMode={layer.lodMode}
                 />
               </div>

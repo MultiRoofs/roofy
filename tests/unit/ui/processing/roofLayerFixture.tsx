@@ -4,6 +4,10 @@
  * over FIVE rows. Shared because three suites assert counts over it and a
  * second copy would drift.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { LayerStoreActions } from "../../../../src/features/layers/layerStore";
 import type { ColumnInfo } from "../../../../src/insights/columnKind";
@@ -106,7 +110,7 @@ export function addRoofLayer(
     visible: true,
     rules: [],
     colorBy: "surface",
-    isStreaming: options.isStreaming ?? false,
+    source: options.isStreaming ? STREAMED_SOURCE : RESIDENT_SOURCE,
   };
   const id = useLayerStore.getState().addLayer(input);
   if (options.selectedLod !== undefined) {

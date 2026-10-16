@@ -5,6 +5,7 @@
  * `null` and an EMPTY set mean different things, and a slow answer must never
  * overwrite a fast one that came after it.
  */
+import { STREAMED_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runQuery = vi.fn();
@@ -397,7 +398,7 @@ describe("automatic map-filter lifecycle", () => {
       modelRef: { type: "url", url: "https://x/a.fcb" },
       visible: true,
       rules: [],
-      isStreaming: true,
+      source: STREAMED_SOURCE,
     });
     useLayerTableStore.setState({
       tables: { [id]: { state: "ready", info: TABLE } },

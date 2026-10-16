@@ -30,6 +30,7 @@
  * WebGL, and `@navaramap/three` crashes at module scope under Node — Task B1's
  * NODE_IMPORT_SAFE = false). The real round trip is Task C20's browser smoke.
  */
+import { STREAMED_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -277,7 +278,7 @@ beforeEach(() => {
       modelRef: { type: "url", url: FCB_URL },
       visible: true,
       rules: [],
-      isStreaming: true,
+      source: STREAMED_SOURCE,
     });
     return "stream-1";
   };

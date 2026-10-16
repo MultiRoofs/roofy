@@ -29,7 +29,7 @@ export function HoverTooltip() {
     const layer = layers.find((candidate) => candidate.id === hovered.layerId);
     if (layer === undefined) return null;
 
-    if (layer.isStreaming) {
+    if (layer.source.access === "stream") {
       const resident = getResidentModel(
         layer.id,
         streams[layer.id]?.version ?? 0,

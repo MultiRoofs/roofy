@@ -165,7 +165,7 @@ describe("openStreamingLayer", () => {
 
     const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
     expect(layer).toBeDefined();
-    expect(layer!.isStreaming).toBe(true);
+    expect(layer!.source.access).toBe("stream");
     expect(layer!.model.bbox).toEqual(HEADER.extent);
     expect(layer!.model.objects).toEqual({});
 

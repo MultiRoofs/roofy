@@ -3,6 +3,10 @@
  * stream time, not at load time — these pin that discovery behaviour and the
  * "applies to every streaming layer" contract.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StreamingLodControl } from "../../../../src/ui/layers/StreamingLodControl";
@@ -41,7 +45,7 @@ function makeLayer(id: string, isStreaming: boolean): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming,
+    source: isStreaming ? STREAMED_SOURCE : RESIDENT_SOURCE,
   };
 }
 

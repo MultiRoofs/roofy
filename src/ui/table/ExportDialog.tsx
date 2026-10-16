@@ -33,7 +33,10 @@ import {
   parentsIndexOf,
   rootFeatureId,
 } from "../../domain/citymodel/featureId";
-import { getResidentModel } from "../../features/streaming/residentModel";
+import {
+  layerObjects,
+  type SourceCapabilities,
+} from "../../features/layers/cityLayerSource";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { FLAT_PREFIX_COLUMNS } from "../../insights/layerRows";
 import { refreshStreamingTable } from "../../features/layers/layerTableLifecycle";
@@ -128,7 +131,7 @@ export interface ExportDialogProps {
   readonly table: LayerTable;
   readonly epsg: number | null;
   readonly selectedLod: string | null;
-  readonly isStreaming: boolean;
+  readonly source: SourceCapabilities;
   readonly onClose: () => void;
 }
 
@@ -138,7 +141,7 @@ export function ExportDialog({
   table,
   epsg,
   selectedLod,
-  isStreaming,
+  source,
   onClose,
 }: ExportDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -177,9 +180,7 @@ export function ExportDialog({
    */
   const residentFeatureIds = useMemo(() => {
     if (!layer) return selectedObjectIds;
-    const objects = layer.isStreaming
-      ? getResidentModel(layerId, streamVersion ?? 0).objects
-      : layer.model.objects;
+    const objects = layerObjects(layer, streamVersion ?? 0);
     const parents = parentsIndexOf(objects);
     return selectedObjectIds.map((id) => rootFeatureId(id, parents));
   }, [layer, layerId, selectedObjectIds.join("\u0000"), streamVersion]);
@@ -353,7 +354,7 @@ export function ExportDialog({
   // export reflects what is resident NOW, so force one rebuild; the new table
   // arrives as a new `table` prop and re-runs the type probe below.
   useEffect(() => {
-    if (!isStreaming) return;
+    if (source.access !== "stream") return;
     let cancelled = false;
     setRefreshFailure(null);
     void (async () => {
@@ -364,7 +365,7 @@ export function ExportDialog({
     return () => {
       cancelled = true;
     };
-  }, [isStreaming, layerId]);
+  }, [source.access, layerId]);
 
   // The top-level types come from the table, not from the model: a streaming
   // layer has no model to ask, and the two could disagree.
@@ -619,7 +620,7 @@ export function ExportDialog({
         </div>
 
         <div className="modal-body export-body">
-          {isStreaming && !familyBacked && (
+          {source.coverage === "viewport" && !familyBacked && (
             /* A CityParquet family's rows come from the FILE, so an export of
                one covers the whole family; only a resident table is partial. */
             <p className="export-streaming-note">

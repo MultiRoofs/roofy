@@ -29,7 +29,7 @@ export type LayerKind = "city" | "streaming" | "vector" | "raster" | "tiles";
 
 export function layerKindOf(item: ActiveLayer): LayerKind {
   if (item.kind === "city") {
-    return item.layer.isStreaming ? "streaming" : "city";
+    return item.layer.source.access === "stream" ? "streaming" : "city";
   }
   switch (item.layer.kind) {
     case "geojson":

@@ -315,7 +315,7 @@ describe("addCityParquetLayerFromUrl", () => {
     const layer = useLayerStore
       .getState()
       .layers.find((l) => l.id === layerId)!;
-    expect(layer.isStreaming).toBe(true);
+    expect(layer.source.access).toBe("stream");
     expect(layer.visible).toBe(false);
     expect(layer.model.sourceEncoding).toBe("cityparquet");
     expect(layer.model.metadata.referenceSystem).toBe(HEADER.referenceSystem);
@@ -397,7 +397,7 @@ describe("addCityParquetLayerFromUrl", () => {
     const layer = useLayerStore
       .getState()
       .layers.find((l) => l.id === layerId)!;
-    expect(layer.isStreaming).toBe(false);
+    expect(layer.source.access).toBe("resident");
     expect(layer.visible).toBe(false);
     expect(layer.name).toBe("delft");
     // The table reads the fetched Parquet, never the model's JSON.

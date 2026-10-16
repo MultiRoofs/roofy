@@ -16,6 +16,10 @@
  * layer's NAME and its MODE both belong to `StyleSection` above it, and are
  * tested there.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
@@ -111,7 +115,7 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   };
 }
@@ -183,7 +187,7 @@ describe("RulesEditor — streaming field source", () => {
       streams: { L: { handle: residentHandle(cache), version: 1 } as never },
     });
     useLayerStore.setState({
-      layers: [baseLayer({ isStreaming: true })],
+      layers: [baseLayer({ source: STREAMED_SOURCE })],
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
   });
@@ -223,7 +227,7 @@ describe("RulesEditor — static field source (unchanged)", () => {
       },
     };
     useLayerStore.setState({
-      layers: [baseLayer({ model, isStreaming: false })],
+      layers: [baseLayer({ model, source: RESIDENT_SOURCE })],
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
 

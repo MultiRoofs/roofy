@@ -6,6 +6,10 @@
  * The run queue is mocked: what this pins is the REQUEST the form builds and
  * the copy on screen, never the execution (a later task owns that).
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -111,7 +115,7 @@ function addCityLayer(
     visible: true,
     rules: [],
     colorBy: "surface",
-    isStreaming,
+    source: isStreaming ? STREAMED_SOURCE : RESIDENT_SOURCE,
   };
   const id = useLayerStore.getState().addLayer(input);
   useWorkspaceStore.getState().setActiveLayerId(id);

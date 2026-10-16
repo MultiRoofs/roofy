@@ -12,6 +12,10 @@
  * layers today. The first describe block below proves that does NOT
  * happen.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { LodSelector } from "../../../../src/ui/sidebar/LodSelector";
@@ -66,7 +70,7 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   };
 }
@@ -94,7 +98,7 @@ function baseStream(overrides: Partial<StreamState> = {}): StreamState {
   };
 }
 
-describe("LodSelector — static layer (isStreaming: false)", () => {
+describe("LodSelector — static layer (source: RESIDENT_SOURCE)", () => {
   it("shows checked LoDs and explains highest-per-object selection", () => {
     render(
       <LodSelector
@@ -102,7 +106,7 @@ describe("LodSelector — static layer (isStreaming: false)", () => {
         availableLods={["2.2", "1.2"]}
         selectedLod="2.2"
         selectedLods={["2.2", "1.2"]}
-        isStreaming={false}
+        access="resident"
         lodMode="auto"
       />,
     );
@@ -127,7 +131,7 @@ describe("LodSelector — static layer (isStreaming: false)", () => {
         availableLods={["2.2", "1.2"]}
         selectedLod="2.2"
         selectedLods={["2.2", "1.2"]}
-        isStreaming={false}
+        access="resident"
         lodMode="auto"
       />,
     );
@@ -141,7 +145,7 @@ describe("LodSelector — static layer (isStreaming: false)", () => {
         layerId="L"
         availableLods={[]}
         selectedLod={null}
-        isStreaming={false}
+        access="resident"
         lodMode="auto"
       />,
     );
@@ -157,7 +161,7 @@ describe("LodSelector — streaming layer, auto mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="auto"
       />,
     );
@@ -173,7 +177,7 @@ describe("LodSelector — streaming layer, auto mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="auto"
       />,
     );
@@ -184,7 +188,7 @@ describe("LodSelector — streaming layer, auto mode", () => {
   it("clicking 'Manual' switches the layer's lodMode to manual", () => {
     useStreamStore.setState({ streams: { L: baseStream() } });
     useLayerStore.setState({
-      layers: [baseLayer({ isStreaming: true, lodMode: "auto" })],
+      layers: [baseLayer({ source: STREAMED_SOURCE, lodMode: "auto" })],
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
@@ -192,7 +196,7 @@ describe("LodSelector — streaming layer, auto mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="auto"
       />,
     );
@@ -209,7 +213,7 @@ describe("LodSelector — streaming layer, manual mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod="1.2"
-        isStreaming
+        access="stream"
         lodMode="manual"
       />,
     );
@@ -223,7 +227,7 @@ describe("LodSelector — streaming layer, manual mode", () => {
   it("clicking 'Auto' switches the layer's lodMode back to auto", () => {
     useStreamStore.setState({ streams: { L: baseStream() } });
     useLayerStore.setState({
-      layers: [baseLayer({ isStreaming: true, lodMode: "manual" })],
+      layers: [baseLayer({ source: STREAMED_SOURCE, lodMode: "manual" })],
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
@@ -231,7 +235,7 @@ describe("LodSelector — streaming layer, manual mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="manual"
       />,
     );
@@ -253,7 +257,7 @@ describe("LodSelector — streaming layer, manual mode", () => {
         layerId="L"
         availableLods={[]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="manual"
       />,
     );

@@ -1,3 +1,4 @@
+import { STREAMED_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   computeAvailableObjectTypes,
@@ -333,7 +334,7 @@ describe("layerStore", () => {
         modelRef: { type: "url", url: "https://x/a.fcb" },
         visible: true,
         rules: [],
-        isStreaming: true,
+        source: STREAMED_SOURCE,
       });
 
       const layer = useLayerStore.getState().layers.find((l) => l.id === id)!;

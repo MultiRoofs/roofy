@@ -6,6 +6,10 @@
  * jsdom has no WebGL anyway. The real engine is exercised by browser smokes,
  * not here.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
 import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -524,7 +528,7 @@ function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...patch,
   } as Layer;
 }
@@ -1025,7 +1029,7 @@ describe("NavaraViewport lifecycle", () => {
     useLayerStore.setState({
       layers: [
         makeLayer({ id: "static" }),
-        makeLayer({ id: "streamed", isStreaming: true }),
+        makeLayer({ id: "streamed", source: STREAMED_SOURCE }),
       ],
     });
     render(<NavaraViewport onTriangleCount={() => {}} />);
@@ -1117,7 +1121,7 @@ describe("NavaraViewport lifecycle", () => {
     // workspace is NOT empty, and the .fcb the user is looking at must not be
     // left behind when a CityJSON file lands beside it.
     useLayerStore.setState({
-      layers: [makeLayer({ id: "streamed", isStreaming: true })],
+      layers: [makeLayer({ id: "streamed", source: STREAMED_SOURCE })],
     });
     // `onTriangleCount` is the sync effect's own footprint — it is called at
     // the end of every pass, and only past the `engineReady` gate. Waiting on
@@ -1131,7 +1135,7 @@ describe("NavaraViewport lifecycle", () => {
 
     useLayerStore.setState({
       layers: [
-        makeLayer({ id: "streamed", isStreaming: true }),
+        makeLayer({ id: "streamed", source: STREAMED_SOURCE }),
         makeLayer({ id: "a" }),
       ],
     });

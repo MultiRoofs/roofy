@@ -36,7 +36,7 @@ import { emptyGridMessage, formatCount } from "./tableText";
 import { useLayerQuery } from "./useLayerQuery";
 import { derivedBuildingValues } from "../drawer/derivedBuildingColumns";
 import { defaultColumns, derivedColumns } from "../drawer/columnPolicy";
-import { getResidentModel } from "../../features/streaming/residentModel";
+import { layerObjects } from "../../features/layers/cityLayerSource";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { useLayerCounts } from "./useLayerCounts";
 import { useComputedColumnStore } from "../../insights/computedColumns";
@@ -105,7 +105,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   // the camera never delivered, so nothing here may call it partial. Only a
   // FlatCityBuf layer's table is built from the resident set.
   const residentOnly =
-    activeLayer?.isStreaming === true && familyEntry === undefined;
+    activeLayer?.source.coverage === "viewport" && familyEntry === undefined;
   const query = useQueryStore((s) =>
     queryKey === null ? null : layerQuery(s, queryKey),
   );
@@ -154,9 +154,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   // whatever had been picked in it.
   const partsById = useMemo(() => {
     if (activeLayer === null) return {};
-    const objects = activeLayer.isStreaming
-      ? getResidentModel(activeLayer.id, streamVersion ?? 0).objects
-      : activeLayer.model.objects;
+    const objects = layerObjects(activeLayer, streamVersion ?? 0);
     return Object.fromEntries(
       Object.values(objects).map((object) => [object.id, object.children]),
     );
@@ -172,9 +170,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         .map((row) => [row.id, row]),
     );
     if (activeLayer === null) return pageRows;
-    const objects = activeLayer.isStreaming
-      ? getResidentModel(activeLayer.id, streamVersion ?? 0).objects
-      : activeLayer.model.objects;
+    const objects = layerObjects(activeLayer, streamVersion ?? 0);
     for (const object of Object.values(objects)) {
       pageRows[object.id] ??= {
         id: object.id,
@@ -231,9 +227,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         const id = typeof row.id === "string" ? row.id : null;
         if (query?.view === "raw" || id === null || activeLayer === null)
           return row;
-        const objects = activeLayer.isStreaming
-          ? getResidentModel(activeLayer.id, streamVersion ?? 0).objects
-          : activeLayer.model.objects;
+        const objects = layerObjects(activeLayer, streamVersion ?? 0);
         const values = derivedBuildingValues(id, objects);
         return {
           ...row,
@@ -367,7 +361,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         <span
           className="table-sync-label"
           title={
-            activeLayer?.isStreaming
+            activeLayer?.source.access === "stream"
               ? familyEntry === undefined
                 ? STREAMING_FILTER_REASON
                 : `${STREAMING_FILTER_REASON}; the table itself covers the whole family`
@@ -376,7 +370,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         >
           {/* "Table only" is true of every stream — map filtering is off for
               them — but "currently loaded" is only true of a resident table. */}
-          {activeLayer?.isStreaming
+          {activeLayer?.source.access === "stream"
             ? residentOnly
               ? "Table only · currently loaded"
               : "Table only"
@@ -660,7 +654,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                   layerId={layerId}
                   emptyMessage={emptyGridMessage(
                     (query?.applied ?? null) !== null,
-                    activeLayer?.isStreaming !== true,
+                    activeLayer?.source.access !== "stream",
                     view.unfilteredRows,
                   )}
                   onSort={handleSort}

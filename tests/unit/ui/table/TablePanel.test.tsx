@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { ActiveLayerPanel } from "../../../../src/ui/layers/ActiveLayerPanel";
 /**
  * The panel's STATES. Data itself is `useLayerQuery`'s test; this file is
@@ -109,7 +113,7 @@ function layer(over: Partial<Layer> = {}): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     visibleObjectIds: null,
     ...over,
   } as Layer;
@@ -401,7 +405,7 @@ describe("TablePanel states", () => {
         : { ok: true, columns: [], rows: [] },
     );
     useLayerStore.setState({
-      layers: [layer({ isStreaming: true })],
+      layers: [layer({ source: STREAMED_SOURCE })],
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
@@ -425,7 +429,7 @@ describe("TablePanel states", () => {
   });
 
   it("keeps a streaming filter table-only", async () => {
-    useLayerStore.setState({ layers: [layer({ isStreaming: true })] });
+    useLayerStore.setState({ layers: [layer({ source: STREAMED_SOURCE })] });
     useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
@@ -714,7 +718,7 @@ describe("TablePanel columns and child records", () => {
       featureCount: 1,
       surfaceAttrKeys: [],
     };
-    useLayerStore.setState({ layers: [layer({ isStreaming: true })] });
+    useLayerStore.setState({ layers: [layer({ source: STREAMED_SOURCE })] });
     useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: extendedTable } },

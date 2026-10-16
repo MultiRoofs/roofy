@@ -4,6 +4,10 @@
  * says how many objects its dataset holds (CityParquet does, FlatCityBuf
  * does not).
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
 
@@ -37,7 +41,7 @@ afterEach(() => {
 function layer(id: string, objectIds: string[], isStreaming: boolean): Layer {
   return {
     id,
-    isStreaming,
+    source: isStreaming ? STREAMED_SOURCE : RESIDENT_SOURCE,
     model: {
       objects: Object.fromEntries(objectIds.map((o) => [o, { id: o }])),
     },

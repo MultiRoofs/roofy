@@ -8,6 +8,7 @@
  * right to abandon its DESCRIBE (its COMMIT went through and its columns are on
  * a table that exists); this one is not the same situation.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { Layer } from "../../../../src/features/layers/layerStore";
@@ -192,7 +193,7 @@ function layer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     derivedFrom: null,
   };
 }

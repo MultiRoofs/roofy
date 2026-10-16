@@ -591,7 +591,7 @@ export function useToolForm(toolId: ToolId) {
   // impossible. Same constant as the radio's title and the head's pre-flight.
   // Only a CITY target can be streaming, and `target` is exactly that layer.
   const newLayerBlocked =
-    tool.destinations.includes("new") && target?.isStreaming === true;
+    tool.destinations.includes("new") && target?.source.access === "stream";
   // The same for "This layer", about the WRITE TARGET's own table: a CityParquet
   // family's table is a VIEW over its file (R-B′), and the write ends in an
   // `ALTER TABLE` DuckDB refuses over one. `cityTable` IS the write target's

@@ -34,7 +34,7 @@ import { SOLID_GEOMETRY_TYPES } from "./solidRollUp";
 export function hasSolidAt(
   layer: Layer,
 ): (objectId: string, lod: string) => boolean {
-  if (layer.isStreaming) return () => false;
+  if (layer.source.access === "stream") return () => false;
   const byObject = new Map<string, ReadonlySet<string>>();
   for (const [id, object] of Object.entries(layer.model.objects)) {
     const lods = new Set<string>();

@@ -43,14 +43,20 @@ export function LayerTypeToggles({
   const streamTypes = useStreamStore((s) => s.streams[layer.id]?.types);
   const [open, setOpen] = useState(false);
 
-  const types = layer.isStreaming
-    ? (streamTypes ?? [])
-    : layer.availableObjectTypes;
+  const types =
+    layer.source.discovery === "progressive"
+      ? (streamTypes ?? [])
+      : layer.availableObjectTypes;
 
   // A single-group static layer has nothing to choose between, and its list is
   // final. A streaming layer keeps the disclosure however few groups it has
   // seen so far, because that number only grows as the user pans.
-  if (!expanded && !layer.isStreaming && types.length <= 1) return null;
+  if (
+    !expanded &&
+    layer.source.discovery !== "progressive" &&
+    types.length <= 1
+  )
+    return null;
 
   const hidden = new Set(layer.hiddenTypes);
 
@@ -93,7 +99,7 @@ export function LayerTypeToggles({
         >
           {types.length === 0 ? (
             <span className="layer-types-empty">
-              {layer.isStreaming
+              {layer.source.discovery === "progressive"
                 ? "Types appear as features stream in"
                 : "No object types in this layer"}
             </span>

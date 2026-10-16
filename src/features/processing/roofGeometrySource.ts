@@ -44,7 +44,7 @@ interface ObjectLike {
  * called, which is what every caller here wants.
  */
 function objectsOf(layer: Layer): Readonly<Record<string, ObjectLike>> {
-  return layer.isStreaming
+  return layer.source.access === "stream"
     ? getResidentModel(layer.id, 0).objects
     : layer.model.objects;
 }
@@ -64,7 +64,7 @@ export interface RoofGeometrySource {
 export function roofGeometrySource(layer: Layer): RoofGeometrySource {
   const cache = new Map<string, ReadonlyArray<RoofSurfaceMetric>>();
 
-  if (layer.isStreaming) {
+  if (layer.source.access === "stream") {
     const objects: Readonly<Record<string, ResidentObjectRecord>> =
       getResidentModel(layer.id, 0).objects;
     return {
@@ -150,7 +150,7 @@ export function geometryLodsByObject(
   layer: Layer,
 ): ReadonlyMap<string, ReadonlySet<string>> {
   const out = new Map<string, ReadonlySet<string>>();
-  if (layer.isStreaming) {
+  if (layer.source.access === "stream") {
     const objects: Readonly<Record<string, ResidentObjectRecord>> =
       getResidentModel(layer.id, 0).objects;
     for (const [id, record] of Object.entries(objects)) {
@@ -173,7 +173,7 @@ function roofLodsByObject(
   layer: Layer,
 ): ReadonlyMap<string, ReadonlySet<string>> {
   const out = new Map<string, ReadonlySet<string>>();
-  if (layer.isStreaming) {
+  if (layer.source.access === "stream") {
     const objects: Readonly<Record<string, ResidentObjectRecord>> =
       getResidentModel(layer.id, 0).objects;
     for (const [id, record] of Object.entries(objects)) {

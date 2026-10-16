@@ -65,7 +65,7 @@ export function useTotalObjectCount(): TotalObjectCount {
   const streamedTotal = useStreamStore((s): number | null => {
     let sum = 0;
     for (const layer of layers) {
-      if (!layer.isStreaming) continue;
+      if (layer.source.access !== "stream") continue;
       // The OPENED families first: the header of a package opened with Building
       // alone already counts only that file, but the families are the app's own
       // answer and the one that survives a reopen the header has not caught up
@@ -81,7 +81,7 @@ export function useTotalObjectCount(): TotalObjectCount {
   let loaded = 0;
   let staticTotal = 0;
   for (const layer of layers) {
-    if (layer.isStreaming) {
+    if (layer.source.access === "stream") {
       loaded += getResidentModel(layer.id, versionSum).featureCount;
     } else {
       const count = Object.keys(layer.model.objects).length;

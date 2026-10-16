@@ -16,6 +16,7 @@
  *    outside the list in the DOM, and a real press (mousedown, then click)
  *    still reaches its items rather than being eaten by the dismiss listener.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
@@ -99,7 +100,7 @@ function layer(
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     // REQUIRED on the real record (Task 21). The cast compiles without it,
     // but the row reads `derivedFrom !== null` — an `undefined` here would
     // make every seeded layer look derived and then dereference a null run.

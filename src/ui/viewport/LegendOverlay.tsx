@@ -58,7 +58,7 @@ export function LegendOverlay() {
   const residents = useMemo(() => {
     const next = new Map();
     for (const layer of layers) {
-      if (!layer.isStreaming) continue;
+      if (layer.source.access !== "stream") continue;
       next.set(
         layer.id,
         getResidentModel(layer.id, streams[layer.id]?.version ?? 0),

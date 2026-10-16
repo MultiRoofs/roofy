@@ -8,6 +8,7 @@
  * a theme puts back the user's own choices, which were never written in the
  * first place. How any of it LOOKS is the commander's browser pass.
  */
+import { RESIDENT_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
@@ -274,7 +275,7 @@ function makeLayer(id: string): Layer {
     availableLods: ["2.2"],
     lodMode: "auto",
     hiddenTypes: [],
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   } as unknown as Layer;
 }
 

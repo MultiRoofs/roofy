@@ -74,7 +74,7 @@ export function useLayerCounts(layerId: string | null): LayerCounts {
     layerId === null ? undefined : state.streams[layerId]?.version,
   );
   const resident =
-    layer?.isStreaming && layerId !== null
+    layer?.source.access === "stream" && layerId !== null
       ? getResidentModel(layerId, streamVersion ?? 0)
       : null;
   const key = `${queryKey ?? ""}:${table?.table ?? ""}`;
@@ -88,7 +88,9 @@ export function useLayerCounts(layerId: string | null): LayerCounts {
   const selectedFeatures = useMemo(() => {
     if (query?.view !== "buildings" || layer === null) return selectedIds;
     const parents = parentsIndexOf(
-      layer.isStreaming ? (resident?.objects ?? {}) : layer.model.objects,
+      layer.source.access === "stream"
+        ? (resident?.objects ?? {})
+        : layer.model.objects,
     );
     return [...new Set(selectedIds.map((id) => rootFeatureId(id, parents)))];
   }, [layer, query?.view, resident, selectedIds.join("\u0000")]);
@@ -155,7 +157,7 @@ export function useLayerCounts(layerId: string | null): LayerCounts {
         count(all.rows) === 0 &&
         query.view === "buildings" &&
         layer !== null &&
-        !layer.isStreaming &&
+        layer.source.access !== "stream" &&
         queryKey !== null
       ) {
         useQueryStore.getState().setView(queryKey, "raw");

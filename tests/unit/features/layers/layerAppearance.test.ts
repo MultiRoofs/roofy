@@ -1,3 +1,4 @@
+import { STREAMED_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { describe, it, expect, afterEach } from "vitest";
 import {
   computeAppearanceThemes,
@@ -119,7 +120,7 @@ describe("layerStore appearance", () => {
   });
 
   it("offers no themes for a streaming layer", () => {
-    const id = add(model(both), { isStreaming: true });
+    const id = add(model(both), { source: STREAMED_SOURCE });
     expect(find(id).appearanceThemes).toEqual([]);
   });
 

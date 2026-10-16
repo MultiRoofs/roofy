@@ -7,6 +7,10 @@
  * streaming layers list what the worker has decoded so far, which is empty
  * exactly when the panel is first opened.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { LayerTypeToggles } from "../../../../src/ui/layers/LayerTypeToggles";
@@ -61,7 +65,7 @@ function makeLayer(overrides: Partial<Layer> = {}): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   };
 }
@@ -148,7 +152,7 @@ describe("LayerTypeToggles — static layer", () => {
 describe("LayerTypeToggles — streaming layer", () => {
   it("lists the types the worker has decoded so far", () => {
     const layer = seed(
-      makeLayer({ isStreaming: true, availableObjectTypes: [] }),
+      makeLayer({ source: STREAMED_SOURCE, availableObjectTypes: [] }),
     );
     useStreamStore.setState({ streams: { L: streamState(["Building"]) } });
     render(<LayerTypeToggles layer={layer} />);
@@ -161,7 +165,7 @@ describe("LayerTypeToggles — streaming layer", () => {
     // Always offered for a streaming layer, unlike a one-type static one: the
     // union only grows, so an empty list now says nothing about later.
     const layer = seed(
-      makeLayer({ isStreaming: true, availableObjectTypes: [] }),
+      makeLayer({ source: STREAMED_SOURCE, availableObjectTypes: [] }),
     );
     useStreamStore.setState({ streams: { L: streamState([]) } });
     render(<LayerTypeToggles layer={layer} />);

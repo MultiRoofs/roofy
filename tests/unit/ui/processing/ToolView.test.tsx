@@ -4,6 +4,10 @@
  * mocked: what this pins is the REQUEST the form builds and the copy the card
  * shows, not the execution — `runQueue.test.ts` owns that.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -142,7 +146,7 @@ function addCityLayer(
     visible: true,
     rules: [],
     colorBy: "surface",
-    isStreaming,
+    source: isStreaming ? STREAMED_SOURCE : RESIDENT_SOURCE,
   };
   const id = useLayerStore.getState().addLayer(input);
   useWorkspaceStore.getState().setActiveLayerId(id);

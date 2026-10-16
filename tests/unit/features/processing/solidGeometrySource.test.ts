@@ -3,6 +3,10 @@
  * only, for the LoD select (spec §6). Nothing here measures anything: opening
  * a dropdown must not triangulate a city.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 
@@ -67,7 +71,7 @@ function staticLayer(): Layer {
   return {
     id: "L1",
     name: "solids",
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     selectedLod: "2.2",
     availableLods: ["2.2", "1.2"],
     model: {
@@ -134,7 +138,7 @@ describe("hasSolidAt", () => {
     residents.objects = { A: { parents: [], geometryLods: ["2.2"] } };
     const has = hasSolidAt({
       id: "S",
-      isStreaming: true,
+      source: STREAMED_SOURCE,
       model: { objects: {} },
     } as unknown as Layer);
     expect(has("A", "2.2")).toBe(false);
@@ -196,7 +200,7 @@ describe("solidLodOptions", () => {
     expect(
       solidLodOptions({
         id: "S",
-        isStreaming: true,
+        source: STREAMED_SOURCE,
         model: { objects: {} },
       } as unknown as Layer),
     ).toEqual([]);

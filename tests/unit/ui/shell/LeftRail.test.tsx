@@ -7,6 +7,7 @@
  * both things in the width it has: how many layers there are, and which one
  * every other panel is currently describing.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { LeftRail } from "../../../../src/ui/shell/LeftRail";
@@ -73,7 +74,7 @@ function layer(id: string, name: string): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   } as Layer;
 }
 

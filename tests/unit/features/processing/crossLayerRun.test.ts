@@ -14,6 +14,7 @@
  * its provenance under the GEO layer's id, and keeps an Undo of its OWN columns
  * per feature.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -225,7 +226,7 @@ function cityLayer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     derivedFrom: null,
   };
 }

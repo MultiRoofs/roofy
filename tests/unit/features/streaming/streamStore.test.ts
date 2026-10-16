@@ -102,11 +102,11 @@ describe("streamStore", () => {
     ).toBe("auto");
   });
 
-  it("defaults a new layer to not streaming", () => {
+  it("defaults a new layer to a resident source", () => {
     const id = addLayer();
     expect(
-      useLayerStore.getState().layers.find((l) => l.id === id)!.isStreaming,
-    ).toBe(false);
+      useLayerStore.getState().layers.find((l) => l.id === id)!.source.access,
+    ).toBe("resident");
   });
 
   it("setLodMode updates only the targeted layer, leaving the other's mode alone", () => {

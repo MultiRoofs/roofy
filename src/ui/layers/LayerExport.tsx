@@ -42,7 +42,7 @@ export function LayerExport({ item }: { item: ActiveLayer }) {
           table={entry.info}
           epsg={epsgOf(item.layer.model.metadata.referenceSystem)}
           selectedLod={item.layer.selectedLod}
-          isStreaming={item.layer.isStreaming}
+          source={item.layer.source}
           onClose={() => setOpen(false)}
         />
       )}

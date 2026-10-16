@@ -9,6 +9,10 @@
  * raster's is one slider. A tileset's is nothing, said out loud rather than
  * left as an empty box.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
@@ -89,7 +93,7 @@ function cityLayer(overrides: Partial<Layer> = {}): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   } as Layer;
 }
@@ -260,7 +264,7 @@ describe("StyleSection — Rules", () => {
         item={city(
           cityLayer({
             name: "Delft stream",
-            isStreaming: true,
+            source: STREAMED_SOURCE,
             colorBy: "rules",
           }),
         )}

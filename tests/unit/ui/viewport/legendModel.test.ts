@@ -8,6 +8,7 @@
  * `effectiveRules` and never in the store; a vector layer contributes its
  * category list or one fill row.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { describe, expect, it } from "vitest";
 import { legendGroups } from "../../../../src/ui/viewport/legendModel";
 import type { Layer } from "../../../../src/features/layers/layerStore";
@@ -54,7 +55,7 @@ function city(overrides: Partial<Layer> = {}): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   };
 }

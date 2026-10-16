@@ -18,6 +18,7 @@
  * than about the VFS; `reprojectGeoLayer` is the REAL one (proj4 replaced by a
  * deterministic affine), so preflight's skip counts are real.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LayerTable } from "../../../../src/insights/layerTables";
 import type { ToolContext } from "../../../../src/features/processing/runQueue";
@@ -272,7 +273,7 @@ function context(
     layer: {
       id: "L1",
       name: "Delft",
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
       model: {
         metadata: {
           referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/28992",

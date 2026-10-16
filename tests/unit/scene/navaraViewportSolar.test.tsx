@@ -23,6 +23,7 @@
  * The animation is driven by the timestamp the engine passes to `preUpdate`,
  * so every case below is deterministic without fake timers.
  */
+import { RESIDENT_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -244,7 +245,7 @@ function makeLayer(id: string): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   } as Layer;
 }
 

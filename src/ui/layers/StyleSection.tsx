@@ -183,7 +183,7 @@ function CityStyleFields({ layerId }: { readonly layerId: string }) {
 
       {colorBy === "surface" && <SurfaceTypePalette />}
 
-      {/* The editor branches on `isStreaming` internally and reads a streaming
+      {/* The editor branches on the source's `access` internally and reads a streaming
           layer's attribute keys from the resident model, because a streaming
           layer's `model` is a stub (see residentModel.ts).
 

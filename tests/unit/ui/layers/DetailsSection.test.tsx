@@ -10,6 +10,10 @@
  * per-layer dropdown is empty exactly when it is first looked at) — labelled
  * as global, so nobody reads it as this layer's setting.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
@@ -103,7 +107,7 @@ function cityLayer(overrides: Partial<Layer> = {}): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   } as Layer;
 }
@@ -265,7 +269,7 @@ describe("DetailsSection — what a static city layer is", () => {
 describe("DetailsSection — a streaming layer", () => {
   it("labels the LoD control as the global one it is", () => {
     seedStream("L", {});
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     expect(
       screen.getByLabelText(
         "Streaming level of detail (applies to every streaming layer)",
@@ -280,7 +284,7 @@ describe("DetailsSection — a streaming layer", () => {
       cellCount: 7,
       objectsCount: 884106,
     });
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     const line = screen.getByText(
       "Showing the objects in view — 12,301 of 884,106 loaded. The table and statistics cover loaded objects only.",
     );
@@ -290,7 +294,7 @@ describe("DetailsSection — a streaming layer", () => {
 
   it("says how many objects are loaded when the stream does not know its dataset's size", () => {
     seedStream("L", { featureCount: 1204, cellCount: 3 });
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     expect(
       screen.getByText(
         "Showing the objects in view — 1,204 loaded. The table and statistics cover loaded objects only.",
@@ -300,7 +304,7 @@ describe("DetailsSection — a streaming layer", () => {
 
   it("freezes and unfreezes the extract through the camera-sync toggle", () => {
     seedStream("L", {});
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     const toggle = screen.getByRole("button", { name: /camera sync/i });
     expect(toggle.textContent).toBe("SYNC");
     fireEvent.click(toggle);
@@ -311,7 +315,7 @@ describe("DetailsSection — a streaming layer", () => {
 
   it("lists the object types discovered so far, from the stream", () => {
     seedStream("L", { types: ["Building", "Bridge"] });
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     expect(screen.getByText("Building, Bridge")).toBeTruthy();
   });
 
@@ -327,7 +331,7 @@ describe("DetailsSection — a streaming layer", () => {
     render(
       <DetailsSection
         item={city({
-          isStreaming: true,
+          source: STREAMED_SOURCE,
           model: {
             ...cityLayer().model,
             metadata: {
@@ -351,7 +355,7 @@ describe("DetailsSection — a streaming layer", () => {
 
   it("still names a projected stream's CRS plainly", () => {
     seedStream("L", {});
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     expect(screen.getByText("EPSG:7415")).toBeTruthy();
   });
 });
@@ -429,7 +433,7 @@ describe("DetailsSection — object families", () => {
       objectsCount: 884106,
     });
     seedFamilies({ rowCounts: { building: 884106 } });
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     const line = screen.getByText(
       "Showing the objects in view — 12,301 of 884,106 loaded. The table and statistics cover the whole family, whatever is on screen.",
     );
@@ -438,7 +442,7 @@ describe("DetailsSection — object families", () => {
 
   it("lists every available family with its own state", () => {
     seedFamilies({ rowCounts: { building: 1204 } });
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     const group = screen.getByRole("group", { name: "Object families" });
     expect(group.textContent).toContain("Building");
     expect(group.textContent).toContain("Bridge");
@@ -451,7 +455,7 @@ describe("DetailsSection — object families", () => {
 
   it("says what is opened and what is merely available", () => {
     seedFamilies();
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     expect(
       screen.getByText("Building opened · 2 more families available"),
     ).toBeTruthy();
@@ -470,7 +474,7 @@ describe("DetailsSection — object families", () => {
         },
       },
     }));
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     const group = screen.getByRole("group", { name: "Object families" });
     expect(group.textContent).toContain("Failed");
     expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
@@ -478,7 +482,7 @@ describe("DetailsSection — object families", () => {
 
   it("opens a CLOSED family's table without opening its geometry", () => {
     seedFamilies();
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     fireEvent.click(screen.getByRole("button", { name: "Show Bridge table" }));
     // The table panel now shows the bridge family…
     expect(useFamilyStore.getState().layers.L!.active).toBe("bridge");
@@ -492,7 +496,7 @@ describe("DetailsSection — object families", () => {
 
   it("keeps the LAST open family's toggle disabled — a layer must render something", () => {
     seedFamilies();
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     const toggle = screen.getByRole("checkbox", {
       name: "Show Building geometry",
     });
@@ -509,7 +513,7 @@ describe("DetailsSection — object families", () => {
   it("cannot toggle geometry with no 3D engine, but can still open a table", () => {
     seedFamilies();
     setStreamPlugin(null);
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     expect(
       (
         screen.getByRole("checkbox", {
@@ -525,7 +529,7 @@ describe("DetailsSection — object families", () => {
   it("keeps object VISIBILITY a separate block from the families", () => {
     seedStream("L", { types: ["Building", "Bridge"] });
     seedFamilies();
-    render(<DetailsSection item={city({ isStreaming: true })} />);
+    render(<DetailsSection item={city({ source: STREAMED_SOURCE })} />);
     expect(screen.getByRole("group", { name: "Object families" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Object types" })).toBeTruthy();
   });

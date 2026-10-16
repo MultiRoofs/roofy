@@ -46,7 +46,7 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
     return (
       <>
         <p className="active-layer-note">
-          {item.kind === "city" && item.layer.isStreaming
+          {item.kind === "city" && item.layer.source.access === "stream"
             ? "No filter. Table only — map filtering for streaming layers is not available yet."
             : "No filter. Filters apply to the map and the table together."}
         </p>

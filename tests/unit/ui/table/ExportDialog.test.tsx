@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
@@ -141,7 +145,7 @@ function open(over: Record<string, unknown> = {}) {
       table={READER_TABLE}
       epsg={7415}
       selectedLod="2.2"
-      isStreaming={false}
+      source={RESIDENT_SOURCE}
       onClose={onClose}
       {...over}
     />,
@@ -533,7 +537,7 @@ describe("ExportDialog", () => {
   });
 
   it("warns that streaming exports include only currently loaded records", async () => {
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
     expect(
       await screen.findByText(
         "Exports include currently loaded records only, not the whole dataset.",
@@ -555,14 +559,14 @@ describe("ExportDialog", () => {
         },
       ]),
     );
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
     await waitFor(() =>
       expect(screen.queryByText(/currently loaded records only/)).toBeNull(),
     );
   });
 
   it("forces one table rebuild when it opens on a streaming layer", async () => {
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
     await waitFor(() =>
       expect(refreshStreamingTable).toHaveBeenCalledWith("L"),
     );
@@ -583,7 +587,7 @@ describe("ExportDialog", () => {
       ok: false,
       message: "IO Error: boom",
     });
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("could not be rebuilt");
@@ -616,7 +620,7 @@ describe("ExportDialog", () => {
         },
       },
     } as never);
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("object family");
@@ -651,7 +655,7 @@ describe("ExportDialog", () => {
         },
       },
     } as never);
-    open({ table: buildingTable, isStreaming: true });
+    open({ table: buildingTable, source: STREAMED_SOURCE });
 
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
@@ -671,7 +675,7 @@ describe("ExportDialog", () => {
     useLayerTableStore.setState({
       tables: { "L::building": { state: "ready", info: familyTable } },
     } as never);
-    open({ table: familyTable, isStreaming: true });
+    open({ table: familyTable, source: STREAMED_SOURCE });
 
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
@@ -700,7 +704,7 @@ describe("ExportDialog", () => {
         },
       },
     } as never);
-    open({ table: familyTable, isStreaming: true });
+    open({ table: familyTable, source: STREAMED_SOURCE });
 
     await waitFor(() =>
       expect(
@@ -710,7 +714,7 @@ describe("ExportDialog", () => {
   });
 
   it("exports normally when the refresh succeeded", async () => {
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
     expect(
@@ -757,7 +761,7 @@ describe("ExportDialog", () => {
         {
           id: "L",
           name: "delft",
-          isStreaming: false,
+          source: RESIDENT_SOURCE,
           model: {
             objects: {
               B1: { id: "B1", parents: [], children: ["P1"] },
@@ -796,7 +800,7 @@ describe("ExportDialog", () => {
         {
           id: "L",
           name: "yokohama",
-          isStreaming: true,
+          source: STREAMED_SOURCE,
           model: { objects: {} },
         },
       ] as never,
@@ -813,7 +817,7 @@ describe("ExportDialog", () => {
           }
         : { ok: true, columns: ["value"], rows: [{ value: "Building" }] },
     );
-    open({ table: FAMILY_TABLE, isStreaming: true });
+    open({ table: FAMILY_TABLE, source: STREAMED_SOURCE });
 
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     fireEvent.click(screen.getByLabelText("Selected records"));
@@ -844,7 +848,7 @@ describe("ExportDialog", () => {
         {
           id: "L",
           name: "yokohama",
-          isStreaming: true,
+          source: STREAMED_SOURCE,
           model: { objects: {} },
         },
       ] as never,
@@ -857,7 +861,7 @@ describe("ExportDialog", () => {
         ? { ok: false, message: "IO Error: could not read footer" }
         : { ok: true, columns: ["value"], rows: [{ value: "Building" }] },
     );
-    open({ table: FAMILY_TABLE, isStreaming: true });
+    open({ table: FAMILY_TABLE, source: STREAMED_SOURCE });
 
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     fireEvent.click(screen.getByLabelText("Selected records"));
@@ -1042,7 +1046,7 @@ describe("ExportDialog", () => {
         table={READER_TABLE}
         epsg={7415}
         selectedLod="2.2"
-        isStreaming={false}
+        source={RESIDENT_SOURCE}
         onClose={() => {}}
       />,
     );
@@ -1057,7 +1061,7 @@ describe("ExportDialog", () => {
         table={FALLBACK_TABLE}
         epsg={7415}
         selectedLod={null}
-        isStreaming={false}
+        source={RESIDENT_SOURCE}
         onClose={() => {}}
       />,
     );
@@ -1076,7 +1080,7 @@ describe("ExportDialog", () => {
         table={READER_TABLE}
         epsg={7415}
         selectedLod="2.2"
-        isStreaming={false}
+        source={RESIDENT_SOURCE}
         onClose={() => {}}
       />,
     );
@@ -1098,7 +1102,7 @@ describe("ExportDialog", () => {
         }}
         epsg={7415}
         selectedLod="2.2"
-        isStreaming={false}
+        source={RESIDENT_SOURCE}
         onClose={() => {}}
       />,
     );

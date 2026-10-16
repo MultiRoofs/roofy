@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
 import { describe, expect, it, vi } from "vitest";
 import type { Selection, ThemeStyle } from "@cityjson/navara-cityjson";
 import type { Layer } from "../../../src/features/layers/layerStore";
@@ -74,7 +78,7 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...patch,
     ...colorBy,
   } as Layer;
@@ -258,7 +262,7 @@ describe("syncLayers", () => {
     const registry = { get: () => undefined, add: vi.fn() };
     syncLayers(
       registry as never,
-      [layer({ id: "S1", isStreaming: true })],
+      [layer({ id: "S1", source: STREAMED_SOURCE })],
       new Map(),
       () => {},
     );
@@ -275,7 +279,7 @@ describe("syncLayers", () => {
     ]);
     syncLayers(
       { get: () => handle, add: vi.fn() } as never,
-      [layer({ id: "L1", isStreaming: true })],
+      [layer({ id: "L1", source: STREAMED_SOURCE })],
       live,
       () => {},
     );
@@ -358,7 +362,7 @@ describe("totalTriangles", () => {
     const streams = new Map([["S1", fakeHandle("S1", 12) as never]]);
     expect(
       totalTriangles(
-        [layer({ id: "L1" }), layer({ id: "S1", isStreaming: true })],
+        [layer({ id: "L1" }), layer({ id: "S1", source: STREAMED_SOURCE })],
         live,
         streams,
       ),
@@ -379,7 +383,7 @@ describe("interactionHandles", () => {
     ]);
     const streams = new Map([["S1", s1 as never]]);
     const layers = [
-      layer({ id: "S1", isStreaming: true }),
+      layer({ id: "S1", source: STREAMED_SOURCE }),
       layer({ id: "L1" }),
       layer({ id: "L2", visible: false }),
     ];
@@ -393,7 +397,7 @@ describe("interactionHandles", () => {
     ]);
     expect(
       interactionHandles(
-        [layer({ id: "S1", isStreaming: true }), layer({ id: "L1" })],
+        [layer({ id: "S1", source: STREAMED_SOURCE }), layer({ id: "L1" })],
         live,
       ),
     ).toEqual([h1]);
@@ -572,7 +576,7 @@ describe("syncStyles", () => {
       [
         layer({
           id: "S1",
-          isStreaming: true,
+          source: STREAMED_SOURCE,
           rules: [roofRule],
         }),
       ],
@@ -731,7 +735,7 @@ describe("syncHighlight", () => {
     };
     syncHighlight(
       allInteractionHandles(
-        [layer({ id: "S1", isStreaming: true })],
+        [layer({ id: "S1", source: STREAMED_SOURCE })],
         new Map(),
         new Map([["S1", stream as never]]),
       ),
@@ -896,7 +900,7 @@ describe("syncStreamState", () => {
     ];
     const l = layer({
       id: "S1",
-      isStreaming: true,
+      source: STREAMED_SOURCE,
       rules,
       visible: false,
       lodMode: "auto",
@@ -921,7 +925,7 @@ describe("syncStreamState", () => {
   it("freezes a layer whose camera sync was switched off, and thaws it again", () => {
     const handle = fakeStreamHandle();
     const memos = new Map<string, StreamSyncMemo>();
-    const l = layer({ id: "S1", isStreaming: true });
+    const l = layer({ id: "S1", source: STREAMED_SOURCE });
     syncStreamState(l, handle as never, memos);
     handle.setCameraSync.mockClear();
 
@@ -938,7 +942,7 @@ describe("syncStreamState", () => {
   it("pushes nothing on a second pass with the same values", () => {
     const handle = fakeStreamHandle();
     const memos = new Map<string, StreamSyncMemo>();
-    const l = layer({ id: "S1", isStreaming: true });
+    const l = layer({ id: "S1", source: STREAMED_SOURCE });
     syncStreamState(l, handle as never, memos);
     handle.setRules.mockClear();
     handle.setLod.mockClear();
@@ -957,7 +961,7 @@ describe("syncStreamState", () => {
   it("pushes only the field that changed", () => {
     const handle = fakeStreamHandle();
     const memos = new Map<string, StreamSyncMemo>();
-    const l = layer({ id: "S1", isStreaming: true, visible: true });
+    const l = layer({ id: "S1", source: STREAMED_SOURCE, visible: true });
     syncStreamState(l, handle as never, memos);
     handle.setRules.mockClear();
     handle.setLod.mockClear();
@@ -973,7 +977,7 @@ describe("syncStreamState", () => {
     const handle = fakeStreamHandle();
     const memos = new Map<string, StreamSyncMemo>();
     const hidden = ["Building"];
-    const l = layer({ id: "S1", isStreaming: true });
+    const l = layer({ id: "S1", source: STREAMED_SOURCE });
     syncStreamState(l, handle as never, memos);
     handle.setHiddenTypes.mockClear();
 
@@ -991,7 +995,7 @@ describe("syncStreamState", () => {
     // date" and leave it unstyled, at the wrong LoD and possibly visible.
     const memos = new Map<string, StreamSyncMemo>();
     const first = fakeStreamHandle();
-    const l = layer({ id: "S1", isStreaming: true });
+    const l = layer({ id: "S1", source: STREAMED_SOURCE });
     syncStreamState(l, first as never, memos);
 
     const second = fakeStreamHandle();
@@ -1068,14 +1072,19 @@ describe("colorBy", () => {
     const handle = fakeStreamHandle();
     const memos = new Map<string, StreamSyncMemo>();
     const rules = [roofRule];
-    const l = layer({ id: "S1", isStreaming: true, rules, colorBy: "rules" });
+    const l = layer({
+      id: "S1",
+      source: STREAMED_SOURCE,
+      rules,
+      colorBy: "rules",
+    });
     syncStreamState(l, handle as never, memos);
     handle.setRules.mockClear();
 
     syncStreamState(
       layer({
         id: "S1",
-        isStreaming: true,
+        source: STREAMED_SOURCE,
         rules,
         colorBy: "rules",
         unmatchedColor: "#010203",
@@ -1091,7 +1100,11 @@ describe("colorBy", () => {
   it("repaints when only the single colour changes", () => {
     const handle = fakeStreamHandle();
     const memos = new Map<string, StreamSyncMemo>();
-    const base = { id: "S1", isStreaming: true, colorBy: "single" } as const;
+    const base = {
+      id: "S1",
+      source: STREAMED_SOURCE,
+      colorBy: "single",
+    } as const;
     syncStreamState(layer({ ...base }), handle as never, memos);
     handle.setRules.mockClear();
     syncStreamState(
@@ -1126,7 +1139,7 @@ describe("colorBy", () => {
 
     const stream = (patch: Partial<Layer>) =>
       syncStreamState(
-        layer({ id: "S1", isStreaming: true, ...patch }),
+        layer({ id: "S1", source: STREAMED_SOURCE, ...patch }),
         streamHandle as never,
         memos,
       );
@@ -1242,7 +1255,7 @@ describe("theme styles", () => {
   it("styles a streaming layer with the active theme, on change only", () => {
     const handle = themedStreamHandle();
     const memos = new Map<string, StreamSyncMemo>();
-    const l = layer({ id: "S1", isStreaming: true });
+    const l = layer({ id: "S1", source: STREAMED_SOURCE });
 
     syncStreamState(l, handle as never, memos, CARTOON);
     expect(handle.setThemeStyle).toHaveBeenCalledWith(CARTOON);
@@ -1261,7 +1274,7 @@ describe("theme styles", () => {
     // unthemed; a memo that survived the swap would leave them photoreal in a
     // themed scene.
     const memos = new Map<string, StreamSyncMemo>();
-    const l = layer({ id: "S1", isStreaming: true });
+    const l = layer({ id: "S1", source: STREAMED_SOURCE });
     const first = themedStreamHandle();
     syncStreamState(l, first as never, memos, CYBER);
 
@@ -1274,7 +1287,7 @@ describe("theme styles", () => {
     const handle = themedStreamHandle();
     const memos = new Map<string, StreamSyncMemo>();
     syncStreamState(
-      layer({ id: "S1", isStreaming: true }),
+      layer({ id: "S1", source: STREAMED_SOURCE }),
       handle as never,
       memos,
     );

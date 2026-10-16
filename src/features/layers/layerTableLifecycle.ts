@@ -287,7 +287,7 @@ export function installLayerTableLifecycle(): () => void {
       // and in `sweepStreamingLayers` below by the same test.
       if (
         !knownLayerIds.has(layer.id) &&
-        layer.isStreaming &&
+        layer.source.access === "stream" &&
         layer.derivedFrom === null
       ) {
         enqueueAt(layer.id);
@@ -322,7 +322,8 @@ export function installLayerTableLifecycle(): () => void {
    */
   const sweepStreamingLayers = (): void => {
     for (const layer of useLayerStore.getState().layers) {
-      if (!layer.isStreaming || layer.derivedFrom !== null) continue;
+      if (layer.source.access !== "stream" || layer.derivedFrom !== null)
+        continue;
       // Design decision (j): the sweep's job is "a consumer opened and this
       // layer's table is behind". The VERSION is exactly that question, and
       // rebuilding a table that is already current costs a rebuild AND retires

@@ -8,6 +8,10 @@
  * NOT: the statements a run sends are part of what is under test here, and they
  * reach the duckdb mock's log.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -322,7 +326,7 @@ function layer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     derivedFrom: null,
   };
 }
@@ -879,7 +883,9 @@ describe("submitRun", () => {
     // replaying one) — which is exactly what this guard is for. No staging:
     // `height-from-extent` offers `"new"` in the shipped registry, so the
     // refusal here is the streaming one and nothing else.
-    useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });
+    useLayerStore.setState({
+      layers: [{ ...layer(), source: STREAMED_SOURCE }],
+    });
     const id = submitRun(request({ destination: "new", newLayerName: "X" }));
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe(
@@ -895,7 +901,9 @@ describe("submitRun", () => {
     // retarget and for `retryRun` replaying one.
     activeFamily = "building";
     tableInfo = { ...freshTable(), fileBacked: true };
-    useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });
+    useLayerStore.setState({
+      layers: [{ ...layer(), source: STREAMED_SOURCE }],
+    });
     const id = submitRun(request());
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe(

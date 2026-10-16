@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import type {
@@ -101,7 +105,7 @@ function layer(): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   };
 }
 afterEach(() => {
@@ -155,7 +159,9 @@ describe("HoverTooltip", () => {
     expect(screen.getByText(/50.0 m² · 0.0° · flat/)).toBeTruthy();
   });
   it("reports loading rather than fabricated streaming metrics after eviction", () => {
-    useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });
+    useLayerStore.setState({
+      layers: [{ ...layer(), source: STREAMED_SOURCE }],
+    });
     useStreamStore.setState({
       streams: {
         L: {

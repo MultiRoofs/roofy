@@ -62,7 +62,7 @@ export function useResolvedBuilding(
     const layer = layers.find((l) => l.id === subject.layerId);
     if (layer === undefined) return null;
 
-    if (!layer.isStreaming) {
+    if (layer.source.access !== "stream") {
       // Resolve inherited attributes on the object and its parts exactly as
       // the static inspector did, so SUMMARY and RULE MATCH read the same
       // attributes a child would inherit from its parent.

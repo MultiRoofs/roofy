@@ -22,6 +22,10 @@
  *    `suppressSettleThenCommit`, so it neither fetches along its flight path
  *    nor leaves its destination unfetched.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
 import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -279,7 +283,7 @@ function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...patch,
   } as Layer;
 }
@@ -437,7 +441,7 @@ function registerStreamingLayer(
   useLayerStore.setState((s) => ({
     layers: [
       ...s.layers,
-      makeLayer({ id: layerId, isStreaming: true, ...patch }),
+      makeLayer({ id: layerId, source: STREAMED_SOURCE, ...patch }),
     ],
   }));
   useStreamStore.getState().register(layerId, {

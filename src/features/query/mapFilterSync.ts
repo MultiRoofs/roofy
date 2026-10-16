@@ -179,7 +179,7 @@ export async function syncFilterToMap(layerId: string): Promise<void> {
     .layers.find((candidate) => candidate.id === layerId);
   // FlatCityBuf only represents currently resident rows in its table. It must
   // never use that partial table to hide map geometry.
-  if (layer?.isStreaming || query.applied === null) {
+  if (layer?.source.access === "stream" || query.applied === null) {
     // The store's own identity guard already makes `clear()` free, but this is
     // the path taken on EVERY Apply, toggle and table rebuild for every layer
     // that is not being map-filtered — which is nearly all of them — so return

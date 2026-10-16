@@ -8,6 +8,7 @@
  * module that may touch duckdb-wasm is `insights/duckdb.ts` and nothing here
  * goes near it.
  */
+import { STREAMED_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type {
   FcbHeaderModel,
@@ -169,7 +170,7 @@ function seedLayer(layerId: string, families: ReadonlyArray<LayerFamily>) {
     modelRef: { type: "url", url: "https://data.example/" },
     visible: true,
     rules: [],
-    isStreaming: true,
+    source: STREAMED_SOURCE,
   });
   useFamilyStore.getState().setFamilies(layerId, families);
 }

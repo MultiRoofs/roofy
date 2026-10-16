@@ -325,7 +325,7 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
               />
             </label>
           </div>
-          {f.cityLayer?.isStreaming === true && !familyBacked && (
+          {f.cityLayer?.source.coverage === "viewport" && !familyBacked && (
             /* Only a RESIDENT table is partial. A CityParquet family's table is
                a view over the file (R-B′) and `counts.all` is the whole
                family's, so this sentence would contradict its own number. */

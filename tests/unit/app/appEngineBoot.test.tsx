@@ -18,6 +18,10 @@
  * no WebGL, and `@navaramap/three` crashes at module scope under Node — Task
  * B1's NODE_IMPORT_SAFE = false). The real path is Task C14's browser smoke.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -215,7 +219,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
         modelRef: { type: "url", url: FCB_URL },
         visible: true,
         rules: [],
-        isStreaming: true,
+        source: STREAMED_SOURCE,
       });
       return "stream-1";
     };
@@ -364,7 +368,7 @@ describe("App object count across static and streaming layers", () => {
       modelRef: { type: "url", url: FCB_URL },
       visible: true,
       rules: [],
-      isStreaming: true,
+      source: STREAMED_SOURCE,
     });
     useStreamStore.setState({
       streams: {
@@ -435,7 +439,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
     });
     const geoLayerId = useGeoLayerStore.getState().addGeoLayer({
       name: "roads",
@@ -482,7 +486,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
     });
     useGeoLayerStore.getState().addGeoLayer({
       name: "roads",
@@ -544,7 +548,7 @@ describe("App renders exactly one attribute view for a selection", () => {
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
     });
 
     render(<App persistenceStore={emptyStore} />);

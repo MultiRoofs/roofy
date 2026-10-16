@@ -8,6 +8,10 @@
  * created says — an explicit "Load table", never a spinner that never resolves
  * and never an error about a table nobody asked for yet.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
@@ -146,7 +150,7 @@ function seed(over: { readonly bridgeReady?: boolean } = {}): void {
         availableObjectTypes: [],
         appearanceThemes: [],
         selectedAppearance: null,
-        isStreaming: true,
+        source: STREAMED_SOURCE,
         visibleObjectIds: null,
       } as unknown as Layer,
     ],
@@ -291,7 +295,7 @@ describe("the table panel's family selector", () => {
           availableObjectTypes: [],
           availableLods: [],
           appearanceThemes: [],
-          isStreaming: false,
+          source: RESIDENT_SOURCE,
           visibleObjectIds: null,
         } as unknown as Layer,
       ],

@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { describe, expect, it } from "vitest";
 import type {
   CityModel,
@@ -76,7 +80,7 @@ function city(patch: Partial<Layer> = {}): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...patch,
   };
 }
@@ -120,7 +124,7 @@ describe("legend surface counts", () => {
 
   it("marks streaming roof and rule counts unavailable when metrics are absent", () => {
     const layer = city({
-      isStreaming: true,
+      source: STREAMED_SOURCE,
       colorBy: "rules",
       rules: [
         {
@@ -176,7 +180,7 @@ describe("legend surface counts", () => {
   });
 
   it("qualifies partial streaming counts and never invents wall or ground values", () => {
-    const layer = city({ isStreaming: true, colorBy: "surface" });
+    const layer = city({ source: STREAMED_SOURCE, colorBy: "surface" });
     const residents = new Map([
       [
         "city",
