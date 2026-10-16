@@ -8,6 +8,11 @@ import { revealAppAfterLaunch } from "./app/launchScreen";
 import ReactDOM from "react-dom/client";
 import { App } from "./app/App";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { installPerfProbe } from "./features/debug/perfProbe";
+
+// The performance harness opens the app with `?perf`; it must wrap WebGL
+// before the engine creates its context.
+if (new URLSearchParams(location.search).has("perf")) installPerfProbe();
 
 function LaunchReady() {
   useEffect(revealAppAfterLaunch, []);
