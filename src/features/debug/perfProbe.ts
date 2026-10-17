@@ -77,10 +77,58 @@ function byteSize(value: unknown): number {
   return 0;
 }
 
+/** Channels per texel of a WebGL2 pixel format; 4 for anything unlisted. */
+const FORMAT_CHANNELS: Readonly<Record<number, number>> = {
+  0x1902: 1, // DEPTH_COMPONENT
+  0x1903: 1, // RED
+  0x8d94: 1, // RED_INTEGER
+  0x8227: 2, // RG
+  0x8228: 2, // RG_INTEGER
+  0x1907: 3, // RGB
+  0x8d98: 3, // RGB_INTEGER
+};
+
+/** What a ranged sub-upload sends, or null when the call is not ranged.
+ *  three passes the whole source array with a range: `bufferSubData`'s
+ *  `srcOffset, length` (in elements) for an attribute's update ranges, and
+ *  `texSubImage2D`'s `width x height` (with `UNPACK_ROW_LENGTH` set) for a
+ *  DataTexture's. Counting the array would count bytes never sent. */
+function rangedBytes(name: string, args: readonly unknown[]): number | null {
+  if (name === "bufferSubData") {
+    const data = args[2];
+    const length = args[4];
+    if (ArrayBuffer.isView(data) && typeof length === "number" && length > 0) {
+      const element =
+        "BYTES_PER_ELEMENT" in data ? (data.BYTES_PER_ELEMENT as number) : 1;
+      return length * element;
+    }
+    return null;
+  }
+  if (name === "texSubImage2D") {
+    const data = args[8];
+    const [width, height, format] = [args[4], args[5], args[6]];
+    if (
+      ArrayBuffer.isView(data) &&
+      typeof width === "number" &&
+      typeof height === "number" &&
+      typeof format === "number"
+    ) {
+      const element =
+        "BYTES_PER_ELEMENT" in data ? (data.BYTES_PER_ELEMENT as number) : 1;
+      const texel = (FORMAT_CHANNELS[format] ?? 4) * element;
+      return Math.min(data.byteLength, width * height * texel);
+    }
+  }
+  return null;
+}
+
 function uploadBytes(
+  name: string,
   args: readonly unknown[],
   positions: readonly number[],
 ): number {
+  const ranged = rangedBytes(name, args);
+  if (ranged !== null) return ranged;
   // Calls come in several overloads; the data sits at the last of the listed
   // positions that holds a sized value, or at the final argument.
   for (let i = positions.length - 1; i >= 0; i--) {
@@ -144,7 +192,7 @@ export function createPerfProbe(options: PerfProbeOptions): PerfProbe {
     wrap(name, () => void counts.readbacks++);
   for (const [name, positions] of Object.entries(UPLOAD_METHODS)) {
     wrap(name, (args) => {
-      counts.uploadedBytes += uploadBytes(args, positions);
+      counts.uploadedBytes += uploadBytes(name, args, positions);
     });
   }
 

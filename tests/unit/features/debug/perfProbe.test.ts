@@ -98,6 +98,38 @@ describe("perfProbe", () => {
     expect(probe.snapshot().uploadedBytes).toBe(40 + 64 + 5 + 16);
   });
 
+  it("counts only the range a sub-upload sends, not the whole source array", () => {
+    // three's ranged updates pass the WHOLE array plus a range: an attribute
+    // through bufferSubData's srcOffset/length, a DataTexture through
+    // texSubImage2D's width x height with UNPACK_ROW_LENGTH set.
+    const { proto } = fakeGlPrototype();
+    const probe = createPerfProbe({
+      glPrototype: proto,
+      schedule: manualClock().schedule,
+    });
+    (proto.bufferSubData as (...a: unknown[]) => void)(
+      0,
+      0,
+      new Float32Array(1000),
+      10,
+      6,
+    );
+    const RGBA = 0x1908;
+    const UNSIGNED_BYTE = 0x1401;
+    (proto.texSubImage2D as (...a: unknown[]) => void)(
+      0,
+      0,
+      5,
+      3,
+      7,
+      1,
+      RGBA,
+      UNSIGNED_BYTE,
+      new Uint8Array(1024 * 64 * 4),
+    );
+    expect(probe.snapshot().uploadedBytes).toBe(6 * 4 + 7 * 4);
+  });
+
   it("counts a frame only for a tick in which something was drawn", () => {
     const { proto } = fakeGlPrototype();
     const clock = manualClock();
