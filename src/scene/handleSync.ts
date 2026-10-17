@@ -344,8 +344,8 @@ export interface StreamInteractionHandle extends InteractionHandle {
    *  every resident cell AND to each cell installed later, which is what makes
    *  a stream that keeps arriving stay in the theme it was opened in. */
   setThemeStyle(style: ThemeStyle): void;
-  /** First-level object groups to stream without geometry. Forces a commit,
-   *  so every affected cell is refetched — the same cost as a LoD change. */
+  /** First-level object groups to hide. A flag write on every resident cell's
+   *  style texture; the cells keep their geometry, so nothing is refetched. */
   setHiddenTypes(types: ReadonlyArray<string>): void;
   /** Bakes the theme into every resident cell on the next commit (a swap,
    *  like a hidden-type change); `null` for plain colours. */
@@ -400,7 +400,8 @@ export interface StreamSyncMemo {
  * Memoised on the values actually pushed, because none of them is free:
  * `setRules` re-bakes every resident cell in the worker, `setLod` forces a
  * commit (so it refetches even for a camera that has not moved), and
- * `setVisible` and `setHiddenTypes` write every resident cell mesh. The
+ * `setVisible` and `setHiddenTypes` touch every resident cell (a mesh's
+ * visibility, a style texture's flags). The
  * viewport's reconciliation effect re-runs on every `layers` change — a hover,
  * a rename, another layer's toggle — so without the memo each of those would
  * cost a full round trip per streaming layer.
