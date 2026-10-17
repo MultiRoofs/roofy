@@ -272,6 +272,12 @@ const record = async (phase, extra = {}) => {
 };
 await record("load", { loadMs: Date.now() - started });
 await shot("load");
+// A fresh profile opens the walkthrough's welcome dialog over the viewport;
+// close it so the gestures and the hover sweep reach the canvas.
+await evaluate(
+  "[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Explore on my own')?.click()",
+);
+await sleep(2000);
 
 // --- input helpers: pressed/released pointer events over the canvas --------
 const mouse = (type, x, y, extra = {}) =>
