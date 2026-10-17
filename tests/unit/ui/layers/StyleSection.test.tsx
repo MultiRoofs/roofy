@@ -232,6 +232,21 @@ describe("StyleSection — Color by expression", () => {
     await waitFor(() => expect(readLayer().styleExpression).toBe("#ff0000"));
   });
 
+  it("keeps a valid edit when the editor goes away before the pause ends", () => {
+    // Switching layer remounts the panel, and collapsing it unmounts it: an
+    // edit that already compiles must not be lost to the debounce.
+    const { unmount } = render(
+      <StyleSection
+        item={city(
+          cityLayer({ colorBy: "expression", styleExpression: "#000000" }),
+        )}
+      />,
+    );
+    fireEvent.change(editor(), { target: { value: '"#ff0000"' } });
+    unmount();
+    expect(readLayer().styleExpression).toBe("#ff0000");
+  });
+
   it("shows why an edit does not apply, and leaves the layer as it was", async () => {
     render(
       <StyleSection

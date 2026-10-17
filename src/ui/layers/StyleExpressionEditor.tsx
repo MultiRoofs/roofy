@@ -82,30 +82,44 @@ export function StyleExpressionEditor({
   // (Copy from…, a restore) replaces the text, and its own write does not.
   const applied = useRef(expression);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // The valid edit waiting out the pause. Unmounting applies it rather than
+  // dropping it: switching layer remounts this panel, collapsing it unmounts
+  // it, and neither should cost an edit that already compiles.
+  const pending = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (expression === applied.current) return;
     applied.current = expression;
     clearTimeout(timer.current);
+    pending.current = null;
     setText(format(expression));
     setErrors([]);
   }, [expression]);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      pending.current?.();
+    },
+    [],
+  );
 
   const onChange = (next: string) => {
     setText(next);
     clearTimeout(timer.current);
+    pending.current = null;
     const result = check(next);
     if (!result.ok) {
       setErrors(result.errors);
       return;
     }
     setErrors([]);
-    timer.current = setTimeout(() => {
+    pending.current = () => {
+      pending.current = null;
       applied.current = result.expression;
       updateLayer(layerId, { styleExpression: result.expression });
-    }, APPLY_DELAY_MS);
+    };
+    timer.current = setTimeout(() => pending.current?.(), APPLY_DELAY_MS);
   };
 
   return (
