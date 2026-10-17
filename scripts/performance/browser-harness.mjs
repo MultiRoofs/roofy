@@ -10,6 +10,7 @@
 //   delft-seq   delft.city.jsonl   (3DBAG Delft tile, static layer)
 //   delft-fcb   delft.fcb          (the same tile, streamed)
 //   delft-json  delft.city.json    (the tile as one CityJSON document, static)
+// The opening camera frames the whole tile; `--cam '<json>'` overrides it.
 //
 // Each phase writes one JSON line: the probe's counters for that phase alone
 // (draw calls, frames, bytes uploaded, readbacks, long tasks, bytes fetched).
@@ -43,14 +44,19 @@ const SCENARIOS = {
   "delft-fcb": { file: "delft.fcb", name: "Delft" },
   "delft-json": { file: "delft.city.json", name: "Delft" },
 };
-const DELFT_CAMERA = {
-  lng: 4.3571,
-  lat: 52.0116,
-  height: 1200,
-  heading: 0,
-  pitch: -45,
-  roll: 0,
-};
+// South of the tile, looking north over all of it: the tile spans
+// EPSG:7415 x 84501-85675, y 445805-446983 (about lat 51.996-52.007).
+// `--cam '<json>'` replaces it for one run.
+const CAMERA = args.cam
+  ? JSON.parse(args.cam)
+  : {
+      lng: 4.3691,
+      lat: 51.9895,
+      height: 1000,
+      heading: 0,
+      pitch: -45,
+      roll: 0,
+    };
 
 if (!DATA || !SCENARIOS[SCENARIO]) {
   console.error(
@@ -211,7 +217,7 @@ const share = {
       visible: true,
     },
   ],
-  cam: DELFT_CAMERA,
+  cam: CAMERA,
   dt: "2026-06-21T12:00:00Z",
   pm: "object",
 };
