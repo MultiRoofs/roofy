@@ -162,6 +162,52 @@ describe("legendGroups — city layers", () => {
   });
 });
 
+describe("legendGroups — expression layers", () => {
+  it("shows one Expression row, swatched with the colours the expression names", () => {
+    const rows = legendGroups(
+      [
+        city({
+          colorBy: "expression",
+          styleExpression: [
+            "match",
+            ["get", "fn"],
+            "house",
+            "#ff0000",
+            "shop",
+            "rgb(0, 0, 255)",
+            ["get", "$base"],
+          ],
+        }),
+      ],
+      [],
+    )[0]!.rows;
+    expect(rows).toEqual([
+      {
+        label: "Expression",
+        color: "linear-gradient(90deg, #ff0000, rgb(0, 0, 255))",
+        kind: "expression",
+      },
+    ]);
+  });
+
+  it("swatches a one-colour expression flat, and one without literals in the roof colour", () => {
+    const of = (styleExpression: unknown) =>
+      legendGroups(
+        [
+          city({
+            colorBy: "expression",
+            styleExpression: styleExpression as never,
+          }),
+        ],
+        [],
+      )[0]!.rows[0]!.color;
+    expect(of("#00ff00")).toBe("#00ff00");
+    expect(of(["to-color", ["get", "colour"]])).toBe(
+      SURFACE_COLOR_HEX.RoofSurface,
+    );
+  });
+});
+
 describe("legendGroups — vector layers", () => {
   it("shows the category list, labelling the null bucket Missing and the overflow Other", () => {
     const groups = legendGroups(

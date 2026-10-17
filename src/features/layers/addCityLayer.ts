@@ -30,7 +30,7 @@ import {
 } from "../../insights/layerTables";
 import type { Rule } from "../rules/types";
 import { useLayerStore } from "./layerStore";
-import type { ColorBy } from "../rules/colorBy";
+import type { ColorBy, LayerStyleExpression } from "../rules/colorBy";
 
 export interface AddCityLayerInput {
   readonly name: string;
@@ -43,6 +43,7 @@ export interface AddCityLayerInput {
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
+  readonly styleExpression?: LayerStyleExpression | null;
   readonly hiddenTypes?: ReadonlyArray<string>;
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
@@ -147,6 +148,7 @@ export function addCityLayer(input: AddCityLayerInput): string {
     colorBy: input.colorBy,
     singleColor: input.singleColor,
     unmatchedColor: input.unmatchedColor,
+    styleExpression: input.styleExpression,
     hiddenTypes: input.hiddenTypes,
     attributeOrders: input.attributeOrders,
     tablePresentation: input.tablePresentation,

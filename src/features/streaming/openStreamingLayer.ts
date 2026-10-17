@@ -46,10 +46,12 @@ import type { CityModel } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
 import {
+  effectiveExpression,
   effectiveRules,
   effectiveRulesEnabled,
   normalizeColorBy,
   type ColorBy,
+  type LayerStyleExpression,
 } from "../rules/colorBy";
 
 export interface OpenStreamingLayerInput {
@@ -81,6 +83,7 @@ export interface OpenStreamingLayerInput {
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
+  readonly styleExpression?: LayerStyleExpression | null;
   readonly visible?: boolean;
   /** First-level object groups to stream without geometry, seeded into the
    *  plugin before its first commit — a restored layer's very first fetch is
@@ -151,6 +154,7 @@ export async function openStreamingLayer(
     // streamed roof, which is the whole premise of "Color by".
     rules: effectiveRules(styling),
     rulesEnabled: effectiveRulesEnabled(styling),
+    expression: effectiveExpression(styling),
     visible: input.visible ?? true,
     hiddenTypes: input.hiddenTypes ?? [],
     // Seeded before the first commit, so a restored textured layer's first
@@ -351,6 +355,7 @@ export async function reopenStreamingLayer(
       // static path does, which is what makes a "Color by" choice survive.
       rules: effectiveRules(layer),
       rulesEnabled: effectiveRulesEnabled(layer),
+      expression: effectiveExpression(layer),
       visible: layer.visible,
       hiddenTypes: layer.hiddenTypes,
       appearance: layer.selectedAppearance,

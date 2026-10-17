@@ -114,6 +114,7 @@ function openStream(
         colorBy: settings.colorBy,
         singleColor: settings.singleColor,
         unmatchedColor: settings.unmatchedColor,
+        styleExpression: settings.styleExpression,
         visible: settings.visible,
         hiddenTypes: settings.hiddenTypes,
         attributeOrders: settings.attributeOrders,

@@ -55,6 +55,7 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     singleColor: patch.singleColor,
     unmatchedColor: patch.unmatchedColor,
     rules: patch.rules,
+    styleExpression: patch.styleExpression,
   });
   return {
     name: patch.id,
@@ -913,7 +914,7 @@ describe("syncStreamState", () => {
     // -> Streaming styling) — and the EFFECTIVE list, so a streamed cell and a
     // resident mesh are baked from one answer: the user's rule, then the
     // trailing unmatched catch-all.
-    expect(handle.setRules).toHaveBeenCalledWith(effectiveRules(l), true);
+    expect(handle.setRules).toHaveBeenCalledWith(effectiveRules(l), true, null);
     const pushed = handle.setRules.mock.calls[0]![0] as ReadonlyArray<Rule>;
     expect(pushed[0]).toBe(rules[0]);
     expect(isSyntheticRule(pushed[pushed.length - 1]!)).toBe(true);
@@ -1147,7 +1148,7 @@ describe("colorBy", () => {
     stream(plain);
     stream(ruled);
     expect(streamHandle.setRules).toHaveBeenCalledTimes(3);
-    expect(streamHandle.setRules.mock.calls[1]).toEqual([[], false]);
+    expect(streamHandle.setRules.mock.calls[1]).toEqual([[], false, null]);
   });
 
   it("does not re-push when nothing about the colouring moved", () => {
@@ -1159,6 +1160,121 @@ describe("colorBy", () => {
     syncStyles([layer({ ...same })], entries);
     syncStyles([layer({ ...same })], entries);
     expect(handle.setStyle).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Color by expression", () => {
+  const red = ["case", true, "#ff0000", ["get", "$base"]];
+  const roof: Surface = {
+    type: "RoofSurface",
+    rings: [
+      [
+        [0, 0, 10],
+        [10, 0, 10],
+        [10, 10, 10],
+      ],
+    ],
+    attributes: {},
+    lod: "2",
+  };
+
+  function live(handle: ReturnType<typeof fakeHandle>) {
+    return new Map<string, LiveLayer>([
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
+    ]);
+  }
+
+  function fakeStreamHandle(id = "S1") {
+    return {
+      id,
+      setHighlight: vi.fn(),
+      resolvePick: vi.fn(),
+      resolveRaycast: vi.fn(),
+      getBoundsGeodetic: vi.fn(),
+      triangleCount: () => 0,
+      onCommit: vi.fn(() => () => undefined),
+      setRules: vi.fn(),
+      setLod: vi.fn(),
+      setVisible: vi.fn(),
+      setCameraSync: vi.fn(),
+      setHiddenTypes: vi.fn(),
+      setAppearance: vi.fn(),
+    };
+  }
+
+  it("compiles a static layer's expression into its style, once per expression", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    const l = layer({ id: "L1", colorBy: "expression", styleExpression: red });
+    syncStyles([l], entries);
+    syncStyles([layer({ ...l })], entries);
+    expect(handle.setStyle).toHaveBeenCalledTimes(1);
+    const evaluate = handle.setStyle.mock.calls[0]![0] as (
+      s: unknown,
+      o: unknown,
+      b: unknown,
+    ) => readonly number[] | null;
+    expect(
+      evaluate(
+        { surfaceIndex: 0, surface: roof },
+        {
+          objectId: "B1",
+          object: { objectType: "Building", attributes: {}, surfaces: [roof] },
+          attributes: {},
+        },
+        [0, 0, 0],
+      ),
+    ).toEqual([1, 0, 0]);
+
+    syncStyles([layer({ ...l, styleExpression: ["get", "$base"] })], entries);
+    expect(handle.setStyle).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears a static layer's style when its expression does not compile", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    syncStyles(
+      [layer({ id: "L1", colorBy: "expression", styleExpression: red })],
+      entries,
+    );
+    syncStyles(
+      [
+        layer({
+          id: "L1",
+          colorBy: "expression",
+          styleExpression: ["frobnicate"],
+        }),
+      ],
+      entries,
+    );
+    expect(handle.setStyle).toHaveBeenCalledTimes(2);
+    expect(handle.setStyle.mock.calls[1]![0]).toBeNull();
+  });
+
+  it("sends a streaming layer's expression with no rules, on change only", () => {
+    const handle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const l = layer({
+      id: "S1",
+      source: STREAMED_SOURCE,
+      colorBy: "expression",
+      styleExpression: red,
+    });
+    syncStreamState(l, handle as never, memos);
+    syncStreamState(layer({ ...l }), handle as never, memos);
+    expect(handle.setRules).toHaveBeenCalledTimes(1);
+    expect(handle.setRules.mock.calls[0]).toEqual([[], false, red]);
+
+    syncStreamState(
+      layer({ ...l, colorBy: "surface" }),
+      handle as never,
+      memos,
+    );
+    expect(handle.setRules).toHaveBeenCalledTimes(2);
+    expect(handle.setRules.mock.calls[1]).toEqual([[], false, null]);
   });
 });
 

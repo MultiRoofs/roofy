@@ -499,6 +499,7 @@ export async function prepareDerivedCityLayer(input: {
         colorBy: parent.colorBy,
         singleColor: parent.singleColor,
         unmatchedColor: parent.unmatchedColor,
+        styleExpression: parent.styleExpression ?? null,
         selectedAppearance: parent.selectedAppearance,
         insertAfterId: parent.id,
         derivedFrom: {

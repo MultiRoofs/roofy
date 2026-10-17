@@ -144,9 +144,13 @@ export function LegendOverlay() {
                     style={{ background: row.color }}
                   />
                   <span>{row.label}</span>
-                  <span className="legend-count">
-                    {row.count === null ? "Unavailable" : row.count}
-                  </span>
+                  {/* An expression's surfaces are not counted: it has
+                      no categories to count them into. */}
+                  {row.kind !== "expression" && (
+                    <span className="legend-count">
+                      {row.count === null ? "Unavailable" : row.count}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

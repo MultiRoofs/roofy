@@ -24,7 +24,11 @@ import type {
 } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
-import { normalizeColorBy, type ColorBy } from "../rules/colorBy";
+import {
+  normalizeColorBy,
+  type ColorBy,
+  type LayerStyleExpression,
+} from "../rules/colorBy";
 import { RESIDENT_SOURCE, type SourceCapabilities } from "./cityLayerSource";
 
 /**
@@ -65,6 +69,10 @@ export interface Layer {
   /** The colour a roof no rule matches wears in "Color by rules". Kept for the
    *  same reason as {@link singleColor}. */
   readonly unmatchedColor: string;
+  /** The colour expression "Color by expression" draws with (MapLibre style
+   *  spec, see `compileStyleExpression`). Kept while another mode is active,
+   *  like {@link singleColor}; absent reads as none. */
+  readonly styleExpression?: LayerStyleExpression | null;
   readonly selectedLod: string | null;
   /** Static layers: highest available selected LoD per object. Absent is legacy single-LoD. */
   readonly selectedLods?: readonly string[];
@@ -221,6 +229,7 @@ export interface LayerStoreActions {
       readonly colorBy?: ColorBy;
       readonly singleColor?: string;
       readonly unmatchedColor?: string;
+      readonly styleExpression?: LayerStyleExpression | null;
     },
   ) => string;
   removeLayer: (id: string) => void;
@@ -229,7 +238,12 @@ export interface LayerStoreActions {
     patch: Partial<
       Pick<
         Layer,
-        "name" | "visible" | "colorBy" | "singleColor" | "unmatchedColor"
+        | "name"
+        | "visible"
+        | "colorBy"
+        | "singleColor"
+        | "unmatchedColor"
+        | "styleExpression"
       >
     >,
   ) => void;
@@ -589,6 +603,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
                 colorBy: source.colorBy,
                 singleColor: source.singleColor,
                 unmatchedColor: source.unmatchedColor,
+                styleExpression: source.styleExpression ?? null,
                 rules: structuredClone(source.rules).map((rule) => ({
                   ...rule,
                   id: crypto.randomUUID(),

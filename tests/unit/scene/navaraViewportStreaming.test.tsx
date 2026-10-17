@@ -1199,6 +1199,7 @@ describe("NavaraViewport streaming wiring", () => {
       expect(streamHandle.setRules).toHaveBeenLastCalledWith(
         expect.anything(),
         true,
+        null,
       ),
     );
     const calls = streamHandle.setRules.mock.calls;

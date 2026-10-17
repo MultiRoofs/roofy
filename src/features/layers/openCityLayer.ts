@@ -52,7 +52,7 @@ import {
 } from "../cityparquet/addCityParquetLayer";
 import { cityParquetLayerNameFromUrl } from "../cityparquet/loadCityParquet";
 import type { TablePresentation } from "../query/tablePresentation";
-import type { ColorBy } from "../rules/colorBy";
+import type { ColorBy, LayerStyleExpression } from "../rules/colorBy";
 import type { Rule } from "../rules/types";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
@@ -89,6 +89,7 @@ export interface CityLayerSettings {
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
+  readonly styleExpression?: LayerStyleExpression | null;
   readonly visible?: boolean;
   readonly lodMode?: "auto" | "manual";
   readonly selectedLod?: string | null;
@@ -227,6 +228,7 @@ function creationSettings(settings: CityLayerSettings) {
     colorBy: settings.colorBy,
     singleColor: settings.singleColor,
     unmatchedColor: settings.unmatchedColor,
+    styleExpression: settings.styleExpression,
     visible: settings.visible,
     hiddenTypes: settings.hiddenTypes,
     attributeOrders: settings.attributeOrders,

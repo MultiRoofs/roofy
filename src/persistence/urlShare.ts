@@ -22,7 +22,11 @@ import {
 
 import type { Rule } from "../features/rules/types";
 import { normalizeSolarTimeZone } from "../features/solar/solarTimeZone";
-import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
+import {
+  normalizeColorBy,
+  type ColorBy,
+  type LayerStyleExpression,
+} from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
 import {
   normalizeFamiliesSnapshot,
@@ -66,6 +70,9 @@ export interface ShareableLayerState {
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
+  /** On the same terms as the three above; {@link readShareHash} fills it in
+   *  as null when absent. */
+  readonly styleExpression?: LayerStyleExpression | null;
   readonly visible: boolean;
   readonly selectedLods?: readonly string[];
   readonly attributeOrders?: AttributeOrders;

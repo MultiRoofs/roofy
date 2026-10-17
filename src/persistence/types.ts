@@ -21,7 +21,11 @@ import {
   type CityModelEncoding,
 } from "@cityjson/navara-core";
 import type { Rule } from "../features/rules/types";
-import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
+import {
+  normalizeColorBy,
+  type ColorBy,
+  type LayerStyleExpression,
+} from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
 import type { SceneTheme } from "../features/sceneTheme/sceneThemeStore";
@@ -178,6 +182,10 @@ export interface LayerSnapshot {
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
+  /** The colour expression "Color by expression" draws with. Written only
+   *  when the layer has one (in any mode: it is kept while another is
+   *  active); absent reads as none. Optional, so the version stays. */
+  readonly styleExpression?: LayerStyleExpression;
   readonly visible: boolean;
   readonly selectedLod?: string | null;
   readonly selectedLods?: readonly string[];
@@ -252,6 +260,7 @@ export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
   readonly colorBy: ColorBy;
   readonly singleColor: string;
   readonly unmatchedColor: string;
+  readonly styleExpression: LayerStyleExpression | null;
   /** True when this layer streamed from a local `File`/`Blob` — that byte
    *  source cannot survive a reload, so the layer must be presented as an
    *  explicit "needs re-selection" placeholder rather than silently
@@ -292,6 +301,7 @@ export function normalizeLayers(
       unmatchedColor: l.unmatchedColor,
       rules: l.rules,
       rulesEnabled: l.rulesEnabled,
+      styleExpression: l.styleExpression,
     });
     return l.stream?.kind === "file"
       ? {

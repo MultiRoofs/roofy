@@ -19,6 +19,7 @@
 import {
   appearanceThemesEqual,
   compileRuleEvaluator,
+  compileStyleExpression,
   type AppearanceTheme,
   type CityModel,
 } from "@cityjson/navara-core";
@@ -35,8 +36,10 @@ import type {
 import type { QueryRegion } from "@cityjson/navara-stream";
 import type { Rule } from "../features/rules/types";
 import {
+  effectiveExpression,
   effectiveRules,
   effectiveRulesEnabled,
+  type LayerStyleExpression,
 } from "../features/rules/colorBy";
 import type { Layer } from "../features/layers/layerStore";
 
@@ -65,6 +68,9 @@ export interface LiveLayer {
   styledRules?: ReadonlyArray<Rule>;
   /** The `effectiveRulesEnabled` flag that went with {@link styledRules}. */
   styledRulesEnabled?: boolean;
+  /** The `effectiveExpression` that went with {@link styledRules}, by
+   *  IDENTITY: the store replaces it on every edit. */
+  styledExpression?: LayerStyleExpression | null;
   /** The scene theme's `ThemeStyle` last pushed, by IDENTITY —
    *  `sceneThemePolicy` hands out one frozen object per theme, so reference
    *  equality is an exact "did the theme change?" test. `undefined` means this
@@ -254,18 +260,34 @@ export function syncStyles(
     // a changed unmatched or single colour, which no rule edit would.
     const rules = effectiveRules(layer);
     const enabled = effectiveRulesEnabled(layer);
-    if (entry.styledRules === rules && entry.styledRulesEnabled === enabled) {
+    const expression = effectiveExpression(layer);
+    if (
+      entry.styledRules === rules &&
+      entry.styledRulesEnabled === enabled &&
+      entry.styledExpression === expression
+    ) {
       continue;
     }
 
     const neverStyled = entry.styledRules === undefined;
     entry.styledRules = rules;
     entry.styledRulesEnabled = enabled;
+    entry.styledExpression = expression;
 
-    const evaluator = compileRuleEvaluator(rules, enabled);
+    // An expression that does not compile draws the layer unstyled; the
+    // style panel is where its errors are shown.
+    const evaluator =
+      expression === null
+        ? compileRuleEvaluator(rules, enabled)
+        : expressionEvaluator(expression);
     if (evaluator === null && neverStyled) continue;
     entry.handle.setStyle(evaluator);
   }
+}
+
+function expressionEvaluator(expression: LayerStyleExpression) {
+  const compiled = compileStyleExpression(expression);
+  return compiled.ok ? compiled.evaluator : null;
 }
 
 /** The interaction surface static and streaming layers share. Only *styling*
@@ -306,7 +328,13 @@ export interface InteractionHandle {
  * and its tests need no plugin.
  */
 export interface StreamInteractionHandle extends InteractionHandle {
-  setRules(rules: ReadonlyArray<Rule>, enabled: boolean): void;
+  /** `expression`, when not null, is baked in place of the rules (in the
+   *  worker, like them). */
+  setRules(
+    rules: ReadonlyArray<Rule>,
+    enabled: boolean,
+    expression: LayerStyleExpression | null,
+  ): void;
   setLod(mode: "auto" | "manual", lod: string | null): void;
   setVisible(visible: boolean): void;
   /** Whether the layer re-queries its source as the camera settles. See
@@ -351,6 +379,7 @@ export interface StreamSyncMemo {
   readonly handle: StreamInteractionHandle;
   rules?: ReadonlyArray<Rule>;
   rulesEnabled?: boolean;
+  expression?: LayerStyleExpression | null;
   visible?: boolean;
   lodMode?: "auto" | "manual";
   selectedLod?: string | null;
@@ -405,10 +434,16 @@ export function syncStreamState(
   // memo has to notice a colour that is not in any user rule.
   const rules = effectiveRules(layer);
   const rulesEnabled = effectiveRulesEnabled(layer);
-  if (memo.rules !== rules || memo.rulesEnabled !== rulesEnabled) {
+  const expression = effectiveExpression(layer);
+  if (
+    memo.rules !== rules ||
+    memo.rulesEnabled !== rulesEnabled ||
+    memo.expression !== expression
+  ) {
     memo.rules = rules;
     memo.rulesEnabled = rulesEnabled;
-    handle.setRules(rules, rulesEnabled);
+    memo.expression = expression;
+    handle.setRules(rules, rulesEnabled, expression);
   }
   if (
     memo.lodMode !== layer.lodMode ||

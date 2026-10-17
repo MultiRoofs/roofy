@@ -6800,3 +6800,21 @@ button.file-label:disabled {
 .lod-multiselect .layer-types-item {
   min-height: var(--control-compact-height, 30px);
 }
+
+/* "Color by expression": JSON, in the brand's code face, tall enough to read a
+   `case` at a glance. */
+.style-expression {
+  width: 100%;
+  min-height: 10rem;
+  padding-block: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.style-expression-error {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--danger);
+}

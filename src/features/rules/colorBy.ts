@@ -31,21 +31,44 @@
  *    `setRules` re-bakes every resident cell in the worker). A fresh array per
  *    render would repaint on every unrelated store change.
  */
-import { evaluateRule, type RoofMetrics } from "@cityjson/navara-core";
+import {
+  evaluateRule,
+  rulesToStyleExpression,
+  type RoofMetrics,
+} from "@cityjson/navara-core";
 import type { Rule } from "./types";
 import { SINGLE_COLOR_HEX, UNMATCHED_COLOR_HEX } from "../../scene/cityColors";
 
-/** How a layer decides what colour a roof surface is drawn in. */
-export type ColorBy = "surface" | "rules" | "single";
+/**
+ * How a layer decides what colour a surface is drawn in. "expression" is the
+ * one mode that is not a rule list: a MapLibre style-spec colour expression
+ * over every surface ({@link effectiveExpression}), which the renderers
+ * compile with `compileStyleExpression`.
+ */
+export type ColorBy = "surface" | "rules" | "single" | "expression";
 
 export const COLOR_BY_MODES: ReadonlyArray<ColorBy> = [
   "surface",
   "rules",
   "single",
+  "expression",
 ];
 
+/**
+ * A layer's colour expression as stored: the JSON the user wrote, an array
+ * (or a constant colour string). Deliberately looser than the style spec's
+ * own `ExpressionSpecification`: whether it compiles is answered by
+ * `compileStyleExpression` at render time, never by the type.
+ */
+export type LayerStyleExpression = ReadonlyArray<unknown> | string;
+
 export function isColorBy(value: unknown): value is ColorBy {
-  return value === "surface" || value === "rules" || value === "single";
+  return (
+    value === "surface" ||
+    value === "rules" ||
+    value === "single" ||
+    value === "expression"
+  );
 }
 
 /**
@@ -58,6 +81,9 @@ export interface ColorByInput {
   readonly colorBy: ColorBy;
   readonly singleColor: string;
   readonly unmatchedColor: string;
+  /** Absent reads as none. Kept while another mode is active, like the two
+   *  colours, so switching away and back does not lose the expression. */
+  readonly styleExpression?: LayerStyleExpression | null;
 }
 
 /**
@@ -158,6 +184,55 @@ export function effectiveRulesEnabled(input: ColorByInput): boolean {
 }
 
 /**
+ * The expression a layer is drawn with, or null when it is drawn from
+ * {@link effectiveRules}. Returned as stored, so its identity is the
+ * renderers' "did the style change?" test, as the rules array's is.
+ */
+export function effectiveExpression(
+  input: ColorByInput,
+): LayerStyleExpression | null {
+  return input.colorBy === "expression"
+    ? (input.styleExpression ?? null)
+    : null;
+}
+
+/** What a layer with nothing to carry opens on: roofs shaded by pitch, flat
+ *  blue to steep red, everything else at its surface colour. A working
+ *  example of the three things an expression reads most. */
+const STARTER_EXPRESSION: LayerStyleExpression = Object.freeze([
+  "case",
+  ["==", ["get", "$surface"], "RoofSurface"],
+  [
+    "interpolate",
+    ["linear"],
+    ["get", "inclinationDeg"],
+    0,
+    "#2b83ba",
+    45,
+    "#d7191c",
+  ],
+  ["get", "$base"],
+]);
+
+/**
+ * The expression "Color by expression" opens on when the layer has none yet:
+ * the one that draws what the layer drew a moment ago (its rules, or its
+ * single colour), or — from surface type — its rules if it has any, so a
+ * rule set can be carried into an expression and edited from there.
+ */
+export function seedStyleExpression(input: ColorByInput): LayerStyleExpression {
+  const from =
+    input.colorBy === "single" || input.colorBy === "rules"
+      ? input
+      : input.rules.some((r) => r.enabled)
+        ? { ...input, colorBy: "rules" as const }
+        : null;
+  return from === null
+    ? STARTER_EXPRESSION
+    : rulesToStyleExpression(effectiveRules(from));
+}
+
+/**
  * WHICH rule a surface matched — the inspector's RULE MATCH row, and the
  * per-rule roof counts on a building.
  *
@@ -195,12 +270,14 @@ export interface RawColorByFields {
   readonly unmatchedColor?: unknown;
   readonly rules?: unknown;
   readonly rulesEnabled?: unknown;
+  readonly styleExpression?: unknown;
 }
 
 export interface ColorByFields {
   readonly colorBy: ColorBy;
   readonly singleColor: string;
   readonly unmatchedColor: string;
+  readonly styleExpression: LayerStyleExpression | null;
 }
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -223,11 +300,28 @@ function hex(value: unknown): string | null {
  * colour costs only itself.
  */
 export function normalizeColorBy(raw: RawColorByFields): ColorByFields {
+  const styleExpression = expression(raw.styleExpression);
+  // "expression" with nothing to draw is no mode at all: it reads as absent.
+  const colorBy =
+    isColorBy(raw.colorBy) &&
+    (raw.colorBy !== "expression" || styleExpression !== null)
+      ? raw.colorBy
+      : derivedColorBy(raw);
   return {
-    colorBy: isColorBy(raw.colorBy) ? raw.colorBy : derivedColorBy(raw),
+    colorBy,
     singleColor: hex(raw.singleColor) ?? SINGLE_COLOR_HEX,
     unmatchedColor: hex(raw.unmatchedColor) ?? UNMATCHED_COLOR_HEX,
+    styleExpression,
   };
+}
+
+/** An expression is an array or a constant (a colour string). Whether it
+ *  COMPILES is the renderer's question, not the restore's: one that does not
+ *  is kept, so the style panel can show its errors and the user can fix it. */
+function expression(value: unknown): LayerStyleExpression | null {
+  return Array.isArray(value) || typeof value === "string"
+    ? (value as LayerStyleExpression)
+    : null;
 }
 
 function derivedColorBy(raw: RawColorByFields): ColorBy {

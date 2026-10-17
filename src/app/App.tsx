@@ -53,7 +53,7 @@ import {
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
 import { derivedNotSavedNote, snapshotLayers } from "./snapshotLayers";
 import { readShareHash, buildShareUrl } from "../persistence/urlShare";
-import type { ColorBy } from "../features/rules/colorBy";
+import type { ColorBy, LayerStyleExpression } from "../features/rules/colorBy";
 import type { ShareableViewState } from "../persistence/urlShare";
 import { useDuckDBStatus } from "../insights/useDuckDBStatus";
 import { retryEngine } from "../insights/layerTables";
@@ -260,6 +260,7 @@ interface UnavailableLayer {
   readonly colorBy: ColorBy;
   readonly singleColor: string;
   readonly unmatchedColor: string;
+  readonly styleExpression: LayerStyleExpression | null;
   readonly visible: boolean;
   readonly lodMode: "auto" | "manual";
   readonly selectedLod: string | null;
@@ -1203,7 +1204,8 @@ export function App({
 
             const rules = (sl.rules as Rule[] | undefined) ?? [];
             // Already validated and derived by `normalizeLayers`.
-            const { colorBy, singleColor, unmatchedColor } = sl;
+            const { colorBy, singleColor, unmatchedColor, styleExpression } =
+              sl;
             const visible = (sl.visible as boolean | undefined) ?? true;
             const lodMode =
               (sl.lodMode as "auto" | "manual" | undefined) ?? "auto";
@@ -1229,6 +1231,7 @@ export function App({
                 colorBy,
                 singleColor,
                 unmatchedColor,
+                styleExpression,
                 visible,
                 lodMode,
                 selectedLod,
@@ -1258,6 +1261,7 @@ export function App({
                   colorBy,
                   singleColor,
                   unmatchedColor,
+                  styleExpression,
                   visible,
                   lodMode,
                   selectedLod,
@@ -1503,7 +1507,7 @@ export function App({
           const rules = (sl.rules ?? []) as (typeof layers)[number]["rules"];
           // `readShareHash` has already validated the three, and derived a
           // mode for a link minted before they existed.
-          const { colorBy, singleColor, unmatchedColor } = sl;
+          const { colorBy, singleColor, unmatchedColor, styleExpression } = sl;
           const visible = sl.visible ?? true;
 
           await openCityLayer(
@@ -1516,6 +1520,7 @@ export function App({
                 colorBy,
                 singleColor,
                 unmatchedColor,
+                styleExpression,
                 visible,
                 selectedLods: sl.selectedLods,
                 attributeOrders: sl.attributeOrders,
@@ -1686,6 +1691,7 @@ export function App({
                   colorBy: entry.colorBy,
                   singleColor: entry.singleColor,
                   unmatchedColor: entry.unmatchedColor,
+                  styleExpression: entry.styleExpression,
                   visible: entry.visible,
                   lodMode: entry.lodMode,
                   selectedLod: entry.selectedLod,
