@@ -4,7 +4,8 @@
  *
  * It wraps the WebGL prototype rather than the engine, so it counts what the
  * GPU is actually asked to do whoever asks: draw calls, bytes uploaded into
- * buffers and textures, synchronous readbacks, and frames, where a frame is an
+ * buffers and textures, synchronous readbacks, the vertices the draws ask for
+ * (what culling saves), and frames, where a frame is an
  * animation tick in which at least one draw call happened. A still camera on a
  * render-on-demand engine should therefore count ticks but no frames.
  *
@@ -16,6 +17,8 @@ export interface PerfSnapshot {
   readonly ticks: number;
   readonly frames: number;
   readonly drawCalls: number;
+  /** Vertices (or indices) all draws asked for, instances multiplied. */
+  readonly drawnVertices: number;
   readonly uploadedBytes: number;
   readonly readbacks: number;
   readonly longTasks: number;
@@ -87,12 +90,33 @@ function uploadBytes(
   return byteSize(args[args.length - 1]);
 }
 
+/** The vertex (or index) count a draw asks for, by the WebGL2 signatures. */
+function drawnVertices(
+  name: (typeof DRAW_METHODS)[number],
+  args: readonly unknown[],
+): number {
+  const n = (i: number) => (typeof args[i] === "number" ? args[i] : 0);
+  switch (name) {
+    case "drawArrays":
+      return n(2);
+    case "drawElements":
+      return n(1);
+    case "drawArraysInstanced":
+      return n(2) * n(3);
+    case "drawElementsInstanced":
+      return n(1) * n(4);
+    case "drawRangeElements":
+      return n(3);
+  }
+}
+
 export function createPerfProbe(options: PerfProbeOptions): PerfProbe {
   const proto = options.glPrototype as Record<string, unknown>;
   const counts = {
     ticks: 0,
     frames: 0,
     drawCalls: 0,
+    drawnVertices: 0,
     uploadedBytes: 0,
     readbacks: 0,
     longTasks: 0,
@@ -110,7 +134,12 @@ export function createPerfProbe(options: PerfProbeOptions): PerfProbe {
     };
   };
 
-  for (const name of DRAW_METHODS) wrap(name, () => void counts.drawCalls++);
+  for (const name of DRAW_METHODS) {
+    wrap(name, (args) => {
+      counts.drawCalls++;
+      counts.drawnVertices += drawnVertices(name, args);
+    });
+  }
   for (const name of READBACK_METHODS)
     wrap(name, () => void counts.readbacks++);
   for (const [name, positions] of Object.entries(UPLOAD_METHODS)) {

@@ -54,6 +54,23 @@ describe("perfProbe", () => {
     expect(probe.snapshot().drawCalls).toBe(3);
   });
 
+  it("sums the vertices each draw asks for, instances multiplied", () => {
+    const { proto } = fakeGlPrototype();
+    const probe = createPerfProbe({
+      glPrototype: proto,
+      schedule: manualClock().schedule,
+    });
+    const call = (name: keyof typeof proto, ...args: unknown[]) =>
+      (proto[name] as (...a: unknown[]) => void)(...args);
+    call("drawArrays", 4, 0, 30); // mode, first, count
+    call("drawElements", 4, 600, 5125, 0); // mode, count, type, offset
+    call("drawArraysInstanced", 4, 0, 6, 10); // + instance count
+    call("drawElementsInstanced", 4, 12, 5123, 0, 5);
+    expect(probe.snapshot().drawnVertices).toBe(30 + 600 + 60 + 60);
+    probe.reset();
+    expect(probe.snapshot().drawnVertices).toBe(0);
+  });
+
   it("sums uploaded bytes from typed arrays and sized allocations", () => {
     const { proto } = fakeGlPrototype();
     const probe = createPerfProbe({
