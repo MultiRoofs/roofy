@@ -102,9 +102,10 @@ handles a tree like any other object, at the cost of one copy of the
 template per instance. Instancing is a memory optimisation that pays at
 city scale (100k trees), not at the scale of the datasets in use.
 
-Where it applies: CityJSON and CityJSONSeq (static), and CityParquet static
-packages through their `implicit_geometries` sidecar. FlatCityBuf carries no
-templates. The CityParquet stream path does not load the sidecar.
+Where it applies: CityJSON and CityJSONSeq (static), CityParquet static
+packages through their `implicit_geometries` sidecar, and FlatCityBuf
+streams, whose header carries the templates (parsed once per open). The
+CityParquet stream path does not load the sidecar.
 
 ## Quantisation (task 2.3 remainder): deferred
 
