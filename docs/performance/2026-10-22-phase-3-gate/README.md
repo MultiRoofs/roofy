@@ -21,10 +21,9 @@ both paths project vertices once.**
 - **Most of the static freeze is one fixable cost both paths share.** Each LoD
   bake re-projects every triangle vertex through proj4: 2.2 of the static
   path's 3.3 s for LoD 2.2 and 0.8 of its 1.4 s for LoD 1.2, and 2.1 s of the
-  worker's bake. Projected once per file, the static freeze should drop to about
-  1.2 s for LoD 2.2 and 0.6 s for LoD 1.2 on 20,079 objects (estimated from
-  the profiles), and the worker's
-  switch loses the same 2.1 s.
+  worker's bake. Projected once per file, the static freeze should drop to
+  about 1.2 s for LoD 2.2 and 0.6 s for LoD 1.2 on 20,079 objects (estimated
+  from the profiles), and the worker's switch loses the same 2.1 s.
 - **Files large enough for a 1 s freeze to matter belong in a streamed format
   anyway.** FlatCityBuf and CityParquet already take the worker path, with
   residency limits; a whole-file worker would hold the full parsed file as
