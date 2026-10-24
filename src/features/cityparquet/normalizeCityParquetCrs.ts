@@ -64,13 +64,20 @@ export function normalizeCityParquetCrs(model: CityModel): CityModel {
     // Retain bounds for geometryless parents and include every transformed
     // vertex, since a projected bounding rectangle is not axis-aligned.
     let objectBounds = projectBounds(object.bbox);
+    // One converted vertex per source vertex object: a corner its surfaces
+    // share stays shared, which is what lets the mesh builder place it once.
+    const converted = new Map<Vec3, Vec3>();
     const surfaces = object.surfaces.map((surface) => ({
       ...surface,
       rings: surface.rings.map((ring) =>
         ring.map((point) => {
-          const converted = project(point);
-          objectBounds = extend(objectBounds, converted);
-          return converted;
+          let out = converted.get(point);
+          if (out === undefined) {
+            out = project(point);
+            converted.set(point, out);
+            objectBounds = extend(objectBounds, out);
+          }
+          return out;
         }),
       ),
     }));

@@ -79,6 +79,33 @@ describe("normalizeCityParquetCrs", () => {
     }
   });
 
+  it("keeps a vertex shared by two surfaces one object after projection", () => {
+    // The mesh builder projects each vertex object once; a shared corner
+    // must stay shared, or every surface pays for it again.
+    const base = model();
+    const building = base.objects.building!;
+    const ring = building.surfaces[0]!.rings[0]!;
+    const wall = [ring[1]!, ring[0]!, [139.5272, 35.7095, 0] as Vec3];
+    const source: CityModel = {
+      ...base,
+      objects: {
+        ...base.objects,
+        building: {
+          ...building,
+          surfaces: [
+            ...building.surfaces,
+            { type: "WallSurface", rings: [wall], attributes: {}, lod: "2" },
+          ],
+        },
+      },
+    };
+    const [roof, side] =
+      normalizeCityParquetCrs(source).objects.building!.surfaces;
+    expect(side!.rings[0]![0]).toBe(roof!.rings[0]![1]);
+    expect(side!.rings[0]![1]).toBe(roof!.rings[0]![0]);
+    expect(side!.rings[0]![2]).not.toBe(roof!.rings[0]![0]);
+  });
+
   it("rejects latitude-first or non-finite coordinates instead of misplacing geometry", () => {
     const source = model();
     for (const point of [
