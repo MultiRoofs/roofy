@@ -1,0 +1,386 @@
+#### main timeline
+     100 ms  busy    1 ms  _update deps/dist-Cl39IsRE.js?v=c2f02669:70129
+     200 ms  busy    6 ms  wasm-function[589] engine/navara_wasm_bg.wasm:0
+     300 ms  busy    6 ms  wasm-function[8919] engine/navara_wasm_bg.wasm:0
+     400 ms  busy    6 ms  wasm-function[6009] engine/navara_wasm_bg.wasm:0
+     500 ms  busy    7 ms  wasm-function[589] engine/navara_wasm_bg.wasm:0
+     600 ms  busy    6 ms  wasm-function[4389] engine/navara_wasm_bg.wasm:0
+     700 ms  busy    8 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+     800 ms  busy   44 ms  cityCounts viewport/legendCounts.ts:22
+     900 ms  busy  100 ms  cityCounts viewport/legendCounts.ts:22
+    1000 ms  busy   65 ms  cityCounts viewport/legendCounts.ts:22
+    1200 ms  busy    3 ms  fetchedBytes debug/perfProbe.ts:169
+    1600 ms  busy    1 ms  (anon) :-1
+    2200 ms  busy    1 ms  (anon) :0
+    2400 ms  busy    3 ms  (anon) :0
+    2700 ms  busy    2 ms  (anon) :-1
+    2800 ms  busy    1 ms  (anon) :-1
+    2900 ms  busy    1 ms  (anon) :-1
+    3000 ms  busy    1 ms  (anon) :0
+    3300 ms  busy    4 ms  wasm-function[1015] engine/navara_wasm_bg.wasm:0
+    3400 ms  busy   10 ms  wasm-function[324] engine/navara_wasm_bg.wasm:0
+    3500 ms  busy    6 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    3600 ms  busy    6 ms  (anon) :0
+    3700 ms  busy    8 ms  wasm-function[1008] engine/navara_wasm_bg.wasm:0
+    3800 ms  busy    3 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    3900 ms  busy    7 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    4000 ms  busy   10 ms  wasm-function[2137] engine/navara_wasm_bg.wasm:0
+    4100 ms  busy    9 ms  wasm-function[3699] engine/navara_wasm_bg.wasm:0
+    4200 ms  busy    9 ms  (anon) :-1
+    4300 ms  busy   11 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    4400 ms  busy    6 ms  wasm-function[4389] engine/navara_wasm_bg.wasm:0
+    4500 ms  busy    5 ms  wasm-function[2137] engine/navara_wasm_bg.wasm:0
+    4600 ms  busy    8 ms  wasm-function[141] engine/navara_wasm_bg.wasm:0
+    4700 ms  busy    8 ms  wasm-function[324] engine/navara_wasm_bg.wasm:0
+    4800 ms  busy   23 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    4900 ms  busy   20 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    5000 ms  busy    7 ms  wasm-function[116] engine/navara_wasm_bg.wasm:0
+    5100 ms  busy    7 ms  js-to-wasm:i:i engine/navara_wasm_bg.wasm:0
+    5200 ms  busy    7 ms  needsUpdate deps/dist-Cl39IsRE.js?v=c2f02669:34920
+    5300 ms  busy    6 ms  wasm-function[6009] engine/navara_wasm_bg.wasm:0
+    5400 ms  busy   92 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    5500 ms  busy   27 ms  (garbage collector) :-1
+    5600 ms  busy   19 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    5700 ms  busy    8 ms  wasm-function[6010] engine/navara_wasm_bg.wasm:0
+    5800 ms  busy    5 ms  wasm-function[6009] engine/navara_wasm_bg.wasm:0
+    5900 ms  busy    8 ms  _forceFeatureUpdates deps/dist-Cl39IsRE.js?v=c2f02669:70134
+    6000 ms  busy    5 ms  wasm-function[1271] engine/navara_wasm_bg.wasm:0
+    6100 ms  busy    7 ms  wasm-function[1151] engine/navara_wasm_bg.wasm:0
+    6200 ms  busy   16 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    6300 ms  busy   49 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    6400 ms  busy   18 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    6500 ms  busy   10 ms  wasm-function[9377] engine/navara_wasm_bg.wasm:0
+    6600 ms  busy    7 ms  (anon) :-1
+    6700 ms  busy    8 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    6800 ms  busy    6 ms  wasm-function[2247] engine/navara_wasm_bg.wasm:0
+    6900 ms  busy    6 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    7000 ms  busy   86 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    7100 ms  busy   96 ms  computeBoundingSphere deps/three.module-B8nzIm16.js?v=c2f02669:13983
+    7200 ms  busy  100 ms  write src/cityStyle.ts:85
+    7300 ms  busy  100 ms  cityCounts viewport/legendCounts.ts:22
+    7400 ms  busy  100 ms  bufferData :-1
+    7500 ms  busy  100 ms  bufferData :-1
+    7600 ms  busy  100 ms  getProgramInfoLog :-1
+    7700 ms  busy   33 ms  getProgramInfoLog :-1
+    8200 ms  busy    1 ms  (anon) :-1
+    8300 ms  busy    1 ms  (anon) :-1
+    8600 ms  busy    1 ms  (anon) :0
+    8700 ms  busy    1 ms  (anon) :0
+    8800 ms  busy    1 ms  (anon) :0
+    8900 ms  busy    1 ms  (anon) :-1
+    9000 ms  busy    1 ms  (anon) :0
+    9300 ms  busy    1 ms  (anon) :0
+    9400 ms  busy    1 ms  (anon) :-1
+    9500 ms  busy    1 ms  (anon) :-1
+   10500 ms  busy    1 ms  wasm-function[12126] engine/navara_wasm_bg.wasm:0
+   10600 ms  busy   13 ms  requestAnimationFrame :-1
+   10800 ms  busy    8 ms  wasm-function[289] engine/navara_wasm_bg.wasm:0
+   10900 ms  busy   10 ms  wasm-function[536] engine/navara_wasm_bg.wasm:0
+   11000 ms  busy    7 ms  wasm-function[885] engine/navara_wasm_bg.wasm:0
+   11100 ms  busy    7 ms  wasm-function[1008] engine/navara_wasm_bg.wasm:0
+   11200 ms  busy    8 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+   11300 ms  busy    7 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+   11400 ms  busy    8 ms  wasm-function[1271] engine/navara_wasm_bg.wasm:0
+   11500 ms  busy    6 ms  wasm-function[116] engine/navara_wasm_bg.wasm:0
+   11600 ms  busy    8 ms  wasm-function[2006] engine/navara_wasm_bg.wasm:0
+   11700 ms  busy    9 ms  wasm-function[6955] engine/navara_wasm_bg.wasm:0
+   11800 ms  busy    7 ms  wasm-function[6009] engine/navara_wasm_bg.wasm:0
+   11900 ms  busy    4 ms  wasm-function[1271] engine/navara_wasm_bg.wasm:0
+#### main span 11935 ms
+-- self --
+   9977 ms  (idle) :-1
+    417 ms  (program) :-1
+    191 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    155 ms  bufferData :-1
+    132 ms  (garbage collector) :-1
+    103 ms  cityCounts viewport/legendCounts.ts:22
+     82 ms  parentsIndexOf citymodel/featureId.ts:1
+     68 ms  getProgramInfoLog :-1
+     59 ms  exports.jsxDEV deps/react_jsx-dev-runtime.js?v=c2f02669:189
+     52 ms  computeBoundingSphere deps/three.module-B8nzIm16.js?v=c2f02669:13983
+     38 ms  (anon) :-1
+     30 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+     26 ms  write src/cityStyle.ts:85
+     24 ms  (anon) :0
+     23 ms  linearToSrgbByte src/cityStyle.ts:36
+     19 ms  requestAnimationFrame :-1
+     15 ms  assertCellGeometry src/workerProtocol.ts:31
+     15 ms  buildResidentModel src/residentModel.ts:5
+     13 ms  replaceLightNums deps/three.module-B8nzIm16.js?v=c2f02669:44621
+     11 ms  fromBufferAttribute deps/three.module-B8nzIm16.js?v=c2f02669:4889
+     11 ms  commit src/streamLayer.ts:255
+     11 ms  shown viewport/legendCounts.ts:19
+     10 ms  wasm-function[961] engine/navara_wasm_bg.wasm:0
+     10 ms  wasm-function[6009] engine/navara_wasm_bg.wasm:0
+      8 ms  wasm-function[1271] engine/navara_wasm_bg.wasm:0
+      8 ms  getZ deps/three.module-B8nzIm16.js?v=c2f02669:12837
+      7 ms  min deps/three.module-B8nzIm16.js?v=c2f02669:4418
+      7 ms  _update deps/dist-Cl39IsRE.js?v=c2f02669:70129
+      7 ms  wasm-function[589] engine/navara_wasm_bg.wasm:0
+      7 ms  _forceFeatureUpdates deps/dist-Cl39IsRE.js?v=c2f02669:70134
+-- inclusive --
+  11935 ms  (root) :-1
+   9977 ms  (idle) :-1
+    623 ms  onAnimationFrame deps/three.module-B8nzIm16.js?v=c2f02669:41017
+    614 ms  (anon) deps/dist-Cl39IsRE.js?v=c2f02669:70449
+    417 ms  (program) :-1
+    316 ms  _update deps/dist-Cl39IsRE.js?v=c2f02669:70129
+    315 ms  performWorkOnRoot deps/react-dom_client.js?v=c2f02669:7938
+    315 ms  performSyncWorkOnRoot deps/react-dom_client.js?v=c2f02669:9061
+    315 ms  flushSyncWorkAcrossRoots_impl deps/react-dom_client.js?v=c2f02669:8966
+    315 ms  processRootScheduleInMicrotask deps/react-dom_client.js?v=c2f02669:8993
+    315 ms  (anon) deps/react-dom_client.js?v=c2f02669:9075
+    310 ms  runWithFiberInDEV deps/react-dom_client.js?v=c2f02669:845
+    307 ms  run :-1
+    302 ms  performUnitOfWork deps/react-dom_client.js?v=c2f02669:8425
+    302 ms  workLoopSync deps/react-dom_client.js?v=c2f02669:8322
+    302 ms  renderRootSync deps/react-dom_client.js?v=c2f02669:8266
+    301 ms  js-to-wasm:id: engine/navara_wasm_bg.wasm:0
+    299 ms  wasm-function[4600] engine/navara_wasm_bg.wasm:0
+    297 ms  beginWork deps/react-dom_client.js?v=c2f02669:6079
+    291 ms  wasm-function[961] engine/navara_wasm_bg.wasm:0
+    291 ms  wasm-function[8907] engine/navara_wasm_bg.wasm:0
+    291 ms  wasm-function[10389] engine/navara_wasm_bg.wasm:0
+    288 ms  react_stack_bottom_frame deps/react-dom_client.js?v=c2f02669:12862
+    288 ms  renderWithHooks deps/react-dom_client.js?v=c2f02669:4199
+    287 ms  updateFunctionComponent deps/react-dom_client.js?v=c2f02669:5559
+    287 ms  render deps/dist-Cl39IsRE.js?v=c2f02669:44286
+    287 ms  render deps/dist-Cl39IsRE.js?v=c2f02669:68070
+    287 ms  _render deps/dist-Cl39IsRE.js?v=c2f02669:70146
+    285 ms  WebGLRenderer.render deps/three.module-B8nzIm16.js?v=c2f02669:50824
+    285 ms  _renderWithLight deps/dist-Cl39IsRE.js?v=c2f02669:67774
+    285 ms  render deps/dist-Cl39IsRE.js?v=c2f02669:67837
+    280 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    278 ms  wasm-function[6010] engine/navara_wasm_bg.wasm:0
+    278 ms  wasm-function[12430] engine/navara_wasm_bg.wasm:0
+    207 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+    200 ms  updateMemo deps/react-dom_client.js?v=c2f02669:4941
+    200 ms  useMemo deps/react-dom_client.js?v=c2f02669:13268
+    200 ms  exports.useMemo deps/react-B0Q-N9AP.js?v=c2f02669:756
+    180 ms  commit src/streamLayer.ts:255
+    168 ms  syncCellMeshes src/cellMeshes.ts:66
+    168 ms  syncMeshes src/streamLayer.ts:597
+    163 ms  createMesh src/CityMeshArraysDesc.ts:35
+    163 ms  onCreate deps/dist-Cl39IsRE.js?v=c2f02669:59391
+    163 ms  onCreate deps/dist-Cl39IsRE.js?v=c2f02669:59456
+    163 ms  addMesh deps/dist-Cl39IsRE.js?v=c2f02669:70185
+    163 ms  addCityMeshArrays src/cityMesh.ts:244
+    163 ms  create src/cellMeshFactory.ts:24
+    162 ms  CityMeshArraysMesh src/cityMesh.ts:41
+    156 ms  createBuffer deps/three.module-B8nzIm16.js?v=c2f02669:41042
+    156 ms  update deps/three.module-B8nzIm16.js?v=c2f02669:41108
+    155 ms  bufferData :-1
+    155 ms  proto.<computed> debug/perfProbe.ts:108
+    153 ms  update deps/three.module-B8nzIm16.js?v=c2f02669:43462
+    153 ms  update deps/three.module-B8nzIm16.js?v=c2f02669:43696
+    153 ms  projectObject deps/three.module-B8nzIm16.js?v=c2f02669:50903
+    132 ms  (garbage collector) :-1
+    129 ms  WebGLRenderer.renderBufferDirect deps/three.module-B8nzIm16.js?v=c2f02669:50625
+    124 ms  setProgram deps/three.module-B8nzIm16.js?v=c2f02669:51131
+    119 ms  LegendOverlay viewport/LegendOverlay.tsx:34
+    116 ms  (anon) viewport/legendCounts.ts:122
+#### 9258edd9-3834-4cbd-b644-a7e6c5ca7fea timeline
+
+#### 9258edd9-3834-4cbd-b644-a7e6c5ca7fea span 11765 ms
+-- self --
+  11765 ms  (idle) :-1
+-- inclusive --
+  11765 ms  (idle) :-1
+  11765 ms  (root) :-1
+#### fcb.worker.ts?worker_file&type=module timeline
+     900 ms  busy    9 ms  (garbage collector) :-1
+    1000 ms  busy   81 ms  (garbage collector) :-1
+    1100 ms  busy   79 ms  (garbage collector) :-1
+    1200 ms  busy   97 ms  (garbage collector) :-1
+    1300 ms  busy   93 ms  (garbage collector) :-1
+    1400 ms  busy   98 ms  (garbage collector) :-1
+    1500 ms  busy   80 ms  (garbage collector) :-1
+    1600 ms  busy   79 ms  (garbage collector) :-1
+    1700 ms  busy   76 ms  (garbage collector) :-1
+    1800 ms  busy   67 ms  (garbage collector) :-1
+    1900 ms  busy   76 ms  (garbage collector) :-1
+    2000 ms  busy   72 ms  decode :-1
+    2100 ms  busy   80 ms  extractSemanticAttributes cityjson/parseHelpers.ts:78
+    2200 ms  busy   89 ms  decode :-1
+    2300 ms  busy   72 ms  readInt32 mjs/byte-buffer.js?v=c2f02669:57
+    2400 ms  busy   76 ms  (garbage collector) :-1
+    2500 ms  busy   75 ms  (garbage collector) :-1
+    2600 ms  busy   84 ms  decode :-1
+    2700 ms  busy   65 ms  (garbage collector) :-1
+    2800 ms  busy   86 ms  (garbage collector) :-1
+    2900 ms  busy   67 ms  (garbage collector) :-1
+    3000 ms  busy   78 ms  (garbage collector) :-1
+    3100 ms  busy   67 ms  (garbage collector) :-1
+    3200 ms  busy   70 ms  (garbage collector) :-1
+    3300 ms  busy   81 ms  (garbage collector) :-1
+    3400 ms  busy   76 ms  (garbage collector) :-1
+    3500 ms  busy   73 ms  decode :-1
+    3600 ms  busy   75 ms  decode :-1
+    3700 ms  busy   76 ms  decode :-1
+    3800 ms  busy   82 ms  (garbage collector) :-1
+    3900 ms  busy   77 ms  decode :-1
+    4000 ms  busy   82 ms  decode :-1
+    4100 ms  busy   78 ms  (garbage collector) :-1
+    4200 ms  busy   98 ms  slotOf geo/vertexPlacer.ts:11
+    4300 ms  busy  100 ms  triangulateSurface geometry/triangulate.ts:18
+    4400 ms  busy   99 ms  triangulateSurface geometry/triangulate.ts:18
+    4500 ms  busy  100 ms  buildCityMeshArrays geometry/buildCityMeshArrays.ts:79
+    4600 ms  busy  100 ms  slotOf geo/vertexPlacer.ts:11
+    4700 ms  busy  100 ms  buildCityMeshArrays geometry/buildCityMeshArrays.ts:79
+    4800 ms  busy  100 ms  (anon) src/objectRecords.ts:46
+    4900 ms  busy  100 ms  triangulateSurface geometry/triangulate.ts:18
+    5000 ms  busy  101 ms  triangulateSurface geometry/triangulate.ts:18
+    5100 ms  busy  100 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+    5200 ms  busy   99 ms  slotOf geo/vertexPlacer.ts:11
+    5300 ms  busy  108 ms  post src/streamWorkerCore.ts:361
+    5400 ms  busy   92 ms  (garbage collector) :-1
+    5500 ms  busy  100 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+    5600 ms  busy   99 ms  post src/streamWorkerCore.ts:361
+    5700 ms  busy  100 ms  triangulateSurface geometry/triangulate.ts:18
+    5800 ms  busy  100 ms  triangulateSurface geometry/triangulate.ts:18
+    5900 ms  busy  100 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+    6000 ms  busy  100 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+    6100 ms  busy  100 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+    6200 ms  busy  102 ms  post src/streamWorkerCore.ts:361
+    6300 ms  busy   97 ms  triangulateSurface geometry/triangulate.ts:18
+    6400 ms  busy  100 ms  post src/streamWorkerCore.ts:361
+    6500 ms  busy  100 ms  triangulateSurface geometry/triangulate.ts:18
+    6600 ms  busy  100 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+    6700 ms  busy  100 ms  slotOf geo/vertexPlacer.ts:11
+    6800 ms  busy  101 ms  (anon) src/objectRecords.ts:46
+    6900 ms  busy  100 ms  post src/streamWorkerCore.ts:361
+    7000 ms  busy   11 ms  post src/streamWorkerCore.ts:361
+    9500 ms  busy    5 ms  (garbage collector) :-1
+    9600 ms  busy  100 ms  (garbage collector) :-1
+    9700 ms  busy  100 ms  (garbage collector) :-1
+    9800 ms  busy  100 ms  (garbage collector) :-1
+    9900 ms  busy  101 ms  (garbage collector) :-1
+   10000 ms  busy   11 ms  (garbage collector) :-1
+   10600 ms  busy   74 ms  (garbage collector) :-1
+   10700 ms  busy  101 ms  (garbage collector) :-1
+   10800 ms  busy   68 ms  (garbage collector) :-1
+#### fcb.worker.ts?worker_file&type=module span 11623 ms
+-- self --
+   5576 ms  (idle) :-1
+   1356 ms  (garbage collector) :-1
+    363 ms  triangulateSurface geometry/triangulate.ts:18
+    299 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+    265 ms  decode :-1
+    235 ms  slotOf geo/vertexPlacer.ts:11
+    220 ms  buildCityMeshArrays geometry/buildCityMeshArrays.ts:79
+    219 ms  post src/streamWorkerCore.ts:361
+    217 ms  (anon) src/objectRecords.ts:46
+    152 ms  extractSemanticAttributes cityjson/parseHelpers.ts:78
+    150 ms  transformInternal deps/proj4.js?v=c2f02669:2994
+    143 ms  yt dist/reader-DNTyussg.js?v=c2f02669:2588
+    141 ms  buildSurface cityjson/parseHelpers.ts:99
+    123 ms  L dist/reader-DNTyussg.js?v=c2f02669:2295
+    101 ms  place geo/vertexPlacer.ts:50
+    100 ms  zt dist/reader-DNTyussg.js?v=c2f02669:2870
+     92 ms  readInt32 mjs/byte-buffer.js?v=c2f02669:57
+     83 ms  dequantizeVertex cityjson/parseHelpers.ts:5
+     72 ms  visit cityjson/parseHelpers.ts:153
+     70 ms  geocentricToGeodetic deps/proj4.js?v=c2f02669:2592
+     67 ms  __string mjs/byte-buffer.js?v=c2f02669:171
+     65 ms  earcutLinked deps/three.module-B8nzIm16.js?v=c2f02669:23675
+     61 ms  buildProjectionBasis geometry/triangulate.ts:188
+     60 ms  triangulateShape deps/three.module-B8nzIm16.js?v=c2f02669:24068
+     58 ms  inverse$28 deps/proj4.js?v=c2f02669:4350
+     58 ms  Kt dist/reader-DNTyussg.js?v=c2f02669:2970
+     57 ms  orientExteriorRing geometry/triangulate.ts:131
+     55 ms  takeRing dist/reader-DNTyussg.js?v=c2f02669:2233
+     53 ms  fetch :-1
+     52 ms  ctx.onmessage src/streamWorkerCore.ts:453
+-- inclusive --
+  11621 ms  (root) :-1
+   5576 ms  (idle) :-1
+   2604 ms  ctx.onmessage src/streamWorkerCore.ts:453
+   1882 ms  buildCityMeshArrays geometry/buildCityMeshArrays.ts:79
+   1834 ms  select src/fcbSourceAdapter.ts:87
+   1356 ms  (garbage collector) :-1
+   1213 ms  toCityJSON dist/reader-DNTyussg.js?v=c2f02669:2942
+   1200 ms  zt dist/reader-DNTyussg.js?v=c2f02669:2870
+    994 ms  jt dist/reader-DNTyussg.js?v=c2f02669:2740
+    967 ms  place geo/vertexPlacer.ts:50
+    867 ms  slotOf geo/vertexPlacer.ts:11
+    658 ms  triangulateSurface geometry/triangulate.ts:18
+    631 ms  forward deps/proj4.js?v=c2f02669:3263
+    625 ms  transformer deps/proj4.js?v=c2f02669:3142
+    609 ms  transformInternal deps/proj4.js?v=c2f02669:2994
+    481 ms  parseCityObject cityjson/parseHelpers.ts:200
+    460 ms  attributes dist/reader-DNTyussg.js?v=c2f02669:2925
+    445 ms  extractSurfaces cityjson/parseHelpers.ts:151
+    441 ms  (anon) cityjson/parseHelpers.ts:167
+    437 ms  (anon) cityjson/parseHelpers.ts:169
+    419 ms  visit cityjson/parseHelpers.ts:153
+    358 ms  inverse$28 deps/proj4.js?v=c2f02669:4350
+    346 ms  toObjectRecords src/objectRecords.ts:35
+    340 ms  Ot dist/reader-DNTyussg.js?v=c2f02669:2688
+    323 ms  buildSurface cityjson/parseHelpers.ts:99
+    299 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+    299 ms  (anon) src/objectRecords.ts:46
+    275 ms  __string mjs/byte-buffer.js?v=c2f02669:171
+    268 ms  columns dist/reader-DNTyussg.js?v=c2f02669:2908
+    265 ms  decode :-1
+    222 ms  post src/streamWorkerCore.ts:361
+    206 ms  L dist/reader-DNTyussg.js?v=c2f02669:2295
+    198 ms  name dist/reader-DNTyussg.js?v=c2f02669:498
+    179 ms  Kt dist/reader-DNTyussg.js?v=c2f02669:2970
+    173 ms  triangulateShape deps/three.module-B8nzIm16.js?v=c2f02669:24068
+    152 ms  extractSemanticAttributes cityjson/parseHelpers.ts:78
+    143 ms  yt dist/reader-DNTyussg.js?v=c2f02669:2588
+    113 ms  earcut deps/three.module-B8nzIm16.js?v=c2f02669:23623
+    101 ms  read dist/reader-DNTyussg.js?v=c2f02669:138
+     98 ms  Ke dist/reader-DNTyussg.js?v=c2f02669:2255
+     96 ms  nt dist/reader-DNTyussg.js?v=c2f02669:2429
+     92 ms  readInt32 mjs/byte-buffer.js?v=c2f02669:57
+     90 ms  dequantizeAll cityjson/parseHelpers.ts:32
+     89 ms  vertices dist/reader-DNTyussg.js?v=c2f02669:2961
+     88 ms  takeShell dist/reader-DNTyussg.js?v=c2f02669:2247
+     85 ms  takeSurface dist/reader-DNTyussg.js?v=c2f02669:2240
+     83 ms  dequantizeVertex cityjson/parseHelpers.ts:5
+     83 ms  (anon) cityjson/parseHelpers.ts:33
+     82 ms  computeRoofMetrics roofMetrics/metrics.ts:151
+     81 ms  earcutLinked deps/three.module-B8nzIm16.js?v=c2f02669:23675
+     75 ms  __offset mjs/byte-buffer.js?v=c2f02669:146
+     70 ms  geocentricToGeodetic deps/proj4.js?v=c2f02669:2592
+     69 ms  read dist/reader-DNTyussg.js?v=c2f02669:50
+     66 ms  takeRing dist/reader-DNTyussg.js?v=c2f02669:2233
+     63 ms  h dist/reader-DNTyussg.js?v=c2f02669:87
+     61 ms  buildProjectionBasis geometry/triangulate.ts:188
+     57 ms  orientExteriorRing geometry/triangulate.ts:131
+     53 ms  fetch :-1
+     51 ms  (program) :-1
+     50 ms  Gt dist/reader-DNTyussg.js?v=c2f02669:2935
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 11263 ms
+-- self --
+  11262 ms  (idle) :-1
+-- inclusive --
+  11262 ms  (idle) :-1
+  11262 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 11266 ms
+-- self --
+  11265 ms  (idle) :-1
+-- inclusive --
+  11265 ms  (idle) :-1
+  11265 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 11269 ms
+-- self --
+  11268 ms  (idle) :-1
+-- inclusive --
+  11268 ms  (idle) :-1
+  11268 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 11272 ms
+-- self --
+  11271 ms  (idle) :-1
+-- inclusive --
+  11271 ms  (idle) :-1
+  11271 ms  (root) :-1

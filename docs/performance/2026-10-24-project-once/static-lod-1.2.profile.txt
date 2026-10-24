@@ -1,0 +1,193 @@
+#### main timeline
+     700 ms  busy    2 ms  wasm-function[343] engine/navara_wasm_bg.wasm:0
+     800 ms  busy    3 ms  wasm-function[2129] engine/navara_wasm_bg.wasm:0
+     900 ms  busy    1 ms  wasm-function[589] engine/navara_wasm_bg.wasm:0
+    1000 ms  busy    6 ms  _update deps/dist-Cl39IsRE.js?v=c2f02669:70129
+    1100 ms  busy    6 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    1200 ms  busy    4 ms  wasm-function[7287] engine/navara_wasm_bg.wasm:0
+    1300 ms  busy    5 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    1400 ms  busy    6 ms  requestAnimationFrame :-1
+    1500 ms  busy   58 ms  cityCounts viewport/legendCounts.ts:22
+    1600 ms  busy  101 ms  cityCounts viewport/legendCounts.ts:22
+    1700 ms  busy  100 ms  parentsIndexOf citymodel/featureId.ts:1
+    1800 ms  busy  101 ms  triangulateSurface geometry/triangulate.ts:18
+    1900 ms  busy   99 ms  triangulateSurface geometry/triangulate.ts:18
+    2000 ms  busy  100 ms  (garbage collector) :-1
+    2100 ms  busy  101 ms  (garbage collector) :-1
+    2200 ms  busy  100 ms  triangulateSurface geometry/triangulate.ts:18
+    2300 ms  busy  100 ms  triangulateSurface geometry/triangulate.ts:18
+    2400 ms  busy   99 ms  slotOf geo/vertexPlacer.ts:11
+    2500 ms  busy  100 ms  slotOf geo/vertexPlacer.ts:11
+    2600 ms  busy   99 ms  buildCityMeshArrays geometry/buildCityMeshArrays.ts:79
+    2700 ms  busy  101 ms  slotOf geo/vertexPlacer.ts:11
+    2800 ms  busy  100 ms  partitionCells geometry/partitionCells.ts:6
+    2900 ms  busy   99 ms  partitionCells geometry/partitionCells.ts:6
+    3000 ms  busy  100 ms  linearToSrgbByte src/cityStyle.ts:36
+    3100 ms  busy   52 ms  bufferData :-1
+    3200 ms  busy    3 ms  (anon) :-1
+    3300 ms  busy    4 ms  (anon) :-1
+    3400 ms  busy    1 ms  (anon) :-1
+    3800 ms  busy    1 ms  (anon) :-1
+    4600 ms  busy    1 ms  wasm-function[519] engine/navara_wasm_bg.wasm:0
+    4700 ms  busy    9 ms  wasm-function[3699] engine/navara_wasm_bg.wasm:0
+    4800 ms  busy    9 ms  (anon) :-1
+    4900 ms  busy    9 ms  wasm-function[11881] engine/navara_wasm_bg.wasm:0
+    5000 ms  busy    7 ms  wasm-function[513] engine/navara_wasm_bg.wasm:0
+    5100 ms  busy    7 ms  wasm-function[13151] engine/navara_wasm_bg.wasm:0
+    5200 ms  busy    7 ms  wasm-function[1271] engine/navara_wasm_bg.wasm:0
+    5300 ms  busy    7 ms  requestAnimationFrame :-1
+    5400 ms  busy    8 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    5500 ms  busy    8 ms  wasm-function[7498] engine/navara_wasm_bg.wasm:0
+    5600 ms  busy    3 ms  wasm-function[13155] engine/navara_wasm_bg.wasm:0
+    5700 ms  busy    4 ms  wasm-function[11780] engine/navara_wasm_bg.wasm:0
+    5800 ms  busy    8 ms  wasm-function[6955] engine/navara_wasm_bg.wasm:0
+    5900 ms  busy    7 ms  wasm-function[570] engine/navara_wasm_bg.wasm:0
+    6000 ms  busy    6 ms  wasm-function[1271] engine/navara_wasm_bg.wasm:0
+    6100 ms  busy    7 ms  wasm-function[13149] engine/navara_wasm_bg.wasm:0
+    6200 ms  busy    9 ms  (anon) :-1
+    6300 ms  busy    7 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    6400 ms  busy    6 ms  (anon) :0
+    6500 ms  busy    7 ms  wasm-function[404] engine/navara_wasm_bg.wasm:0
+    6600 ms  busy    7 ms  emit deps/dist-Cl39IsRE.js?v=c2f02669:35254
+    6700 ms  busy    8 ms  needsUpdate deps/dist-Cl39IsRE.js?v=c2f02669:34920
+    6800 ms  busy    8 ms  wasm-function[279] engine/navara_wasm_bg.wasm:0
+    6900 ms  busy    6 ms  wasm-function[1271] engine/navara_wasm_bg.wasm:0
+    7000 ms  busy    9 ms  wasm-function[12392] engine/navara_wasm_bg.wasm:0
+    7100 ms  busy    6 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    7200 ms  busy    6 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    7300 ms  busy    3 ms  wasm-function[310] engine/navara_wasm_bg.wasm:0
+#### main span 7337 ms
+-- self --
+   4655 ms  (idle) :-1
+    848 ms  (program) :-1
+    220 ms  (garbage collector) :-1
+    190 ms  partitionCells geometry/partitionCells.ts:6
+    183 ms  triangulateSurface geometry/triangulate.ts:18
+    125 ms  slotOf geo/vertexPlacer.ts:11
+    121 ms  cityCounts viewport/legendCounts.ts:22
+    112 ms  buildCityMeshArrays geometry/buildCityMeshArrays.ts:79
+     56 ms  inverse$29 deps/proj4.js?v=c2f02669:4296
+     55 ms  buildProjectionBasis geometry/triangulate.ts:188
+     48 ms  place geo/vertexPlacer.ts:50
+     48 ms  earcut deps/three.module-B8nzIm16.js?v=c2f02669:23623
+     30 ms  orientExteriorRing geometry/triangulate.ts:131
+     28 ms  triangulateShape deps/three.module-B8nzIm16.js?v=c2f02669:24068
+     28 ms  parentsIndexOf citymodel/featureId.ts:1
+     27 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+     26 ms  transformInternal deps/proj4.js?v=c2f02669:2994
+     26 ms  selectedSurfaceLod geometry/lodSelection.ts:11
+     25 ms  earcutLinked deps/three.module-B8nzIm16.js?v=c2f02669:23675
+     19 ms  bufferData :-1
+     18 ms  buildArrays src/cityModelMesh.ts:159
+     18 ms  geocentricToGeodetic deps/proj4.js?v=c2f02669:2592
+     17 ms  (anon) :-1
+     13 ms  min deps/three.module-B8nzIm16.js?v=c2f02669:4418
+     12 ms  exports.jsxDEV deps/react_jsx-dev-runtime.js?v=c2f02669:189
+     12 ms  linearToSrgbByte src/cityStyle.ts:36
+     10 ms  inverse$28 deps/proj4.js?v=c2f02669:4350
+     10 ms  requestAnimationFrame :-1
+      9 ms  (anon) :0
+      9 ms  write src/cityStyle.ts:85
+-- inclusive --
+   7336 ms  (root) :-1
+   4655 ms  (idle) :-1
+   1331 ms  performWorkOnRoot deps/react-dom_client.js?v=c2f02669:7938
+   1331 ms  performSyncWorkOnRoot deps/react-dom_client.js?v=c2f02669:9061
+   1331 ms  flushSyncWorkAcrossRoots_impl deps/react-dom_client.js?v=c2f02669:8966
+   1331 ms  processRootScheduleInMicrotask deps/react-dom_client.js?v=c2f02669:8993
+   1331 ms  (anon) deps/react-dom_client.js?v=c2f02669:9075
+   1327 ms  runWithFiberInDEV deps/react-dom_client.js?v=c2f02669:845
+   1135 ms  commitRoot deps/react-dom_client.js?v=c2f02669:8530
+   1135 ms  commitRootWhenReady deps/react-dom_client.js?v=c2f02669:8057
+   1133 ms  commitPassiveMountOnFiber deps/react-dom_client.js?v=c2f02669:7608
+   1133 ms  recursivelyTraversePassiveMountEffects deps/react-dom_client.js?v=c2f02669:7601
+   1133 ms  flushPassiveEffects deps/react-dom_client.js?v=c2f02669:8769
+   1133 ms  flushPendingEffects deps/react-dom_client.js?v=c2f02669:8763
+   1133 ms  flushSpawnedWork deps/react-dom_client.js?v=c2f02669:8685
+   1130 ms  react_stack_bottom_frame deps/react-dom_client.js?v=c2f02669:12899
+   1130 ms  commitHookEffectListMount deps/react-dom_client.js?v=c2f02669:6608
+   1130 ms  commitHookPassiveMountEffects deps/react-dom_client.js?v=c2f02669:6649
+   1128 ms  setLod src/cityModelMesh.ts:378
+   1128 ms  setLod src/cityModelRegistry.ts:72
+   1128 ms  syncLayers scene/handleSync.ts:53
+   1128 ms  (anon) scene/NavaraViewport.tsx:1961
+   1120 ms  rebuildGeometry src/cityModelMesh.ts:471
+   1025 ms  buildArrays src/cityModelMesh.ts:159
+    848 ms  (program) :-1
+    810 ms  buildCityMeshArrays geometry/buildCityMeshArrays.ts:79
+    385 ms  triangulateSurface geometry/triangulate.ts:18
+    288 ms  place geo/vertexPlacer.ts:50
+    243 ms  onAnimationFrame deps/three.module-B8nzIm16.js?v=c2f02669:41017
+    242 ms  (anon) deps/dist-Cl39IsRE.js?v=c2f02669:70449
+    240 ms  onAnimationFrame deps/three.module-B8nzIm16.js?v=c2f02669:50784
+    240 ms  slotOf geo/vertexPlacer.ts:11
+    220 ms  (garbage collector) :-1
+    197 ms  partitionCells geometry/partitionCells.ts:6
+    197 ms  performUnitOfWork deps/react-dom_client.js?v=c2f02669:8425
+    197 ms  workLoopSync deps/react-dom_client.js?v=c2f02669:8322
+    197 ms  renderRootSync deps/react-dom_client.js?v=c2f02669:8266
+    196 ms  run :-1
+    195 ms  beginWork deps/react-dom_client.js?v=c2f02669:6079
+    193 ms  _update deps/dist-Cl39IsRE.js?v=c2f02669:70129
+    193 ms  react_stack_bottom_frame deps/react-dom_client.js?v=c2f02669:12862
+    193 ms  renderWithHooks deps/react-dom_client.js?v=c2f02669:4199
+    192 ms  updateFunctionComponent deps/react-dom_client.js?v=c2f02669:5559
+    188 ms  wasm-function[4600] engine/navara_wasm_bg.wasm:0
+    188 ms  js-to-wasm:iii:i wasm/39e937aa:0
+    188 ms  update deps/dist-Cl39IsRE.js?v=c2f02669:3392
+    184 ms  wasm-function[10389] engine/navara_wasm_bg.wasm:0
+    183 ms  wasm-function[961] engine/navara_wasm_bg.wasm:0
+    183 ms  wasm-function[8907] engine/navara_wasm_bg.wasm:0
+    178 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    175 ms  wasm-function[6010] engine/navara_wasm_bg.wasm:0
+    175 ms  wasm-function[12430] engine/navara_wasm_bg.wasm:0
+    163 ms  updateMemo deps/react-dom_client.js?v=c2f02669:4941
+    163 ms  useMemo deps/react-dom_client.js?v=c2f02669:13268
+    163 ms  exports.useMemo deps/react-B0Q-N9AP.js?v=c2f02669:756
+    137 ms  LegendOverlay viewport/LegendOverlay.tsx:34
+    135 ms  (anon) viewport/legendCounts.ts:122
+    135 ms  countedLegendGroups viewport/legendCounts.ts:121
+    135 ms  (anon) viewport/LegendOverlay.tsx:57
+    128 ms  cityCounts viewport/legendCounts.ts:22
+#### 8a668533-393c-4a1c-9e47-a1de2fe6beb2 timeline
+
+#### 8a668533-393c-4a1c-9e47-a1de2fe6beb2 span 6603 ms
+-- self --
+   6603 ms  (idle) :-1
+-- inclusive --
+   6603 ms  (idle) :-1
+   6603 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+    1800 ms  busy    2 ms  (garbage collector) :-1
+#### index-DuPVPW0m.js span 6159 ms
+-- self --
+   6156 ms  (idle) :-1
+      2 ms  (garbage collector) :-1
+-- inclusive --
+   6158 ms  (root) :-1
+   6156 ms  (idle) :-1
+      2 ms  (garbage collector) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 6088 ms
+-- self --
+   6087 ms  (idle) :-1
+-- inclusive --
+   6087 ms  (idle) :-1
+   6087 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 6045 ms
+-- self --
+   6045 ms  (idle) :-1
+-- inclusive --
+   6045 ms  (idle) :-1
+   6045 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 6000 ms
+-- self --
+   5999 ms  (idle) :-1
+-- inclusive --
+   5999 ms  (idle) :-1
+   5999 ms  (root) :-1

@@ -1,0 +1,174 @@
+#### main timeline
+     500 ms  busy    3 ms  wasm-function[6502] engine/navara_wasm_bg.wasm:0
+     600 ms  busy   13 ms  getResourceLayers deps/dist-Cl39IsRE.js?v=c2f02669:66125
+     700 ms  busy    6 ms  wasm-function[8294] engine/navara_wasm_bg.wasm:0
+     800 ms  busy    6 ms  wasm-function[139] engine/navara_wasm_bg.wasm:0
+     900 ms  busy    7 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    1000 ms  busy    7 ms  wasm-function[12355] engine/navara_wasm_bg.wasm:0
+    1100 ms  busy    7 ms  wasm-function[4039] engine/navara_wasm_bg.wasm:0
+    1200 ms  busy   31 ms  useTotalObjectCount streaming/useTotalObjectCount.ts:38
+    1300 ms  busy   99 ms  collectAttributeFields layers/RulesEditor.tsx:999
+    1400 ms  busy  100 ms  cityCounts viewport/legendCounts.ts:22
+    1500 ms  busy   99 ms  cityCounts viewport/legendCounts.ts:22
+    1600 ms  busy   99 ms  (anon) styling/ruleColors.ts:31
+    1700 ms  busy  100 ms  (anon) styling/ruleColors.ts:31
+    1800 ms  busy  100 ms  linearToSrgbByte src/cityStyle.ts:36
+    1900 ms  busy   49 ms  paintSlotFlags src/surfaceColorLayers.ts:93
+    2500 ms  busy    2 ms  (anon) :0
+    2600 ms  busy    3 ms  (anon) :0
+    2700 ms  busy    1 ms  (anon) :0
+    3300 ms  busy    1 ms  (anon) :-1
+    4000 ms  busy    2 ms  (anon) :0
+    4100 ms  busy    1 ms  (anon) :-1
+    4300 ms  busy    6 ms  wasm-function[4389] engine/navara_wasm_bg.wasm:0
+    4400 ms  busy    7 ms  (anon) :-1
+    4500 ms  busy    7 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    4600 ms  busy    7 ms  wasm-function[1231] engine/navara_wasm_bg.wasm:0
+    4700 ms  busy    8 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    4800 ms  busy    7 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    4900 ms  busy    6 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    5000 ms  busy    8 ms  wasm-function[885] engine/navara_wasm_bg.wasm:0
+    5100 ms  busy    7 ms  wasm-function[522] engine/navara_wasm_bg.wasm:0
+    5200 ms  busy    7 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    5300 ms  busy    7 ms  wasm-function[9377] engine/navara_wasm_bg.wasm:0
+    5400 ms  busy    9 ms  wasm-function[286] engine/navara_wasm_bg.wasm:0
+    5500 ms  busy    7 ms  wasm-function[6463] engine/navara_wasm_bg.wasm:0
+    5600 ms  busy    8 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    5700 ms  busy    7 ms  wasm-function[1865] engine/navara_wasm_bg.wasm:0
+    5800 ms  busy    7 ms  wasm-function[589] engine/navara_wasm_bg.wasm:0
+    5900 ms  busy    6 ms  wasm-function[180] engine/navara_wasm_bg.wasm:0
+    6000 ms  busy    7 ms  wasm-function[961] engine/navara_wasm_bg.wasm:0
+    6100 ms  busy    2 ms  wasm-function[424] engine/navara_wasm_bg.wasm:0
+#### main span 6121 ms
+-- self --
+   4633 ms  (idle) :-1
+    627 ms  (program) :-1
+    112 ms  cityCounts viewport/legendCounts.ts:22
+     92 ms  collectAttributeFields layers/RulesEditor.tsx:999
+     89 ms  (anon) styling/ruleColors.ts:31
+     77 ms  (garbage collector) :-1
+     44 ms  inheritedAttributes citymodel/inheritedAttributes.ts:0
+     34 ms  linearToSrgbByte src/cityStyle.ts:36
+     33 ms  computeRoofMetrics roofMetrics/metrics.ts:151
+     30 ms  parentsIndexOf citymodel/featureId.ts:1
+     25 ms  computeStyleColors src/surfaceColorLayers.ts:40
+     23 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+     16 ms  exports.jsxDEV deps/react_jsx-dev-runtime.js?v=c2f02669:189
+     12 ms  write src/cityStyle.ts:85
+     10 ms  (anon) src/cityModelMesh.ts:355
+     10 ms  (anon) :-1
+      8 ms  (anon) :0
+      7 ms  resolveField rules/evaluate.ts:26
+      7 ms  useTotalObjectCount streaming/useTotalObjectCount.ts:38
+      7 ms  (anon) viewport/legendCounts.ts:122
+      6 ms  staticRoofs viewport/legendCounts.ts:9
+      6 ms  paintSlotFlags src/surfaceColorLayers.ts:93
+      5 ms  wasm-function[836] engine/navara_wasm_bg.wasm:0
+      5 ms  setTextured src/cityStyle.ts:226
+      5 ms  wasm-function[180] engine/navara_wasm_bg.wasm:0
+      4 ms  computeAzimuth roofMetrics/metrics.ts:113
+      4 ms  requestAnimationFrame :-1
+      4 ms  evaluateRule rules/evaluate.ts:36
+      4 ms  wasm-function[6009] engine/navara_wasm_bg.wasm:0
+      3 ms  wasm-function[776] engine/navara_wasm_bg.wasm:0
+-- inclusive --
+   6120 ms  (root) :-1
+   4633 ms  (idle) :-1
+    627 ms  (program) :-1
+    572 ms  performWorkOnRoot deps/react-dom_client.js?v=c2f02669:7938
+    572 ms  performSyncWorkOnRoot deps/react-dom_client.js?v=c2f02669:9061
+    572 ms  flushSyncWorkAcrossRoots_impl deps/react-dom_client.js?v=c2f02669:8966
+    572 ms  processRootScheduleInMicrotask deps/react-dom_client.js?v=c2f02669:8993
+    572 ms  (anon) deps/react-dom_client.js?v=c2f02669:9075
+    568 ms  runWithFiberInDEV deps/react-dom_client.js?v=c2f02669:845
+    294 ms  performUnitOfWork deps/react-dom_client.js?v=c2f02669:8425
+    294 ms  workLoopSync deps/react-dom_client.js?v=c2f02669:8322
+    294 ms  renderRootSync deps/react-dom_client.js?v=c2f02669:8266
+    294 ms  run :-1
+    290 ms  beginWork deps/react-dom_client.js?v=c2f02669:6079
+    285 ms  react_stack_bottom_frame deps/react-dom_client.js?v=c2f02669:12862
+    285 ms  renderWithHooks deps/react-dom_client.js?v=c2f02669:4199
+    284 ms  updateFunctionComponent deps/react-dom_client.js?v=c2f02669:5559
+    278 ms  commitRoot deps/react-dom_client.js?v=c2f02669:8530
+    278 ms  commitRootWhenReady deps/react-dom_client.js?v=c2f02669:8057
+    276 ms  flushPassiveEffects deps/react-dom_client.js?v=c2f02669:8769
+    276 ms  flushPendingEffects deps/react-dom_client.js?v=c2f02669:8763
+    276 ms  flushSpawnedWork deps/react-dom_client.js?v=c2f02669:8685
+    274 ms  commitPassiveMountOnFiber deps/react-dom_client.js?v=c2f02669:7608
+    274 ms  recursivelyTraversePassiveMountEffects deps/react-dom_client.js?v=c2f02669:7601
+    273 ms  react_stack_bottom_frame deps/react-dom_client.js?v=c2f02669:12899
+    273 ms  commitHookEffectListMount deps/react-dom_client.js?v=c2f02669:6608
+    273 ms  commitHookPassiveMountEffects deps/react-dom_client.js?v=c2f02669:6649
+    273 ms  repaint src/cityModelMesh.ts:347
+    273 ms  setStyle src/cityModelMesh.ts:493
+    273 ms  setStyle src/cityModelRegistry.ts:75
+    273 ms  syncStyles scene/handleSync.ts:147
+    273 ms  (anon) scene/NavaraViewport.tsx:1961
+    253 ms  restyle src/cityModelMesh.ts:354
+    208 ms  computeStyleColors src/surfaceColorLayers.ts:40
+    187 ms  onAnimationFrame deps/three.module-B8nzIm16.js?v=c2f02669:41017
+    185 ms  (anon) deps/dist-Cl39IsRE.js?v=c2f02669:70449
+    166 ms  updateMemo deps/react-dom_client.js?v=c2f02669:4941
+    166 ms  useMemo deps/react-dom_client.js?v=c2f02669:13268
+    166 ms  exports.useMemo deps/react-B0Q-N9AP.js?v=c2f02669:756
+    163 ms  _update deps/dist-Cl39IsRE.js?v=c2f02669:70129
+    158 ms  wasm-function[4600] engine/navara_wasm_bg.wasm:0
+    158 ms  js-to-wasm:id: engine/navara_wasm_bg.wasm:0
+    157 ms  wasm-function[8907] engine/navara_wasm_bg.wasm:0
+    157 ms  wasm-function[10389] engine/navara_wasm_bg.wasm:0
+    155 ms  wasm-function[961] engine/navara_wasm_bg.wasm:0
+    153 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    151 ms  wasm-function[6010] engine/navara_wasm_bg.wasm:0
+    151 ms  wasm-function[12430] engine/navara_wasm_bg.wasm:0
+    136 ms  (anon) viewport/legendCounts.ts:122
+    136 ms  countedLegendGroups viewport/legendCounts.ts:121
+    136 ms  (anon) viewport/LegendOverlay.tsx:57
+    136 ms  LegendOverlay viewport/LegendOverlay.tsx:34
+    130 ms  cityCounts viewport/legendCounts.ts:22
+    129 ms  (anon) styling/ruleColors.ts:31
+     94 ms  RulesEditor layers/RulesEditor.tsx:65
+     92 ms  collectAttributeFields layers/RulesEditor.tsx:999
+     77 ms  (garbage collector) :-1
+     54 ms  renderWithHooksAgain deps/react-dom_client.js?v=c2f02669:4246
+     54 ms  inheritedAttributes citymodel/inheritedAttributes.ts:0
+     44 ms  setColors src/cityStyle.ts:202
+#### 149a4b54-a1cb-4269-95ea-4f97aa20f15e timeline
+
+#### 149a4b54-a1cb-4269-95ea-4f97aa20f15e span 5568 ms
+-- self --
+   5567 ms  (idle) :-1
+-- inclusive --
+   5567 ms  (idle) :-1
+   5567 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 5208 ms
+-- self --
+   5207 ms  (idle) :-1
+-- inclusive --
+   5207 ms  (idle) :-1
+   5207 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 5159 ms
+-- self --
+   5158 ms  (idle) :-1
+-- inclusive --
+   5158 ms  (idle) :-1
+   5158 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 5091 ms
+-- self --
+   5090 ms  (idle) :-1
+-- inclusive --
+   5090 ms  (idle) :-1
+   5090 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 5045 ms
+-- self --
+   5045 ms  (idle) :-1
+-- inclusive --
+   5045 ms  (idle) :-1
+   5045 ms  (root) :-1
