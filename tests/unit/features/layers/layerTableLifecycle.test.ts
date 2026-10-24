@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const enqueued: string[] = [];
@@ -20,8 +24,49 @@ vi.mock("../../../../src/insights/layerTables", async (importOriginal) => {
     dropLayerTable: vi.fn(async (layerId: string) => {
       dropped.push(layerId);
     }),
+    // The recovery seam `retryEngine` calls after a successful boot. Captured,
+    // so a case can run it without booting a real DuckDB.
+    onEngineRetry: (cb: () => void) => {
+      engineRetryHooks.push(cb);
+      return () => {
+        const at = engineRetryHooks.indexOf(cb);
+        if (at >= 0) engineRetryHooks.splice(at, 1);
+      };
+    },
   };
 });
+
+/** `(layerId, family)` pairs `ensureFamilyView` was asked to (re)build. */
+const ensured: string[] = [];
+/** Layers `dropFamilyViews` was asked to forget. The lifecycle's removal door:
+ *  it drops every family's view AND the file registrations behind them, which
+ *  `dropLayerTable` alone cannot do. */
+const droppedFamilies: string[] = [];
+vi.mock("../../../../src/insights/familyViews", () => ({
+  dropFamilyViews: vi.fn(async (layerId: string) => {
+    droppedFamilies.push(layerId);
+    dropped.push(layerId);
+  }),
+  // The family store ensures the ACTIVE family's view as a layer opens (ruling
+  // S3); no DuckDB here, so it simply succeeds.
+  ensureFamilyView: vi.fn(
+    async (input: { layerId: string; family: string }) => {
+      ensured.push(`${input.layerId}::${input.family}`);
+      return { ok: true } as const;
+    },
+  ),
+  dropFamilyView: vi.fn(async () => {}),
+}));
+
+// The file's own CRS is a ranged footer read in the real thing (ruling S2), so
+// it is faked here like every other I/O in this suite — and synchronously
+// resolved, so the ensure is still one microtask away.
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
+
+/** The callbacks the lifecycle registered with `retryEngine`'s recovery seam. */
+const engineRetryHooks: Array<() => void> = [];
 
 const clearMapFilter = vi.fn();
 const forgetMapFilter = vi.fn();
@@ -44,7 +89,7 @@ const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 const { useStreamStore } =
   await import("../../../../src/features/streaming/streamStore");
-const { useLayerTableStore } =
+const { adoptLayerTable, resetLayerTablesForTest, useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
@@ -54,6 +99,8 @@ import type { RunRecord } from "../../../../src/features/processing/types";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+const { useFamilyStore } =
+  await import("../../../../src/features/layers/familyStore");
 
 function emptyModel(): CityModel {
   return {
@@ -83,7 +130,7 @@ function layer(over: Partial<Layer>): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     visibleObjectIds: null,
     ...over,
   } as Layer;
@@ -95,6 +142,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   enqueued.length = 0;
   dropped.length = 0;
+  droppedFamilies.length = 0;
+  ensured.length = 0;
+  engineRetryHooks.length = 0;
   buildOutcome = { ok: true };
   clearMapFilter.mockReset();
   forgetMapFilter.mockReset();
@@ -102,7 +152,12 @@ beforeEach(() => {
   useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
   useQueryStore.setState({ queries: {} });
-  useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
+  // The REGISTRY as well as the store: `hasFileBackedTable` reads the registry,
+  // and a family view adopted by one case would otherwise silence the next.
+  resetLayerTablesForTest();
+  // A layer with FAMILIES is never given a bare resident table (ruling S3), so
+  // a leaked family entry would silence every rebuild case below.
+  useFamilyStore.setState({ layers: {} });
   // The toolbox is a table CONSUMER too, so its `open` and its in-flight runs
   // are inputs to every gate below — a leaked `open: true` would make the
   // panel-closed cases pass for the wrong reason.
@@ -142,6 +197,16 @@ describe("removals", () => {
     expect(forgetMapFilter).toHaveBeenCalledWith("A");
   });
 
+  it("goes through `dropFamilyViews`, so the file registrations go too", () => {
+    // A family's view holds a registered source open. Dropping the table alone
+    // would leave that registration in the VFS for the life of the page — and
+    // a re-add under the same layer id would then reuse a name that has been
+    // dropped, which still resolves, to nothing.
+    useLayerStore.setState({ layers: [layer({ id: "A" })] });
+    useLayerStore.setState({ layers: [] });
+    expect(droppedFamilies).toEqual(["A"]);
+  });
+
   it("does not drop a table for a layer that is merely renamed", () => {
     useLayerStore.setState({ layers: [layer({ id: "A" })] });
     useLayerStore.getState().updateLayer("A", { name: "renamed" });
@@ -152,7 +217,7 @@ describe("removals", () => {
 describe("streaming layers", () => {
   it("enqueues a table when a streaming layer appears (static ones are already enqueued by addCityLayer)", () => {
     useLayerStore.setState({
-      layers: [layer({ id: "S", isStreaming: true }), layer({ id: "A" })],
+      layers: [layer({ id: "S", source: STREAMED_SOURCE }), layer({ id: "A" })],
     });
     expect(enqueued).toEqual(["S"]);
   });
@@ -164,10 +229,10 @@ describe("streaming layers", () => {
     // own rows.
     useLayerStore.setState({
       layers: [
-        layer({ id: "L1", isStreaming: true }),
+        layer({ id: "L1", source: STREAMED_SOURCE }),
         layer({
           id: "L2",
-          isStreaming: true,
+          source: STREAMED_SOURCE,
           derivedFrom: { layerId: "L1", layerName: "Delft", runId: "run_1" },
         }),
       ],
@@ -181,7 +246,9 @@ describe("streaming layers", () => {
   });
 
   it("ignores a commit while the table panel is closed", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     enqueued.length = 0;
     useStreamStore.setState({ streams: { S: { version: 1 } as never } });
     vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
@@ -189,7 +256,9 @@ describe("streaming layers", () => {
   });
 
   it("rebuilds on a commit while the panel is open, debounced", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useLayerTableStore.getState().setTablePanelOpen(true);
     enqueued.length = 0;
 
@@ -203,7 +272,9 @@ describe("streaming layers", () => {
   });
 
   it("clears the map filter through the sync BEFORE a debounced rebuild", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useLayerTableStore.getState().setTablePanelOpen(true);
     clearMapFilter.mockReset();
 
@@ -217,7 +288,9 @@ describe("streaming layers", () => {
   });
 
   it("refreshStreamingTable rebuilds at once, with no panel and no debounce", async () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     enqueued.length = 0;
     await refreshStreamingTable("S");
     expect(enqueued).toEqual(["S"]);
@@ -226,8 +299,8 @@ describe("streaming layers", () => {
   it("rebuilds every streaming layer when the panel OPENS — their versions moved while it was shut", () => {
     useLayerStore.setState({
       layers: [
-        layer({ id: "S1", isStreaming: true }),
-        layer({ id: "S2", isStreaming: true }),
+        layer({ id: "S1", source: STREAMED_SOURCE }),
+        layer({ id: "S2", source: STREAMED_SOURCE }),
         layer({ id: "A" }),
       ],
     });
@@ -252,8 +325,8 @@ describe("streaming layers", () => {
   it("keeps a separate debounce timer per streaming layer", () => {
     useLayerStore.setState({
       layers: [
-        layer({ id: "S1", isStreaming: true }),
-        layer({ id: "S2", isStreaming: true }),
+        layer({ id: "S1", source: STREAMED_SOURCE }),
+        layer({ id: "S2", source: STREAMED_SOURCE }),
       ],
     });
     useLayerTableStore.getState().setTablePanelOpen(true);
@@ -277,7 +350,9 @@ describe("streaming layers", () => {
   });
 
   it("abandons a debounced rebuild if the panel is CLOSED before it fires", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useLayerTableStore.getState().setTablePanelOpen(true);
     enqueued.length = 0;
 
@@ -289,7 +364,9 @@ describe("streaming layers", () => {
   });
 
   it("does not build twice when the panel reopens over an armed timer", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     const panel = useLayerTableStore.getState();
     panel.setTablePanelOpen(true);
     enqueued.length = 0;
@@ -305,13 +382,196 @@ describe("streaming layers", () => {
   });
 
   it("cancels a pending rebuild on uninstall", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useLayerTableStore.getState().setTablePanelOpen(true);
     enqueued.length = 0;
     useStreamStore.setState({ streams: { S: { version: 1 } as never } });
     uninstall();
     vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
     expect(enqueued).toEqual([]);
+  });
+});
+
+describe("a FILE-BACKED table is never rebuilt from residents", () => {
+  /** A ready family view for `layerId`, adopted exactly as `familyViews` does. */
+  function adoptFamilyView(layerId: string): void {
+    adoptLayerTable(layerId, {
+      table: "layer_9",
+      sourceName: "family_1.parquet",
+      source: null,
+      reader: null,
+      extension: null,
+      sourceBytes: null,
+      columns: [],
+      lods: [],
+      sourceFeatureIds: null,
+      rowCount: 884106,
+      fileBacked: true,
+      familyKey: "building",
+      sourceCrs: "EPSG:6697",
+    });
+  }
+
+  it("ignores a commit, however many land", () => {
+    // The view reads the FILE: it already answers for every object in the
+    // family, resident or not. A rebuild from the resident set would replace
+    // whole-file answers with "whatever the camera has delivered", several
+    // times a pan.
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    adoptFamilyView("S");
+    enqueued.length = 0;
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("disarms a timer that was already pending when the view landed", () => {
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    enqueued.length = 0;
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    // The commit armed a rebuild; the family's view lands inside the debounce
+    // window, and the timer must not fire over it.
+    adoptFamilyView("S");
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("is left alone by the consumer sweep", () => {
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    adoptFamilyView("S");
+    enqueued.length = 0;
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).toEqual([]);
+    // And the sweep did not clear its drawn set on the way past either.
+    expect(clearMapFilter).not.toHaveBeenCalled();
+  });
+
+  it("makes `refreshStreamingTable` a no-op that reports success", async () => {
+    // The Export dialog's forced rebuild. It cannot be a failure — the view is
+    // as fresh as the file it reads — and it must not enqueue, or Export would
+    // write the resident set over a whole-file table.
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    adoptFamilyView("S");
+    enqueued.length = 0;
+    await expect(refreshStreamingTable("S")).resolves.toEqual({ ok: true });
+    expect(enqueued).toEqual([]);
+  });
+
+  it("still rebuilds a streaming layer whose table is NOT file-backed", async () => {
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    enqueued.length = 0;
+    await refreshStreamingTable("S");
+    expect(enqueued).toEqual(["S"]);
+  });
+});
+
+/**
+ * Ruling S3: a layer with object FAMILIES never gets a bare resident table at
+ * all.
+ *
+ * The inconsistency this closes: the lifecycle used to build one the moment the
+ * row landed, and the file-backed guards above then FROZE it — leaving a stale
+ * (usually empty) snapshot under the bare key for any reader that looked it up
+ * by layer id. Families are published before the row, so the bare build never
+ * happens and there is nothing stale to read.
+ */
+describe("a layer with object families gets no bare resident table", () => {
+  function withFamilies(layerId: string): void {
+    useFamilyStore.getState().setFamilies(layerId, [
+      {
+        key: "building",
+        rawKey: "building",
+        label: "Building",
+        href: "building.parquet",
+        source: { url: "https://x.test/building.parquet" },
+        size: null,
+        rowCount: null,
+      },
+    ]);
+  }
+
+  it("is not enqueued when its row lands", () => {
+    withFamilies("S");
+    enqueued.length = 0;
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    expect(enqueued).toEqual([]);
+  });
+
+  it("is not enqueued by a commit or by the consumer sweep either", () => {
+    withFamilies("S");
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    enqueued.length = 0;
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("forgets its families when the layer is removed", () => {
+    withFamilies("S");
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    useLayerStore.setState({ layers: [] });
+    expect(useFamilyStore.getState().layers.S).toBeUndefined();
+    expect(droppedFamilies).toContain("S");
+  });
+
+  it("still enqueues a streaming layer with NO families", () => {
+    enqueued.length = 0;
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    expect(enqueued).toEqual(["S"]);
+  });
+
+  it("keeps `refreshStreamingTable` off it even before a view lands", async () => {
+    // The Export dialog's forced rebuild is the one door left that could build
+    // the bare table ruling S3 forbids — `hasFileBackedTable` is still false in
+    // the window between the row landing and the first view.
+    withFamilies("S");
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    enqueued.length = 0;
+    await expect(refreshStreamingTable("S")).resolves.toEqual({ ok: true });
+    expect(enqueued).toEqual([]);
+  });
+
+  it("re-ensures every family layer's ACTIVE view after an engine retry", async () => {
+    withFamilies("S");
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
+    // Let the layer's FIRST ensure settle: a family still `creating` is left
+    // alone, which is the one state that is genuinely not worth re-asking.
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    ensured.length = 0;
+    // The engine died and came back: the registry was cleared, and a family's
+    // view is not a parked source `retryEngine` can replay on its own.
+    expect(engineRetryHooks).toHaveLength(1);
+    for (const hook of engineRetryHooks) hook();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(ensured).toEqual(["S::building"]);
   });
 });
 
@@ -352,7 +612,9 @@ describe("the processing toolbox as a table consumer", () => {
     // table. Opening Tools with the table panel shut used to leave a streaming
     // layer's table at whatever was resident the last time anyone looked —
     // "All 0 buildings" with Run disabled, on a layer with 1,115 residents.
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useProcessingStore.getState().setOpen(true);
     enqueued.length = 0;
 
@@ -362,7 +624,9 @@ describe("the processing toolbox as a table consumer", () => {
   });
 
   it("rebuilds AGAIN on a later commit, so a result is never read against newer geometry", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useProcessingStore.getState().setOpen(true);
     enqueued.length = 0;
 
@@ -379,8 +643,8 @@ describe("the processing toolbox as a table consumer", () => {
   it("rebuilds every streaming layer when the TOOLBOX opens, as the table panel does", () => {
     useLayerStore.setState({
       layers: [
-        layer({ id: "S1", isStreaming: true }),
-        layer({ id: "S2", isStreaming: true }),
+        layer({ id: "S1", source: STREAMED_SOURCE }),
+        layer({ id: "S2", source: STREAMED_SOURCE }),
         layer({ id: "A" }),
       ],
     });
@@ -401,7 +665,9 @@ describe("the processing toolbox as a table consumer", () => {
     // A run submitted from the toolbox and still queued when the user shut the
     // panel is the one reader left, and it re-reads the table at the head of
     // the queue.
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useProcessingStore.getState().upsertRun(run({ status: "queued" }));
     enqueued.length = 0;
 
@@ -413,7 +679,9 @@ describe("the processing toolbox as a table consumer", () => {
   it("ignores a commit for a run that is already DONE", () => {
     // A finished card is not a reader: it describes a table that already
     // exists, and rebuilding for it would only retire it as stale.
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useProcessingStore.getState().upsertRun(run({ status: "done" }));
     enqueued.length = 0;
 
@@ -425,8 +693,8 @@ describe("the processing toolbox as a table consumer", () => {
   it("ignores a commit for a run in flight over ANOTHER layer", () => {
     useLayerStore.setState({
       layers: [
-        layer({ id: "S", isStreaming: true }),
-        layer({ id: "S2", isStreaming: true }),
+        layer({ id: "S", source: STREAMED_SOURCE }),
+        layer({ id: "S2", source: STREAMED_SOURCE }),
       ],
     });
     useProcessingStore
@@ -440,7 +708,9 @@ describe("the processing toolbox as a table consumer", () => {
   });
 
   it("abandons a debounced rebuild if the toolbox is CLOSED before it fires", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useProcessingStore.getState().setOpen(true);
     enqueued.length = 0;
 
@@ -451,7 +721,9 @@ describe("the processing toolbox as a table consumer", () => {
   });
 
   it("does not build twice when the toolbox reopens over an armed timer", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     const processing = useProcessingStore.getState();
     processing.setOpen(true);
     enqueued.length = 0;
@@ -465,7 +737,9 @@ describe("the processing toolbox as a table consumer", () => {
   });
 
   it("stops sweeping on uninstall", () => {
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     // A version the sweep WOULD act on, so this cannot pass for the version's
     // sake rather than the uninstall's.
     useStreamStore.setState({ streams: { S: { version: 1 } as never } });
@@ -484,7 +758,7 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
     // FINISHED card as "stale: layer reloaded" though nothing about the data
     // moved.
     useLayerStore.setState({
-      layers: [layer({ id: "L1", isStreaming: true })],
+      layers: [layer({ id: "L1", source: STREAMED_SOURCE })],
     });
     useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
     vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS);
@@ -502,7 +776,7 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
 
   it("skips it again once that build has SETTLED", async () => {
     useLayerStore.setState({
-      layers: [layer({ id: "L1", isStreaming: true })],
+      layers: [layer({ id: "L1", source: STREAMED_SOURCE })],
     });
     useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
     useLayerTableStore.setState({ tablePanelOpen: true });
@@ -517,7 +791,7 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
 
   it("DOES rebuild when the version moved while nothing was looking", () => {
     useLayerStore.setState({
-      layers: [layer({ id: "L1", isStreaming: true })],
+      layers: [layer({ id: "L1", source: STREAMED_SOURCE })],
     });
     useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
     useLayerTableStore.setState({ tablePanelOpen: true });
@@ -535,7 +809,7 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
     // every later consumer skipping the retry it needs.
     buildOutcome = { ok: false, message: "Database was closed" };
     useLayerStore.setState({
-      layers: [layer({ id: "L1", isStreaming: true })],
+      layers: [layer({ id: "L1", source: STREAMED_SOURCE })],
     });
     useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
     useLayerTableStore.setState({ tablePanelOpen: true });
@@ -563,7 +837,7 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
     // clears, and a version left over from the REMOVED layer would then make
     // every later consumer skip the retry for the rest of the session.
     useLayerStore.setState({
-      layers: [layer({ id: "L1", isStreaming: true })],
+      layers: [layer({ id: "L1", source: STREAMED_SOURCE })],
     });
     useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
     useLayerTableStore.setState({ tablePanelOpen: true });
@@ -574,7 +848,7 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
     buildOutcome = { ok: false, message: "Database was closed" };
     enqueued.length = 0;
     useLayerStore.setState({
-      layers: [layer({ id: "L1", isStreaming: true })],
+      layers: [layer({ id: "L1", source: STREAMED_SOURCE })],
     });
     await vi.advanceTimersByTimeAsync(0);
     useProcessingStore.getState().setOpen(true);
@@ -586,7 +860,9 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
     // The export's door is an explicit "rebuild now whatever the version", and
     // recording its version would let the next sweep skip a rebuild the
     // export's own table change needs.
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     useStreamStore.setState({ streams: { S: { version: 3 } as never } });
     await refreshStreamingTable("S");
     enqueued.length = 0;
@@ -626,7 +902,9 @@ describe("residentTableSource", () => {
     // and over, and each build must see the cells resident THEN — not the ones
     // that happened to be loaded when the source object was made.
     let objects: Record<string, unknown> = {};
-    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerStore.setState({
+      layers: [layer({ id: "S", source: STREAMED_SOURCE })],
+    });
     stubStream(() => objects);
 
     const source = residentTableSource("S");

@@ -1,4 +1,9 @@
 import {
+  isSupportedCityModelEncoding,
+  type CityModelEncoding,
+} from "@cityjson/navara-core";
+import { normalizeSelectedLods } from "../features/layers/selectedLods";
+import {
   normalizeTablePresentation,
   type TablePresentation,
 } from "../features/query/tablePresentation";
@@ -17,9 +22,17 @@ import {
 
 import type { Rule } from "../features/rules/types";
 import { normalizeSolarTimeZone } from "../features/solar/solarTimeZone";
-import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
+import {
+  normalizeColorBy,
+  type ColorBy,
+  type LayerStyleExpression,
+} from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
-import type { GeographicCamera } from "./types";
+import {
+  normalizeFamiliesSnapshot,
+  type GeographicCamera,
+  type LayerFamiliesSnapshot,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +41,12 @@ import type { GeographicCamera } from "./types";
 export interface ShareableLayerState {
   readonly name: string;
   readonly modelUrl: string;
+  /**
+   * The format the layer was opened as (`UrlModelRef.encoding`). OPTIONAL on
+   * the terms `colorBy` sets below, so the hash schema stays v3; dropped by
+   * {@link readShareHash} when it names no format this build knows.
+   */
+  readonly encoding?: CityModelEncoding;
   /** The USER's rules. A shared link never carries the synthetic catch-alls
    *  the modes below are drawn with: they are derived on the other side, from
    *  the three fields under them. */
@@ -51,9 +70,24 @@ export interface ShareableLayerState {
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
+  /** On the same terms as the three above; {@link readShareHash} fills it in
+   *  as null when absent. */
+  readonly styleExpression?: LayerStyleExpression | null;
   readonly visible: boolean;
+  readonly selectedLods?: readonly string[];
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
+  /**
+   * The object families this layer had open, and the one its table showed
+   * (ruling S4).
+   *
+   * OPTIONAL, on the same terms as `colorBy` above, so the hash schema stays
+   * v3: a link minted before it carries none, and absent means the R-D default —
+   * which is what such a link opened. Validated by {@link readShareHash}, and
+   * validated AGAIN against the package's real families on the other side, since
+   * a shared source can be repackaged.
+   */
+  readonly families?: LayerFamiliesSnapshot;
 }
 
 /**
@@ -235,10 +269,17 @@ export function readShareHash(hash: string): ShareHashResult {
           ? {
               ...l,
               ...normalizeColorBy(l),
+              selectedLods: normalizeSelectedLods(l.selectedLods),
               attributeOrders: normalizeAttributeOrders(l.attributeOrders),
               tablePresentation: normalizeTablePresentation(
                 l.tablePresentation,
               ),
+              families: normalizeFamiliesSnapshot(l.families),
+              encoding:
+                typeof l.encoding === "string" &&
+                isSupportedCityModelEncoding(l.encoding)
+                  ? l.encoding
+                  : undefined,
             }
           : l,
       )

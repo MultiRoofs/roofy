@@ -301,3 +301,68 @@ describe("the share hash", () => {
     });
   });
 });
+
+describe("Color by expression, in both documents", () => {
+  const RED = ["case", true, "#ff0000", ["get", "$base"]];
+  const fields = {
+    colorBy: "expression",
+    singleColor: "#0a0b0c",
+    unmatchedColor: "#010203",
+    styleExpression: RED,
+  } as const;
+
+  it("writes the expression only when there is one, whatever the mode", () => {
+    expect(captureColorBy(fields)).toMatchObject({
+      colorBy: "expression",
+      rulesEnabled: false,
+      styleExpression: RED,
+    });
+    expect(
+      captureColorBy({ ...fields, colorBy: "rules" }).styleExpression,
+    ).toEqual(RED);
+    expect(
+      "styleExpression" in captureColorBy({ ...fields, styleExpression: null }),
+    ).toBe(false);
+  });
+
+  it("round-trips through a saved snapshot", () => {
+    const back = normalizeLayers({
+      version: 4,
+      layers: [
+        { name: "L", modelRef: {}, rules: [RULE], ...captureColorBy(fields) },
+      ],
+    })[0]!;
+    expect(back).toMatchObject({ colorBy: "expression", styleExpression: RED });
+  });
+
+  it("round-trips through a share link", () => {
+    const state: ShareableViewState = {
+      v: 3,
+      layers: [
+        {
+          name: "L",
+          modelUrl: "https://x/a.city.json",
+          rules: [RULE],
+          visible: true,
+          ...captureColorBy(fields),
+        },
+      ] as unknown as ShareableViewState["layers"],
+      cam: CAMERA,
+      dt: "2026-09-07T12:00:00.000Z",
+      pm: "object",
+    };
+    const result = readShareHash("#" + encodeShareState(state));
+    expect(result.kind === "ok" && result.state.layers[0]!).toMatchObject({
+      colorBy: "expression",
+      styleExpression: RED,
+    });
+  });
+
+  it("restores a document that names the mode but lost the expression on its rules", () => {
+    const back = normalizeLayers(
+      doc({ rules: [RULE], colorBy: "expression" }),
+    )[0]!;
+    expect(back.colorBy).toBe("rules");
+    expect(back.styleExpression).toBeNull();
+  });
+});

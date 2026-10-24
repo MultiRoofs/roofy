@@ -12,6 +12,7 @@
 import { useMemo, useState } from "react";
 import { useSelectionStore } from "../../features/selection/selectionStore";
 import { useQueryStore } from "../../features/query/queryStore";
+import { getActiveTableKey } from "../../features/layers/familyStore";
 import { useShellStore } from "../shell/shellStore";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
@@ -54,7 +55,8 @@ export function DetailsPanel({ onClose }: { readonly onClose: () => void }) {
     return (layerId: string, id: string): CityObject | null => {
       const layer = layers.find((l) => l.id === layerId);
       if (layer === undefined) return null;
-      if (!layer.isStreaming) return layer.model.objects[id] ?? null;
+      if (layer.source.access !== "stream")
+        return layer.model.objects[id] ?? null;
       const record = getResidentModel(layerId, streamVersion ?? 0)?.objects[id];
       if (record === undefined) return null;
       return {
@@ -221,7 +223,7 @@ function partsForMulti(
   const layer = layers.find((candidate) => candidate.id === subject.layerId);
   // Streaming resident records deliberately have no rings. Their area belongs
   // to the resident-metrics path, never to a fake CityObject conversion here.
-  if (!layer || layer.isStreaming) return {};
+  if (!layer || layer.source.access === "stream") return {};
   const descendants = (root: CityObject) => {
     const found: CityObject[] = [];
     const seen = new Set([root.id]);
@@ -249,7 +251,7 @@ function roofAreasForMulti(
   streamVersion: number | undefined,
 ): Readonly<Record<string, number | null>> | undefined {
   const layer = layers.find((candidate) => candidate.id === subject.layerId);
-  if (!layer?.isStreaming) return undefined;
+  if (layer?.source.access !== "stream") return undefined;
   const records = getResidentModel(layer.id, streamVersion ?? 0).objects;
   const areas: Record<string, number | null> = {};
   for (const root of subject.objects) {
@@ -278,7 +280,11 @@ function roofAreasForMulti(
 
 function openRawObject(layerId: string, objectId: string): void {
   // The drawer query is session state: opening Raw never mutates a saved layer.
-  useQueryStore.getState().navigateRawObject(layerId, objectId);
+  // Through the ACTIVE family's key (R-C′), because that is the table the grid
+  // is about to page.
+  useQueryStore
+    .getState()
+    .navigateRawObject(getActiveTableKey(layerId), objectId);
   useShellStore.getState().openDrawer();
   useSelectionStore.getState().select({ kind: "object", layerId, objectId });
 }

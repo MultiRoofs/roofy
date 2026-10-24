@@ -2,9 +2,10 @@
  * The fetch-bbox readout overlay: shows the numbers behind the ground outline,
  * and shows nothing at all when the diagnostic is off.
  */
+import { STREAMED_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import { StreamQueryBoxOverlay } from "../../../../src/ui/viewport/StreamQueryBoxOverlay";
 import { useQueryRegionStore } from "../../../../src/features/streaming/queryRegionStore";
 import { useRenderDebugStore } from "../../../../src/features/debug/renderDebugStore";
@@ -19,6 +20,7 @@ function region(layerId: string, minX = 84000): QueryRegion {
     layerId,
     bbox: [minX, 445000, minX + 2500, 446500],
     epsg: 7415,
+    frame: null,
     span: 2500,
     heightM: 43.2,
     ring: [
@@ -59,7 +61,9 @@ describe("StreamQueryBoxOverlay", () => {
     // id (a UUID), and the plugin has no notion of a display name.
     useRenderDebugStore.getState().setStreamQueryBoxEnabled(true);
     useLayerStore.setState({
-      layers: [{ id: "uuid-1", name: "delft.fcb", isStreaming: true } as Layer],
+      layers: [
+        { id: "uuid-1", name: "delft.fcb", source: STREAMED_SOURCE } as Layer,
+      ],
     });
     useQueryRegionStore.getState().setRegion(region("uuid-1"));
     render(<StreamQueryBoxOverlay />);

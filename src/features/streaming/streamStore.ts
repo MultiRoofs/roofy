@@ -2,7 +2,7 @@
  * Zustand store for per-layer viewport-streaming state, keyed by layer id.
  *
  * The streaming state machine itself is NOT here: it lives in
- * `@cityjson/navara-flatcitybuf`'s `FcbStreamLayerHandle`, which owns the
+ * `@cityjson/navara-flatcitybuf`'s `StreamLayerHandle`, which owns the
  * worker, the resident cell cache, the LoD ladder and the commit counter, and
  * only *reports* what it did through
  * `onStatus`/`onLadder`/`onTypes`/`onCommit`. This
@@ -27,11 +27,11 @@
 import type { AppearanceTheme } from "@cityjson/navara-core";
 import { create } from "zustand";
 import type {
-  FcbHeaderModel,
-  FcbStreamLayerHandle,
+  StreamHeader,
+  StreamLayerHandle,
   Grid,
   StreamStatus,
-} from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
 
 /** Re-export shim — the streaming status vocabulary moved to
  *  `@cityjson/navara-flatcitybuf` with the handle that emits it. */
@@ -42,7 +42,7 @@ export interface StreamState {
    *  cache and the commit loop. Held by REFERENCE and never replaced by any
    *  action below — a version bump mirrors a commit, it does not re-create
    *  the thing that committed. */
-  readonly handle: FcbStreamLayerHandle;
+  readonly handle: StreamLayerHandle;
   /**
    * The unsubscribes for the four handle events this store mirrors
    * (`onStatus`/`onLadder`/`onTypes`/`onCommit`), to be run by
@@ -59,7 +59,7 @@ export interface StreamState {
    *  reaching into the handle on every render. Immutable for the layer's
    *  lifetime, which is why mirroring it needs no updater. */
   readonly grid: Grid;
-  readonly header: FcbHeaderModel;
+  readonly header: StreamHeader;
   /** The tile level the last commit settled on, mirrored from `handle.level`
    *  by {@link StreamStoreActions.setLevel}. `null` until the first commit —
    *  `LodSelector`'s auto read-out shows a bare "Auto" until then. */
@@ -84,6 +84,19 @@ export interface StreamState {
    *  model) select this field, not `streams` as a whole and not
    *  `useLayerStore.layers`. */
   readonly version: number;
+  /**
+   * How many times this layer's HANDLE has been replaced (ruling R-E′).
+   *
+   * `0` is a first open; anything higher is a handle a family toggle's reopen
+   * produced. The viewport's reconciler reads both halves of that: the NUMBER
+   * changing is its reason to re-run when the layer id has not moved, and
+   * `> 0` is what keeps the sole-layer camera fit off — a reopen must leave the
+   * camera exactly where the user put it.
+   *
+   * Optional, reading as `0`, so the three dozen fixtures that build a
+   * `StreamState` by hand keep compiling; `openStreamingLayer` always states it.
+   */
+  readonly generation?: number;
 }
 
 export interface StreamStoreState {

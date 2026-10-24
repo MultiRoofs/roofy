@@ -7,6 +7,7 @@
  * The engine is never imported: `NavaraViewport` is mocked (jsdom has no
  * WebGL, and `@navaramap/three` crashes at module scope under Node).
  */
+import { RESIDENT_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -114,7 +115,7 @@ function renderViewer() {
     modelRef: { type: "url", url: "https://example.test/delft.city.json" },
     visible: true,
     rules: [],
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   });
   const { container } = render(<App persistenceStore={emptyStore} />);
   return () => container.querySelector(".viewer-shell") as HTMLElement;

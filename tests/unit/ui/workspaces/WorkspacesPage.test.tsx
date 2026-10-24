@@ -7,15 +7,14 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { WorkspacesPage } from "../../../../src/ui/workspaces/WorkspacesPage";
-import { LocalStorageProjectStateStore } from "../../../../src/persistence/localStorage";
+import { MemoryBackend } from "../../../../src/persistence/storage/memoryBackend";
+import { SnapshotRepository } from "../../../../src/persistence/storage/snapshotRepository";
 afterEach(() => {
   cleanup();
-  localStorage.clear();
   vi.restoreAllMocks();
 });
 it("creates, renames, duplicates, opens and deletes local workspaces", async () => {
-  localStorage.clear();
-  const store = new LocalStorageProjectStateStore();
+  const store = new SnapshotRepository(new MemoryBackend());
   const open = vi.fn();
   render(<WorkspacesPage store={store} onOpen={open} onBack={() => {}} />);
   fireEvent.change(screen.getByLabelText("Workspace name"), {

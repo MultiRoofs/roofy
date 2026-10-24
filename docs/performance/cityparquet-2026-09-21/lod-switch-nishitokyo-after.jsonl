@@ -1,0 +1,8 @@
+{"source":"nishitokyo-file","step":"construct [2,1,0]","ms":9661,"rebuilds":0,"triangles":1913792,"heapMB":685}
+{"source":"nishitokyo-file","step":"[2,1,0] -> [2]","ms":288.2,"rebuilds":1,"triangles":36968,"heapMB":751}
+{"source":"nishitokyo-file","step":"[2] -> [2,1,0]","ms":10807.7,"rebuilds":1,"triangles":1913792,"heapMB":717}
+{"source":"nishitokyo-file","step":"[2,1,0] -> [2,1]","ms":140.6,"rebuilds":0,"triangles":1913792,"heapMB":726}
+{"source":"nishitokyo-file","step":"[2,1] -> [1,2] (reordered)","ms":0.1,"rebuilds":0,"triangles":1913792,"heapMB":726}
+{"source":"nishitokyo-file","step":"[1,2] -> [2]","ms":433.4,"rebuilds":1,"triangles":36968,"heapMB":721}
+{"source":"nishitokyo-file","step":"[2] -> [2,1]","ms":10651.3,"rebuilds":1,"triangles":1913792,"heapMB":692}
+{"source":"nishitokyo-file","step":"forced rebuild under [2,1] (pre-fix cost)","ms":11199.4,"rebuilds":1,"triangles":1913792,"heapMB":718}

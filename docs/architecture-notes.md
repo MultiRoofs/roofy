@@ -14,13 +14,13 @@ New records go here, not in `CLAUDE.md`.
 - **The basemap catalogue is DATA, and stays engine-free.** `src/scene/basemaps.ts` is unit-tested under Node, where `@navaramap/three` cannot be imported at all, so an entry that needs an engine VALUE names it as a marker string and `NavaraViewport.addBasemap` — the engine-binding site — resolves it. The one such entry today is `elevation-heatmap`: a `raster-dem` source carrying `elevationDecoder: "terrarium"` (resolved to `TERRARIUM_ELEVATION_DECODER()`) plus an optional `layer` block (`elevationHeatmap`: min/max height, log ramp) that `addBasemap` merges into the `raster` layer descriptor. Its DEM is the same Re:Earth service the terrain mesh and the geoid already use, read as data rather than drawn as imagery. `addBasemap` also writes `view.globe.elevationColormap` (the one globe setter probed CLEAN on 0.0.5 — Known Issue (i)) with the RdYlBu ramp from Navara's own ElevationHeatmapMaterial docs, because the engine's default ramp is near-monochrome blue; the write lives at the basemap seam, never in theme code. Historical note: this option was hidden 2026-08-06 on a "fetches zero terrarium tiles" verdict that was a MEASUREMENT artifact — in-page probes (fetch patches, `performance` resource entries) read false zeros for tile fetches the CDP network log shows in the hundreds (the same probe read the draped Esri basemap as zero in the live app; which conditions hide a fetch from in-page observation was not pinned down — judge fetching at the network layer). Re-verified 2026-08-11 in the live app at the network layer and by pixels (A/B against "None" at the same camera; atmosphere haze over relief mimics a ramp well enough to have produced two wrong verdicts).
 - **Picking is our own raycast**: `PickStrategy = "own-raycast"` (`@cityjson/navara-cityjson/src/pickStrategy.ts`, `DEFAULT_PICK_STRATEGY`). Navara's `PickableMeshWrapper` carries one uniform batch id per mesh and cannot express per-surface ids, so the plugins raycast the engine's pick ray (`getPickRay`, ECEF) against their own geometry to resolve object **and** surface.
 - **Geospatial layers are the MIRROR IMAGE of city layers, on every axis.** They live in their own `geoLayerStore` (a geo layer has no `CityModel`, no LoD ladder, no rules, no surfaces), the ENGINE draws them, and the app owns no geometry for them — so each half of the app works the opposite way round from the city path. **Picking**: the engine's own click pick — the `featureClick` event (named `pick` before 0.1.0; `featureHover`/`featureEnter`/`featureLeave` also exist now but are deliberately NOT subscribed, since each costs a GPU pick per frame and re-bakes the draped atlases) — is the only way to hit one, and it carries a per-feature `batchId` — exactly the granularity the city path could never get out of it (see the raycast bullet above). `NavaraViewport` therefore subscribes `featureClick` but only ever STASHES the result: it carries no gesture (and on 0.0.5 fired for terrain and basemap tiles too; 0.1.1 renders only pickable meshes into its own pick scene, so a click on bare ground now arrives as a `featureClick` with a null result, handled the same way), so the following `click` decides, against the live geo registry, and **a city hit always wins** (our raycast is exact geometry at the exact pixel; the engine's pick is a colour read that also answers for a draped fill under the building). The ORDER is load-bearing and engine-guaranteed: `PickHelper` binds its `pointerup` listener before the view's own and its pick is synchronous, so `featureClick` always precedes the `click` of the same gesture. Since 0.1.1 the engine gates BOTH at the same travel tolerance (`CLICK_PIXEL_TOLERANCE` = 5 px, 30 for touch; the `click` event is a gesture now, never emitted after a camera drag), which `CLICK_DRAG_TOLERANCE_PX` mirrors — so the 0.0.5 asymmetry (zero-tolerance pick vs a 3 px gate, where a 1 px jitter cleared a geo selection while still selecting a city object) is gone, and `createClickGate` survives as defence in depth (a `pointercancel` cancels it). The whole engine event surface is POINTER events (`pointerdown`/`pointermove`/`pointerup`/`pointerleave`/`pointercancel`, touch included) and the engine `Object.assign`s `map` onto the very DOM `PointerEvent` it received, which is why the container's sky detector listens to `pointermove`, not `mousemove` — the compatibility mouse event is a different object and the identity test would read every move as "sky". Draped (`clampToGround`) fills paint OVER city meshes inside their footprint — the engine's stencil-volume drape composites against the globe, and the technique is unchanged between 0.0.5 and 0.1.1 — while the city raycast still wins the click there (browser-verified 2026-09-04). **Styling**: per layer, not per rule — colour, point size (PIXELS, `sizeInMeters: false`; Navara's `PointMaterial` defaults it to true, which turns a POI into a blot or a speck depending on altitude), line width and fill opacity, normalised through the one total door in `features/geoLayers/geoLayerStyle.ts` and converted to the engine's `0xRRGGBB` only at the description boundary. The style is theme-AGNOSTIC on purpose: a geo layer is drawn on the globe over imagery whose brightness has nothing to do with the chrome. It persists in the snapshot (v3) alongside `visible`/`opacity`. The CONTROLS, though, are NOT on the layer row: they live in the right InspectorPanel's geo view (`ui/inspector/GeoLayerInspector.tsx`), which follows `geoLayerStore.activeGeoLayerId`, and each is gated by KIND — opacity for `geojson` and `raster-xyz`, the four style fields for `geojson` alone, so a `3d-tiles` layer's panel is information ONLY (its appearance comes from the tiles' own materials — the descriptor still carries `opacity`, the UI just offers no handle on it; a raster sheet likewise has no colour of ours to set) — six controls in a 240 px row had to hide behind a disclosure and still trebled its height, and putting them where the city tabs already are gives both kinds of layer one mental model (click a row on the left, configure it on the right). **Highlight**: a selected feature is recoloured through the engine's `FeatureEvaluator` on that layer, one evaluator per feature set — and clearing means returning the layer's own colour EXPLICITLY, because an omitted key does not reset a previous override. **Reconciliation** (`geoLayerSync.ts`): `Layer.update()` REPLACES the whole description, so a visibility/opacity/style change re-sends a description rebuilt from scratch, never a patch; a `config` change is an honest rebuild of the source/layer pair; and the layer is always deleted before its source, which is reference-counted. An add the engine refuses is `console.error`'d and left absent so the next pass retries — one bad URL must not take the viewport down. **UI**: the Add Layer dialog opens on the **Geospatial** tab by default (`initialTab ?? "geo"`), the layer panel has a city section and a geospatial section each with its own add button, the Rules tab names and lets you pick its target CITY layer (rules never apply to geo layers), the legend groups its entries by layer, and the attribute overlay has a geo mode that shows the picked feature's GeoJSON `properties`. A geo row is CLICKABLE and slim — identity and actions only (visibility, rename, "Zoom to layer", remove) — and clicking it sets `activeGeoLayerId`, which is what swaps the inspector to `GeoLayerInspector`; the two sides are mutually exclusive, so a city row click or a city object pick hands the inspector back (`setActiveGeoLayer(null)`) and picking a geo feature in the viewport activates its layer. `activeGeoLayerId` is session state and is deliberately NOT persisted — a restored snapshot opens on the city tabs, not on whatever was last configured. "Zoom to layer" shows only for GeoJSON and 3D Tiles rows, because a raster-xyz template names no extent to fly to; the button resolves the layer's bounds (fetching the GeoJSON or `tileset.json` once, cached by URL) and calls `CitySceneHandle.fitBounds`. Browser-verified 2026-08-10 end to end (drape, pick, recolour, style edit, city-wins, save/restore) — but that smoke predates the row→inspector move, so it covers the DRAWING and PICKING paths, not the current UI: the inspector-hosted controls, the row click that activates a layer and the zoom button are unit-tested only and not yet browser-smoked.
-- **Engine-binding isolation**: `@navaramap/*` imports live **only** in named engine-binding modules — `navara-cityjson/src/{CityJSONPlugin,CityModelMeshDesc,CityMeshArraysDesc,plugin}.ts` and `navara-flatcitybuf/src/{FlatCityBufPlugin,engineRays,plugin}.ts`. Everything else takes descriptors, pick rays and mesh factories as injected seams. This is structural, not stylistic: `NODE_IMPORT_SAFE=false` — importing `@navaramap/three` under Node crashes at module scope. Plugin tests import the specific engine-free module, never the package barrel. The engine-bound entry points are the `/plugin` subpath exports, kept out of the main barrels.
+- **Engine-binding isolation**: `@navaramap/*` imports live **only** in named engine-binding modules — `navara-cityjson/src/{CityJSONPlugin,CityModelMeshDesc,CityMeshArraysDesc,plugin}.ts` and `navara-stream/src/{CityStreamPlugin,engineRays,plugin}.ts`. Everything else takes descriptors, pick rays and mesh factories as injected seams. This is structural, not stylistic: `NODE_IMPORT_SAFE=false` — importing `@navaramap/three` under Node crashes at module scope. Plugin tests import the specific engine-free module, never the package barrel. The engine-bound entry points are the `/plugin` subpath exports, kept out of the main barrels.
 - **One lighting calibration: the engine's forward-lit default, at exposure 10.** `NavaraViewport` states `view.lit = true` right after `addDefaultPhotorealScene()` (`applyForwardLighting`) and never writes the aerial-perspective pass, which stays at its `irradiance: false` default and only hazes what the lights produced. The scene's `SunLightDesc` (direction and colour from the atmosphere, cascaded shadow maps from `@navaramap/three-csm`) and `SkyLightProbeDesc` (the ambient term, sampled from the atmosphere) shade every LIT material in the forward pass: the terrain, the draped basemap, Google's tiles, and the city meshes. `DEFAULT_EXPOSURE` stays 10, the value the engine's own forward-lit samples sit at — browser-verified on the Delft sample at a fixed camera (2026-09-06): sun-facing walls light, the rest grey, roofs and ground carrying each other's shadows. The history matters because it was a hard rule until issue #13. From the Navara migration to 2026-09-06 the app ran the DEFERRED calibration — `view.lit = false` with the pass in `irradiance` mode re-lighting the G-buffer albedo from the atmosphere, city meshes as unlit `MeshBasicMaterial` — and it produced the flat, shadowless city the issue shows, for two reasons found in the engine source: (1) both city-mesh descriptors extended the plain `MeshDesc`, whose `getPassKey()` answers `"opaque"`, a forward scene the engine draws AFTER copying the G-buffer out, so the buildings' normals never reached the irradiance term at all (every wall was flat albedo whatever the sun did — the opaque scene is lit by the scene lights like every other, so this was a G-buffer problem, not a lighting one); and (2) the irradiance term reads the normal buffer only, and no built-in effect reads the shadow G-buffer the lit pipeline writes, so cast shadows are structurally unreachable in that calibration — the engine's own realistic-atmosphere guide says as much ("excludes cast shadows from the forward pass"). The descriptors now extend `MeshDescWithSelectiveEffect` (MRT scene whenever a G-buffer is allocated, which the aerial-perspective effect always requires), and the calibration moved to the one the engine's own mesh descriptors use. What the deferred mode still offers and this one does not: cloud shadows on the ground (`CloudsEffectDesc` composites its shadow term through the irradiance path; `cloudsEnabled` defaults to false). Consequences kept deliberately: the app adds **no** scene lights of its own (the old ambient fill and its slider are gone — the sky probe IS the ambient term, and a second lighting pass over lit materials at exposure 10 is exactly the 2026-08-04 overbright diagnosis); the default basemap is Esri World Imagery (OSM's near-white sheet reads as blown paper at this exposure); and a theme darkens with `sunIntensity`, `skyLightProbeIntensity` and `exposure` (`sceneThemePolicy`), never by writing the aerial-perspective pass — `apAlbedoScale` is gone with the mode it scaled. The cascaded shadow maps' tuning is the quality table in `src/scene/shadowQuality.ts` (one row per level — low/medium/high = 1024/2048/4096 maps with `shadowBias × map size` held constant at −0.001 × 2048, `shadowNormalBias: 0`, `shadowMargin: 500`; the level lives in `renderDebugStore.shadowQuality`, default medium), pushed with every `castShadow` write and re-written whole on a level change (the engine re-allocates the maps on a live `shadowMapSize` write, probed). It replaced a single `SUN_SHADOW_TUNING` of 2048 at −0.0005 after a low-sun screenshot showed every roof and wall striped with shadow acne: the bias's metre equivalent had been halved by the margin change and a ~12° sun exceeds it; doubling the bias per texel is the medium row, a finer map at the same bias-per-texel the high row. The bias is one value for all four cascades and is worth the cascade's depth range times 0.0005 in metres; the margin (the engine's 5 km is room for a mountain outside the frustum) sets that range, and 500 m brought the nearest cascade from 8.3 km to 3.8 km of depth — about two metres of bias at street level instead of four, no acne — while the far cascades stay at tens of kilometres, so at the layer-fit view (2.2 km up) buildings shadow the ground but not each other, and no bias fixes that (1e-4 and 2e-5 were swept: both just bring the roof acne back; a per-cascade bias would need the engine to expose one). Checked at street level and at the layer-fit view, a low sun over a far cascade untested. Why a depth bias at all: the engine defaults left every lit face in a checker of self-shadowing on this data, and a NORMAL bias (the textbook cure) made every mis-wound roof solid dark, because it pushes the lookup along the VERTEX normal — which real CityJSON points into the building on the faces `orientExteriorRing` gets wrong (see the double-sided bullet) — while a depth bias moves every fragment towards the sun regardless of winding. Draped GeoJSON fills, which used to paint over city meshes inside their footprint (the `draped` scene was drawn after the buildings), are now occluded by the buildings above them, since the MRT scene is drawn after `draped`. **The second #13 report (2026-09-06, "facades opposite the sun as bright as the sunlit ones") was headroom, not lighting.** Probed live over CDP: the compiled city program is a stock lit Lambert with the CSM define and the cascaded no-loop direct term, the flat per-triangle normals give N·L 0.74 on a roof, 0.67 on a west wall and 0 on an east wall at the sample's sun, and rendering with the sky probe zeroed gave black shade sides and white sun sides — so the direct term reaches every wall. What flattened the picture: the palette is display colours (wall #d9dcd4 = 0.85 linear), so at exposure 10 a sunlit wall rendered at the same value as the sunlit ground (≈220) and every roof clipped, and the six-fold difference between a west and a south wall came out as 185 vs 138. The fix is `PHOTOREAL_ALBEDO = 0.5` as a neutral `tintRGB` on the photoreal style — `material.color` multiplies the vertex colours before the lighting equation, so it is an albedo, hues survive — measured at the 200 m camera as west/south/east wall and roof red of 155/107/86/231 against a 226 ground (tint 1.0: 185/138/117/251, 0.7: 170/121/101/242, 0.4: 145/97/77/223). Lowering the exposure instead would drag the globe (calibrated by the engine for its imagery) down with the buildings. At the auto-fit default view (heading 0, pitch −60, 2.2 km, 12:00 UTC) the camera sees roofs and south walls, all sun-facing, and the shaded east walls are edge-on, so what that view gains is headroom and unclipped roofs, not new shading. The photoreal OUTLINE that the first #13 pass added (an unlit dark ink line, `edges` on the photoreal style) was removed on 2026-09-08 at the maintainer's call: with the faces lit it read as a wire over the photograph by day and glowed white over black buildings at night (unlit line at exposure 10). Only the stylised themes draw edges now; the edge-line normal fix in the plugin still matters for them.
 - **Attributes are INHERITED for display.** CityJSON splits a building in two: the `Building` carries the semantics and no geometry, the `BuildingPart` carries the geometry and no attributes (measured on the Delft sample: 66 Buildings all with attributes, 66 BuildingParts all without). Picking is geometric, so a click always lands on the part — reading attributes off the picked object alone showed "No attributes" for every building in the dataset. `src/domain/citymodel/inheritedAttributes.ts` fills the gaps from the nearest ancestor (own values win, cycle-safe) and names the source so the UI can say where a value came from. Presentation ONLY: the parsed model, rules, DuckDB and the table still read the real thing. Used by the attribute overlay and the inspector, on both the static and streaming paths — a FlatCityBuf `ResidentObjectRecord` splits the same way, hence the structural `AttributeCarrier` parameter.
-- **Streaming LoD is GLOBAL, camera-sync is PER-LAYER.** A streaming layer's LoD ladder is discovered from the cells the worker decodes (`onLadder`), so it is empty at load time and a per-layer dropdown would be empty exactly when first looked at — `StreamingLodControl` offers the union of discovered LoDs plus `Auto` and applies to every streaming layer; `LodSelector` now renders only for static layers. `Layer.cameraSync` is per-layer instead, because freezing one extract while panning another is the point of having it; it reaches `FcbStreamLayerHandle.setCameraSync` through `syncStreamState`'s memo.
+- **Streaming LoD is GLOBAL, camera-sync is PER-LAYER.** A streaming layer's LoD ladder is discovered from the cells the worker decodes (`onLadder`), so it is empty at load time and a per-layer dropdown would be empty exactly when first looked at — `StreamingLodControl` offers the union of discovered LoDs plus `Auto` and applies to every streaming layer; `LodSelector` now renders only for static layers. `Layer.cameraSync` is per-layer instead, because freezing one extract while panning another is the point of having it; it reaches `StreamLayerHandle.setCameraSync` through `syncStreamState`'s memo.
 - **City meshes render DOUBLE-SIDED, deliberately.** Front-face culling deletes real geometry from real CityJSON: the spec asks for outward-facing exterior shells but files vary, and `orientExteriorRing` (navara-core's `buildCityMeshArrays`) makes it worse on the shapes that matter — it decides orientation by whether a face's normal points away from the object's bbox CENTRE, which is right for a convex block and wrong for every concave one (an L-shape's inner walls, a courtyard, anything under an overhang legitimately face their own centroid, so the heuristic reverses them). Measured on the Delft sample at a fixed camera with the backdrop off: ~1.1% of the viewport was building pixels that only appear double-sided (3400 px, against 56 the other way). Both mesh classes in `navara-cityjson` must agree, or a building renders differently as a file than as a stream — which is why there is now ONE material factory, `createCityMaterial` (`MeshLambertMaterial`, vertex colours, `DoubleSide`), used by both classes and the textured-group builder; three flips a back face's normal in the fragment shader, so a mis-wound wall is still lit from the side the camera sees. Every material it makes goes through the `ShadowMaterialHooks` seam (register on create, unregister BEFORE dispose on every LoD swap, appearance switch and cell eviction — the registry also drops an entry on the material's own `dispose` event, so the explicit release is about rolling the shader patch back on a live material in a deterministic order, not about a leak), which the descriptors fill with `ViewContext.applyShadowMaterial`/`removeShadowMaterial` — a material the cascaded-shadow registry has never seen receives no shadow, whatever `receiveShadow` says. The theme's edge `LineSegments` child rides into the MRT scene with its parent and therefore carries a finite unit `normal` attribute: the line material compiles from the `basic` shader the engine patches to always write the normal G-buffer, and an absent attribute would write NaN there (Known Issue (e)'s mechanism). Photoreal now draws those edges too, so `buildCityEdgeSegments` (one O(triangles) Map pass plus a second position buffer per mesh) runs for every static layer and every streaming cell in the default theme — instant on the Delft sample's 109 k triangles, not measured on a large stream. Fixing the winding properly needs solid-orientation analysis (ray parity per shell), not a centroid guess — and even then a viewer of third-party data would not be safe to cull.
-- **Appearances (textures and materials) are parsed into the domain model and drawn per layer, never per rule.** `@cityjson/navara-core` reads CityJSON `appearance` (materials, textures, `vertices-texture`) through an `AppearanceMerger` that folds each unit's LOCAL tables — a static file has one, every CityJSONSeq/FlatCityBuf feature carries its own with local indices — into one deduplicated model-wide table (Rotterdam: ~10 k per-feature entries → 148 images) and rewrites indices as it goes; a `Surface` then carries `material[theme]` (index) and `texture[theme]` (index + one resolved UV per ring vertex, in lock-step with `rings`), and `CityModel.appearance` lists the themes some surface actually uses. Appearance is TOLERANT by rule: a malformed entry reads as untextured, never as a parse error. `buildCityMeshArrays` takes an `AppearanceTheme` (`{kind:"texture"|"material", name}`): a material theme swaps the semantic base colours for the material's diffuse colour (sRGB→linear; rules still override exactly as before), a texture theme writes surfaces SORTED by image into contiguous `textureGroups` and emits per-vertex `uvs`, reversing each UV ring by the same decision as its vertex ring (`orientExteriorRing`, hole rewinding). The mesh classes draw one city material (`createCityMaterial`, a lit Lambert) per group (three iterates `geometry.groups` for both drawing and raycasting, and the engine's MRT patch leaves `map` intact), load images through an injectable `TextureSource` (`texturedMaterials.ts`; Node tests inject a fake) and **white out a group's vertex colours only once its image is ready**, so highlights still tint a textured face and a missing image degrades to the plain look — the consequence, stated in the Rules tab, is that rule colours show only on untextured faces while a texture theme is active. Image paths resolve against the DATASET's url (`textureBaseUrl` = the layer's `modelRef` url; a local file has none, so its relative images stay unresolved with one warning), never against the app origin. The UI is one `AppearanceSelector` beside the LoD dropdown (`Layer.appearanceThemes` / `selectedAppearance`, default = the file's default texture theme, else its first texture theme, else a material theme; persisted in the v3 snapshot as `appearance`). Streaming mirrors the static path one seam over: the worker keeps one merger per open file (layer-wide indices), bakes the theme into each cell and ships the image definitions a cell uses plus the themes seen so far; `FcbStreamLayerHandle.setAppearance` is a forced SWAP commit (like a hidden-type change, because the theme is baked into vertex order), themes are learned like the LoD ladder (`streamStore.appearanceThemes`; a fresh open adopts the first texture theme when it appears), and one per-layer `TextureCache` (`layerTextures.ts`) is shared by every cell so an image two cells use loads once. UV origin: the spec is silent, three's default (`flipY`, bottom-left) is right — browser-verified on Rotterdam 2026-09-03 (facades upright) for both `.jsonl` and `.fcb`. Not drawn in v1: material transparency/specular/emissive (parsed, unused), per-ring texture indices (the exterior ring's wins), `borderColor`; an interior ring spelled `[null]` costs the whole surface its texture. **CityParquet** reads the `material_lod*`/`texture_lod*` JSON columns paired with each geometry column by suffix and the `textures.parquet`/`materials.parquet` sidecars by `id` (dataset-global, so one merger context serves every table of a package; UV pairs are inline, one per WKB ring vertex, a closing duplicate tolerated); every loader arm that can LIST a package (manifest, bucket prefix, bucket glob, picked folder) fetches the sidecars beside the object tables, a lone table has no siblings to look for and stays plain, and an unreadable sidecar is one warning, never a failed load. **CityGML** indexes every `app:Appearance` in the document once: textures by the ring `gml:id`s their `app:textureCoordinates` name (one UV per `posList` vertex, closing duplicate included — which is what `parseLinearRing` keeps too), materials by target id matched against the polygon and then its containers (composite surface, solid, boundary surface, building); `xlink:href` reuse of surface data and of `TexCoordList`s lands the same deduplicated image under the other theme, `app:TexCoordGen` and `GeoreferencedTexture` targets stay untextured, and a ZIP of several files merges the tables through core's `mergeModelAppearances` (its images live inside the archive and are therefore unresolvable — a documented gap). Browser-verified 2026-09-03: `.jsonl`, `.fcb` and a CityParquet package all draw Rotterdam's facades; the CityGML sample loads with its four themes and fetches its images (its 5 m house was too small to pixel-check on the software renderer).
-- **The brand is Roofy, and its tokens are owned by ONE file; the plugins take its colours as a parameter.** `src/app/brand.css` (the Claude Design kit, mirrored verbatim in `public/brand/brand.css` for docs and slides — change one, change both) is imported BEFORE `app.css` and owns surfaces, text, borders, the four brand hues, the `--layer-*` legend colours (nature lime, energy amber, water blue, social orange — the mark's own four colours), the three type stacks (`--font-display` Outfit, `--font-ui` IBM Plex Sans, `--font-mono` IBM Plex Mono, self-hosted via `@fontsource` imports in `main.tsx`; the variable Outfit registers as `"Outfit Variable"`, which is why the stack names it first) and the radius scale. `app.css` only DERIVES: `--accent` is `--brand-primary` (lime, darkening to lime-700 on the light sheet), `--accent-fill`/`--on-accent` are the filled button (lime-500 with dark ink in BOTH themes — lime text on white does not hold contrast, so `--accent-text` is lime-900 there), `--tertiary` the brand blue, `--danger` the brand orange, `--warn` the amber. The logo is `src/ui/RoofyLockup.tsx`, an inline SVG whose fills are the `--layer-*` tokens, so it follows the theme toggle with no JS. **The plugins do not know the brand.** `CityJSONPluginOptions.colors` and `FlatCityBufPluginOptions.colors` (a `CityColors` — highlight, hover and the semantic surface palette; per-plugin default, overridable per layer through `AddCityModelOptions.colors`/`OpenStreamOptions.colors`; omitted keeps the plugins' historical amber and red-roof defaults) are the seam, and `src/scene/cityColors.ts` is the app's one answer, handed to both constructors in `NavaraViewport`: selection lime-500, hover lime-300 (lime-100 washes to white under the exposure-10 atmosphere), roofs in the darker brand orange, windows in the brand blue, theme-agnostic like the geo styles. The option is named `colors`, not `appearance`, because `appearance` is the CityJSON theme (textures and materials) the data carries; the palette is what the plugin draws where the data colours nothing, so `buildCityMeshArrays` takes it as a seventh parameter beside the theme. `GEO_HIGHLIGHT_COLOR_HEX` and the inspector's surface dots derive from the same constant, so a picked feature, a picked surface and the legend agree. The values are chosen for NO COLLISION: no highlight, hover or base surface colour is byte-equal to a rule preset, the new-rule default or the default geo colour (a selected ruled surface must still look selected, and a base roof equal to a preset makes the preset a no-op) — which is why the "Large roofs" preset and the new-rule default sit on lime-700 while the selection owns lime-500. Storage keys (`roofy-theme`, `roofy:snapshot:*`) and the debug global (`__roofyRenderDebug`) were renamed with the brand on 2026-09-05, deliberately breaking; Urbis-era saves are simply not listed. The Cloudflare Worker is still named `multiroof-viewer` (`wrangler.jsonc`, the workflows): renaming it changes the deploy URLs and is a Cloudflare-side change, not a rename in this repo.
+- **Appearances (textures and materials) are parsed into the domain model and drawn per layer, never per rule.** `@cityjson/navara-core` reads CityJSON `appearance` (materials, textures, `vertices-texture`) through an `AppearanceMerger` that folds each unit's LOCAL tables — a static file has one, every CityJSONSeq/FlatCityBuf feature carries its own with local indices — into one deduplicated model-wide table (Rotterdam: ~10 k per-feature entries → 148 images) and rewrites indices as it goes; a `Surface` then carries `material[theme]` (index) and `texture[theme]` (index + one resolved UV per ring vertex, in lock-step with `rings`), and `CityModel.appearance` lists the themes some surface actually uses. Appearance is TOLERANT by rule: a malformed entry reads as untextured, never as a parse error. `buildCityMeshArrays` takes an `AppearanceTheme` (`{kind:"texture"|"material", name}`): a material theme swaps the semantic base colours for the material's diffuse colour (sRGB→linear; rules still override exactly as before), a texture theme writes surfaces SORTED by image into contiguous `textureGroups` and emits per-vertex `uvs`, reversing each UV ring by the same decision as its vertex ring (`orientExteriorRing`, hole rewinding). The mesh classes draw one city material (`createCityMaterial`, a lit Lambert) per group (three iterates `geometry.groups` for both drawing and raycasting, and the engine's MRT patch leaves `map` intact), load images through an injectable `TextureSource` (`texturedMaterials.ts`; Node tests inject a fake) and **white out a group's vertex colours only once its image is ready**, so highlights still tint a textured face and a missing image degrades to the plain look — the consequence, stated in the Rules tab, is that rule colours show only on untextured faces while a texture theme is active. Image paths resolve against the DATASET's url (`textureBaseUrl` = the layer's `modelRef` url; a local file has none, so its relative images stay unresolved with one warning), never against the app origin. The UI is one `AppearanceSelector` beside the LoD dropdown (`Layer.appearanceThemes` / `selectedAppearance`, default = the file's default texture theme, else its first texture theme, else a material theme; persisted in the v3 snapshot as `appearance`). Streaming mirrors the static path one seam over: the worker keeps one merger per open file (layer-wide indices), bakes the theme into each cell and ships the image definitions a cell uses plus the themes seen so far; `StreamLayerHandle.setAppearance` is a forced SWAP commit (like a LoD change, because the theme is baked into vertex order), themes are learned like the LoD ladder (`streamStore.appearanceThemes`; a fresh open adopts the first texture theme when it appears), and one per-layer `TextureCache` (`layerTextures.ts`) is shared by every cell so an image two cells use loads once. UV origin: the spec is silent, three's default (`flipY`, bottom-left) is right — browser-verified on Rotterdam 2026-09-03 (facades upright) for both `.jsonl` and `.fcb`. Not drawn in v1: material transparency/specular/emissive (parsed, unused), per-ring texture indices (the exterior ring's wins), `borderColor`; an interior ring spelled `[null]` costs the whole surface its texture. **CityParquet** reads the `material_lod*`/`texture_lod*` JSON columns paired with each geometry column by suffix and the `textures.parquet`/`materials.parquet` sidecars by `id` (dataset-global, so one merger context serves every table of a package; UV pairs are inline, one per WKB ring vertex, a closing duplicate tolerated); every loader arm that can LIST a package (manifest, bucket prefix, bucket glob, picked folder) fetches the sidecars beside the object tables, a lone table has no siblings to look for and stays plain, and an unreadable sidecar is one warning, never a failed load. **CityGML** indexes every `app:Appearance` in the document once: textures by the ring `gml:id`s their `app:textureCoordinates` name (one UV per `posList` vertex, closing duplicate included — which is what `parseLinearRing` keeps too), materials by target id matched against the polygon and then its containers (composite surface, solid, boundary surface, building); `xlink:href` reuse of surface data and of `TexCoordList`s lands the same deduplicated image under the other theme, `app:TexCoordGen` and `GeoreferencedTexture` targets stay untextured, and a ZIP of several files merges the tables through core's `mergeModelAppearances` (its images live inside the archive and are therefore unresolvable — a documented gap). Browser-verified 2026-09-03: `.jsonl`, `.fcb` and a CityParquet package all draw Rotterdam's facades; the CityGML sample loads with its four themes and fetches its images (its 5 m house was too small to pixel-check on the software renderer).
+- **The brand is Roofy, and its tokens are owned by ONE file; the plugins take its colours as a parameter.** `src/app/brand.css` (the Claude Design kit, mirrored verbatim in `public/brand/brand.css` for docs and slides — change one, change both) is imported BEFORE `app.css` and owns surfaces, text, borders, the four brand hues, the `--layer-*` legend colours (nature lime, energy amber, water blue, social orange — the mark's own four colours), the three type stacks (`--font-display` Outfit, `--font-ui` IBM Plex Sans, `--font-mono` IBM Plex Mono, self-hosted via `@fontsource` imports in `main.tsx`; the variable Outfit registers as `"Outfit Variable"`, which is why the stack names it first) and the radius scale. `app.css` only DERIVES: `--accent` is `--brand-primary` (lime, darkening to lime-700 on the light sheet), `--accent-fill`/`--on-accent` are the filled button (lime-500 with dark ink in BOTH themes — lime text on white does not hold contrast, so `--accent-text` is lime-900 there), `--tertiary` the brand blue, `--danger` the brand orange, `--warn` the amber. The logo is `src/ui/RoofyLockup.tsx`, an inline SVG whose fills are the `--layer-*` tokens, so it follows the theme toggle with no JS. **The plugins do not know the brand.** `CityJSONPluginOptions.colors` and `CityStreamPluginOptions.colors` (a `CityColors` — highlight, hover and the semantic surface palette; per-plugin default, overridable per layer through `AddCityModelOptions.colors`/`OpenStreamOptions.colors`; omitted keeps the plugins' historical amber and red-roof defaults) are the seam, and `src/scene/cityColors.ts` is the app's one answer, handed to both constructors in `NavaraViewport`: selection lime-500, hover lime-300 (lime-100 washes to white under the exposure-10 atmosphere), roofs in the darker brand orange, windows in the brand blue, theme-agnostic like the geo styles. The option is named `colors`, not `appearance`, because `appearance` is the CityJSON theme (textures and materials) the data carries; the palette is what the plugin draws where the data colours nothing, so `buildCityMeshArrays` takes it as a seventh parameter beside the theme. `GEO_HIGHLIGHT_COLOR_HEX` and the inspector's surface dots derive from the same constant, so a picked feature, a picked surface and the legend agree. The values are chosen for NO COLLISION: no highlight, hover or base surface colour is byte-equal to a rule preset, the new-rule default or the default geo colour (a selected ruled surface must still look selected, and a base roof equal to a preset makes the preset a no-op) — which is why the "Large roofs" preset and the new-rule default sit on lime-700 while the selection owns lime-500. Storage keys (`roofy-theme`, `roofy:snapshot:*`) and the debug global (`__roofyRenderDebug`) were renamed with the brand on 2026-09-05, deliberately breaking; Urbis-era saves are simply not listed. The Cloudflare Worker is still named `multiroof-viewer` (`wrangler.jsonc`, the workflows): renaming it changes the deploy URLs and is a Cloudflare-side change, not a rename in this repo.
 - **Per-layer rules**: unchanged. Static layers compile to a `SurfaceStyleEvaluator` (`handle.setStyle`); streaming layers send rules to the worker (`handle.setRules`), which bakes vertex colours per cell.
 - **"Color by" (12.3): one effective rule list, two consumers.** `colorBy` (`"surface" | "rules" | "single"`) is the ONE mode; the pre-12.3 `rulesEnabled` flag is gone from the in-memory `Layer` (still written/read in snapshots and share links, so old documents restore). `effectiveRules(layer)` — `features/rules/colorBy.ts`, memoised on rules-identity + the mode + the two colours — is the ONE array both renderers draw from: `"surface"` → `[]`, `"single"` → one zero-condition catch-all, `"rules"` → the enabled user rules then a trailing unmatched catch-all. Zero-condition rules evaluate true on the static path AND in the FCB worker (browser-probed before any of this was written), which is why no plugin change was needed. Synthetic rules exist only inside the effective list — `isSyntheticRule` tells a consumer apart, and a serialised one would be the same fact written twice; `effectiveRulesEnabled` (the boolean that goes with it) is always passed beside the array. `firstMatchingRule(attributes, metrics, rules)` reports a match by rule IDENTITY, never by colour.
 - **Geo "Color by attribute" (12.3) paints per feature through the SAME evaluator path as the highlight.** The engine's `featureClick` pick carries a `batchId` re-minted on every feature-set recreation (never cache one), and `FeatureEvaluator.evaluate`'s callback receives `info.properties` with distinct per-feature values for point/polyline/polygon sets (browser-probed). `applyFeatureColors` (`scene/geoLayerSync.ts`) is the ONE function that paints a feature: highlight when picked, else the category colour when the layer colours by an attribute, else the base colour — deselection restores the category, and feature-set recreation re-applies. Categories are the first 8 distinct values in first-seen order on `CATEGORY_PALETTE_HEX` plus a fixed OTHER bucket (`CATEGORY_OTHER_HEX`) for everything past the eighth. Stroke colour is DEFERRED: the engine's `PolygonMaterial.outlineShow/outlineColor/outlineWidth` renders nothing (probed, byte-identical frames) and does not survive a `Layer.update()` re-description, so the single `color` stays for fills and lines.
@@ -31,26 +31,30 @@ New records go here, not in `CLAUDE.md`.
 - **ONE active layer, ONE selection (Milestone 12).** `src/features/workspace/workspaceStore.ts` owns the single `activeLayerId` for city, streaming and geo layers alike; the layer and geo-layer stores carry no active id. Rule 1 is enforced in the store's own `setActiveLayerId` (a selection on another layer is cleared before the write), so no caller can bypass it; `activateLayer` in `layerCoordination.ts` is the documented entry point and never moves the camera. `installWorkspaceInvariants` (installed once by `App`) subscribes to the layer, geo-layer and selection stores: the first layer of an empty workspace becomes active, a removed active layer hands over to a surviving neighbour in unified order (city rows first, then geo), a selection whose owner is removed or hidden is cleared, and a selection activates its owner. Switching pick mode converts the selection (surface → owning object) instead of wiping it; Escape clears it unless a modal is open. Never write `useWorkspaceStore.setActiveLayerId` from a component that has not read the rule above — it is the same call either way, but the intent belongs in `activateLayer`.
 - **The camera fits ONCE, when the first content of a scene lands.** `NavaraViewport` mints its fit token only when the workspace goes from no layers to some (city + geo rows, `previousLayerCountRef`) and, for streams, only when both live registries are empty; adding a second layer of any kind never flies the camera (`Zoom to layer` is the explicit move). Since 12.2 both producers answer to workspace ROWS, not live registries: a stream fits iff, at registration, the layer store holds exactly its own row and the geo store is empty; the first-geo fit is an `App` effect on the unified order going 0 → 1 with a geo layer (skipped while `isAutoFitSuppressed()`), which awaits the scene gate — retrying once, because React StrictMode's mount/unmount pass rejects the first gate — re-checks the single-row predicate after every await, and calls `fitBounds` when `resolveGeoLayerBounds` returns bounds (a URL-backed GeoJSON costs one fetch of the document, shared with `Zoom to layer`). Restore sets `previousWorkspaceSizeRef` itself so a saved camera is never overwritten by the edge.
 - **The shell keeps one viewer canvas (Milestone 12).** `shellStore` owns session-only panel sizes, collapse state, the map-column drawer, and per-layer section requests. `ViewerShell` keeps the map mounted while panels resize/collapse and while the drawer expands; the expanded drawer mirrors the current viewport attribution in its own footer. After entering the viewer, removing the last layer or choosing New workspace retains the canvas and presents File / URL / Catalog actions. First-run landing remains available before entering the viewer, and load errors remain visible in the retained viewer. The header contains workspace actions and Preferences; scene controls live on the map. `ResizeHandle` supports pointer dragging and keyboard arrows, Page Up/Down, Home/End with bounded absolute sizes and ARIA values. Interface appearance remains system / light / dark under `roofy-theme-preference`.
-- **The STAC catalog browser reads a bucket, not an API.** `STAC_CATALOG_URL` is hardcoded to `https://storage.googleapis.com/city3d-stac/catalog.json` — a public static file with no per-deployment variation, and deliberately **no `VITE_` override**, because `.env` is dotenvx-encrypted and a build-time var here would inline ciphertext (the Maps-key footgun). The root is a link document carrying none of the metadata a card shows, so `stacClient` crawls one `collection.json` per `rel:"child"` at concurrency 6; a per-collection failure is logged and skipped, only an unreachable root is fatal. **Items never come from the catalog's own `rel:"item"` links — those 404** — and there is no `/search` endpoint: the only source is the collection's stac-geoparquet mirror (`items-geoparquet`, matched by media type or `collection-mirror` role, present on ~31 of the 53 collections; the rest are listed and marked "No items indexed"). That file is ≤ ~2.24 MB, so it is fetched WHOLE and handed to the app's existing DuckDB-wasm via `queryParquetBuffer` — no httpfs, no range reads — with the SELECT list built per file from a `DESCRIBE` probe, since the mirrors are independently generated and one missing column must not cost a whole collection. Loadability is decided by calling `detectEncoding` itself (`stacAssets`), never a parallel media-type table, so the Add button cannot drift out of agreement with what `addLayerFromUrl` will actually do; `.zip` CityGML archives are the one deliberate exception (loadable — see the ZIP bullet below), while `.7z`/`.tar` stay download-only. Entry points are the landing "Browse catalog" button and the Add Layer dialog's "Catalog" tab (which widens the modal via `.modal-wide`); `onAddUrl` is `(url) => Promise<AddUrlResult>` (`{ok:true} | {ok:false, message}`) all the way down the layer-add chain so the browser can report a failed add inline (`role="alert"`) — with the LOADER'S OWN SENTENCE per item, because "Unsupported CityJSON version 1.0" and "the host blocks browser access" demand different next moves and a canned "try again" serves neither — and stay open for the next one. The sentence is read synchronously via the loader hook's `lastError()` (a ref mirror of its error state), since the caller that just awaited the add cannot see the fresh state value from its closure.
-- **STAC-sourced `.city.json.gz` layers are reader-backed from the gunzipped bytes `loadFromUrl` returns.** Remote loading is gzip-aware — `HttpClient.fetchBytes` returns the same envelope as `fetchText` (so every friendly HTTP-error branch survives), `decodeModelBytes` gunzips on magic bytes rather than on the extension, and `detectEncoding` strips one trailing `.gz` — because 3D BAG, the largest CORS-clean collection, serves `.city.json.gz`. Such a layer is reader-backed like any other CityJSON URL, and there is nothing special-cased about it: `loadFromUrl` returns the GUNZIPPED bytes, and those are what `addCityLayer` hands DuckDB, so `read_cityjson` reads a plain CityJSON buffer and never sees a gzip stream (it cannot read one, by name or by magic — which is exactly why the decode happens before the bytes reach it). The per-layer table, the `SourceProvider` and the whole build are the ones described in the DuckDB bullet below; `loadModelIntoDuckDB`, `loadCityModelFromMemory` and `shouldUseSourceUrlPath` are all gone, along with the single shared table they served.
+- **The STAC catalog browser reads a bucket, not an API.** `STAC_CATALOG_URL` is hardcoded to `https://storage.googleapis.com/city3d-stac/catalog.json` — a public static file with no per-deployment variation, and deliberately **no `VITE_` override**, because `.env` is dotenvx-encrypted and a build-time var here would inline ciphertext (the Maps-key footgun). The root is a link document carrying none of the metadata a card shows, so `stacClient` crawls one `collection.json` per `rel:"child"` at concurrency 6; a per-collection failure is logged and skipped, only an unreachable root is fatal. **Items never come from the catalog's own `rel:"item"` links — those 404** — and there is no `/search` endpoint: the only source is the collection's stac-geoparquet mirror (`items-geoparquet`, matched by media type or `collection-mirror` role, present on ~31 of the 53 collections; the rest are listed and marked "No items indexed"). That file is ≤ ~2.24 MB, so it is fetched WHOLE and handed to the app's existing DuckDB-wasm via `queryParquetBuffer` — no httpfs, no range reads — with the SELECT list built per file from a `DESCRIBE` probe, since the mirrors are independently generated and one missing column must not cost a whole collection. Loadability is decided by asking the format registry itself (`formatFromName`, in `stacAssets`), never a parallel media-type table, so the Add button cannot drift out of agreement with what `openCityLayer` will actually do; `.zip` CityGML archives are loadable (see the ZIP bullet below), while `.7z`/`.tar` stay download-only. Entry points are the landing "Browse catalog" button and the Add Layer dialog's "Catalog" tab (which widens the modal via `.modal-wide`); `onAddUrl` is `(url) => Promise<AddUrlResult>` (`{ok:true} | {ok:false, message}`) all the way down the layer-add chain so the browser can report a failed add inline (`role="alert"`) — with the LOADER'S OWN SENTENCE per item, because "Unsupported CityJSON version 1.0" and "the host blocks browser access" demand different next moves and a canned "try again" serves neither — and stay open for the next one. The sentence is read synchronously via the loader hook's `lastError()` (a ref mirror of its error state), since the caller that just awaited the add cannot see the fresh state value from its closure.
+- **STAC-sourced `.city.json.gz` layers are reader-backed from the gunzipped bytes `loadFromUrl` returns.** Remote loading is gzip-aware — `HttpClient.fetchBytes` returns the same envelope as `fetchText` (so every friendly HTTP-error branch survives), `decodeModelBytes` gunzips on magic bytes rather than on the extension, and `formatFromName` strips one trailing `.gz` — because 3D BAG, the largest CORS-clean collection, serves `.city.json.gz`. Such a layer is reader-backed like any other CityJSON URL, and there is nothing special-cased about it: `loadFromUrl` returns the GUNZIPPED bytes, and those are what `addCityLayer` hands DuckDB, so `read_cityjson` reads a plain CityJSON buffer and never sees a gzip stream (it cannot read one, by name or by magic — which is exactly why the decode happens before the bytes reach it). The per-layer table, the `SourceProvider` and the whole build are the ones described in the DuckDB bullet below; `loadModelIntoDuckDB`, `loadCityModelFromMemory` and `shouldUseSourceUrlPath` are all gone, along with the single shared table they served.
 - **CityParquet is a STATIC whole-load layer, decoded by an engine-free parser in the plugin package.** Fetched bytes become the same normalised `CityModel` the CityJSON path produces (`parseCityParquetManifest` → `assembleCityParquetModel`), so rendering, LoD switching, rules, picking, persistence and the inspector's attribute inheritance all arrive for free through `CityJSONPlugin.addCityModel` — nothing about CityParquet reaches the engine. Decoding deliberately does **not** go through DuckDB: rendering must not depend on DuckDB init state (today an optional analytics component that can fail gracefully), and a DuckDB decoder would be untestable under Node. Analytics therefore take the **flat fallback** (`{ kind: "model" }` — rows built app-side from the parsed `CityModel` and loaded through `read_json_auto`), because `cityparquet_read` is unusable in the wasm build: the layer gets its own table like every other, just without a reader or a source behind it, so no CityParquet package can be exported back out. See the DuckDB bullet below. This is NOT the route a `.city.json.gz` layer takes — that one is reader-backed from gunzipped bytes. A large multi-file load decodes **sequentially on the UI thread** (fetching is pooled, decoding is not), which is the same character the static CityJSON path already has; a worker or a streaming CityParquet layer is future work, and `MAX_CITYPARQUET_FILES` is what keeps that pause bounded.
 - **hyparquet 1.28.1 is VENDORED into `navara-cityparquet/src/vendor/hyparquet/`, patched.** Upstream implements `DELTA_BYTE_ARRAY` only in the DataPage **V2** reader, and `cityparquet-rs` writes through arrow-rs, which emits **V1** pages with `DELTA_BYTE_ARRAY` string columns — so an unpatched reader throws on every real file. A package-manager patch would have to be declared and kept in sync across the repo's npm/pnpm split (app root vs submodule) and fails as a runtime decode error, not an install error; one vendored copy is the same bytes for every consumer. Two upstream quirks are worked around from the OUTSIDE, not by editing the vendor: a partial `parsers` option silently drops the parsers it does not name (so `tableReader.ts` spreads `DEFAULT_PARSERS` and passes a COMPLETE object), and that complete override is also what disables hyparquet's geoparquet auto-conversion, which would otherwise hand back the LoD0 footprint column as GeoJSON instead of WKB. `src/vendor/hyparquet/VENDORED.md` carries the exact diff, the un-vendor condition and the re-vendoring procedure — read it before touching that directory.
-- **What a CityParquet URL MEANS is decided by one pure function.** `src/features/cityparquet/sourceClassify.ts` maps a string to a source with no I/O, so the loader, the Add-Layer dialog's enable logic and the tests cannot disagree: a single `.parquet` table; an https **package directory** (a `metadata.json` STAC Item whose `cityparquet-objects` assets are the authoritative inventory); or, on `gs://`/`s3://` only, a glob or a prefix expanded by the bucket's ANONYMOUS listing API. Plain-https wildcards are **rejected with a sentence** rather than silently unsupported — the shape is recognisably CityParquet, the host just exposes no listing API — which is why the classifier throws and `isCityParquetUrl` is the total wrapper that still routes such a URL into the CityParquet arm so the user sees that message. Expansion is capped at **64 object tables** (`MAX_CITYPARQUET_FILES`) on **every** arm — glob, listing, a manifest's declared hrefs and a picked folder alike, because the cap is a whole-LOAD memory bound and a manifest is a list someone else wrote (3D BAG's root package declares up to a thousand); a full tiled dataset is a streaming problem, not a whole-load one, and the cap is reported, never silently applied. A `.parquet.gz` classifies as a **table** even though the format defines no gzipped spelling — precisely because it defines none: owning it here sends the bytes to the reader, whose "could not be read as Parquet" is the honest report, instead of leaking the URL to the CityJSON loader to be called bad JSON. CRS comes from the footer's `city.crs` PROJJSON and only when its authority is **EPSG** — anything else fails the existing CRS gate. Out of scope in v1, deliberately: appearance (materials/textures), geometry templates, the experimental `CityParquetArrowNative-v1` encoding (rejected by name, never guessed from Arrow shape), partial reads and authenticated buckets.
+- **One format registry, one door.** `src/domain/citymodel/formats/` holds one `CityFormat` per encoding (`label`, `extensions`, a byte `sniff`, `access` whole / stream / by-size, the stream `adapter`, and the `table` a whole read builds), and `detectFormat` decides with a fixed precedence: the user's word (the dialog's detection or correction, or the format a saved layer was opened as), then a DEFINITE byte signature (FlatCityBuf and Parquet magic, ZIP magic or a leading `<` for CityGML, a second line opening another object for CityJSONSeq), then the name unless the bytes rule it out, then the strongest `possible` verdict, then CityJSON. A gzipped head is no evidence. Every city layer opens through `features/layers/openCityLayer.ts` (drop, dialog, URL, STAC, restore, share link, re-link): it decides the format (a file's first 64 KiB are read for it; a URL whose name names no format gets one ranged request for the same 64 KiB, and a server that answers with the whole body has it cancelled), builds the `CityModelReference` with that `encoding`, runs the format's opener (FlatCityBuf under the engine hold, CityParquet by size, the rest parsed whole) and applies the saved LoD choice. A URL read whole whose fetched bytes are a streamed format throws `FormatMismatchError` and re-routes once, unless the user chose the format. The reference's `encoding` is persisted in snapshots and share links (optional, validated, the schema versions unchanged), so a layer the user corrected once restores as what it is. The dialog shows the name's answer at once and the bytes' a moment later, unless the user has already chosen; only a hand-made correction goes out as the user's word, so the dialog's own guess never stops the door from reading the bytes. A re-link uses the saved format only for a file of the saved name. A CityJSONSeq is recognised by a first line that closes an object and a second that opens one, so a hand-formatted CityJSON document is not mistaken for one.
+- **One streaming core, one package per format.** `navara-stream` holds everything format-agnostic: the worker core (`installStreamWorker`: grid, cell cache, bucketing, per-cell ENU baking), the wire protocol, the commit planner, residency budgets, the layer handle and `CityStreamPlugin`. It names no format: a stream's `format` is an opaque id, and the host hands the plugin one worker factory per id (`workers: { flatcitybuf: createFlatCityBufWorker, cityparquet: createCityParquetWorker }`). Each format package owns its `StreamSourceAdapter`, a worker entry that installs the core over it, and the factory holding the literal `new Worker(new URL(...))` (Vite rewrites only a literal next to the entry it names). Dependencies run one way: `navara-flatcitybuf` and `navara-cityparquet` depend on `navara-stream`, never the reverse. Entry points: `@cityjson/navara-stream` (engine-free main thread), `/worker` (what a worker entry or adapter imports, so a worker chunk does not carry the layer machinery) and `/plugin` (engine-bound).
+- **A layer's source says what it can do.** `Layer.source` is a `SourceCapabilities` (`features/layers/cityLayerSource.ts`) with three separate answers: `access` (`resident`: the whole model is in `layer.model`; `stream`: the model is a stub, the objects are the resident cells and the stream plugin draws them), `coverage` (`complete`, or `viewport`: counts, statistics and empty results say "currently loaded") and `discovery` (`upfront`: LoDs, object types and themes folded from the model at add time; `progressive`: learned from the stream store as cells land). `RESIDENT_SOURCE` and `STREAMED_SOURCE` are the two combinations used today; consumers ask the question they mean (the map filter, the scene and the table builder read `access`, the wording reads `coverage`, the type toggles read `discovery`) so a server source that streams over a complete dataset changes the constant, not forty call sites. `layerObjects(layer, streamVersion)` is the one answer to "the objects this layer has right now". The scene still keeps two handle types (`CityModelHandle`, `StreamLayerHandle`); they merge when static layers are cut into cells (phase 2.3 of `docs/plans/2026-10-16-review-phases-0-2.md`).
+- **What a CityParquet URL MEANS is decided by one pure function.** `src/domain/citymodel/formats/cityParquetUrl.ts` maps a string to a source with no I/O, so the loader, the Add-Layer dialog's enable logic and the tests cannot disagree: a single `.parquet` table; an https **package directory** (a `metadata.json` STAC Item whose `cityparquet-objects` assets are the authoritative inventory); or, on `gs://`/`s3://` only, a glob or a prefix expanded by the bucket's ANONYMOUS listing API. Plain-https wildcards are **rejected with a sentence** rather than silently unsupported — the shape is recognisably CityParquet, the host just exposes no listing API — which is why the classifier throws and `isCityParquetUrl` is the total wrapper that still routes such a URL into the CityParquet arm so the user sees that message. Expansion is capped at **64 object tables** (`MAX_CITYPARQUET_FILES`) on **every** arm — glob, listing, a manifest's declared hrefs and a picked folder alike, because the cap is a whole-LOAD memory bound and a manifest is a list someone else wrote (3D BAG's root package declares up to a thousand); a full tiled dataset is a streaming problem, not a whole-load one, and the cap is reported, never silently applied. A `.parquet.gz` classifies as a **table** even though the format defines no gzipped spelling — precisely because it defines none: owning it here sends the bytes to the reader, whose "could not be read as Parquet" is the honest report, instead of leaking the URL to the CityJSON loader to be called bad JSON. CRS comes from the footer's `city.crs` PROJJSON and only when its authority is **EPSG** — anything else fails the existing CRS gate. Out of scope in v1, deliberately: appearance (materials/textures), geometry templates, the experimental `CityParquetArrowNative-v1` encoding (rejected by name, never guessed from Arrow shape), partial reads and authenticated buckets.
 - **A `.zip` of CityGML is loadable, decided by MAGIC BYTES, and one zip is one layer.** The STAC browser's Add button and the URL/file loaders agree because both changed together: `stacAssets` marks `.zip` loadable (label "CityGML archive (ZIP)"), and `loadFromUrl`/`addLayerFromFile` sniff `PK\x03\x04` on the fetched bytes (never the extension) before the encoding switch, so every friendly HTTP/CORS/404 sentence survives. `src/domain/citymodel/cityGmlArchive.ts` (fflate, a direct dep) reads the archive in TWO passes — list entries inflating nothing, then inflate only the selection — because a real PLATEAU archive is 251 entries / 4.4 GB uncompressed; entries are capped at 32 (reported, never silent), `.gml`/`.citygml` are content and `.xml` is a fallback only when no `.gml` exists (PLATEAU ships 33 `.xml` sidecars beside its 251 `.gml`), and several entries merge into one `CityModel` only when CRS agrees and no id collides — otherwise a sentence names the reason. `.7z`/`.tar` stay download-only (no decompressor). Coverage honesty: most catalog zip items still fail for PRE-EXISTING reasons (the American host sends no CORS, PLATEAU's EPSG:6697 is degree-based and refused by the metric gate, Montreal's mirror carries stale signed URLs); the German Länder items work end-to-end because `normalizeSrsName` now maps AdV `ETRS89_UTM32/33` URNs to EPSG:25832/25833 (horizontal only — the `*…` suffix names the vertical datum, which the geoid path already owns).
-- **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `insights/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (the single door every static add goes through — a dropped file, a picked folder, a URL, a restore, a share link, a re-link) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while a CONSUMER of the table is looking — the table panel, the processing toolbox, or a run of that layer still in flight; the export dialog forces one rebuild when it opens). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A build AWAITS `initDuckDB()` before touching DuckDB and parks its source if the engine is not up (the boot is ~5 s and a restored snapshot lands inside it); `retryEngine()` rebuilds the parked ones. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice — `registerBuffer` CONSUMES its array (the worker transfer detaches it), so a re-registration goes through the entry's `SourceProvider`. The build drops `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*`/`template` (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused. LoDs are DERIVED from the reader's own column names (`{label, suffix}`) and a suffix is never rebuilt from a label: 3D BAG spells LoD 0 `geometry_lod0_0`. CityGML, its ZIP, CityParquet and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children, bbox`, `parents`/`children` NULL rather than `[]`, `bbox` the reader's own `STRUCT(xmin, ymin, zmin, xmax, ymax, zmax)` of DOUBLEs built from `CityObject.bbox` — NULL for an object with no geometry — so a tool reading `"bbox"."zmin"` binds on every layer kind, `feature_id` from `domain/citymodel/featureId.ts`, with `read_json_auto` pinned to `sample_size = -1, field_appearance_threshold = 0, map_inference_threshold = -1` — the defaults collapse rows whose keys vary into ONE `MAP(VARCHAR, JSON)` column, measured — and an `ALTER COLUMN … TYPE` per fixed column afterwards, because an all-NULL list column infers as JSON and a DATE-shaped id as DATE) so `parents IS NULL` is the feature-root test on every layer. **Every SQL string is a pure function** in `insights/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column, an impossible operator, an empty needle or a non-numeric value BEFORE the query is sent, and `ORDER BY` is table-qualified so a `castText` column sorts on the base column rather than its `::VARCHAR` alias. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json` (with `ARRAY true` for JSON, and no `::VARCHAR` cast: that one is the grid's), and for a package one read of the source into a scratch schema, a CTAS per CityGML module, `cityparquet_init` as its own statement, then `cityparquet_write` zipped with `fflate` — and **never** `FORMAT cityjson|cityjsonseq|flatcitybuf`, whose sinks bypass DuckDB's VFS entirely (no file is created at all; the same extension writes fine through `cityparquet_write`, which is the upstream pointer). Those three are shown DISABLED in the dialog so the capability is discoverable. **Every read-back is validated BY CONTENT** — `PAR1` magic, `JSON.parse`, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; DuckDB's `glob()` lists names that were never created, so it is fit only for a cleanup check and never for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
+- **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `insights/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (where every static open ends) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while a CONSUMER of the table is looking — the table panel, the processing toolbox, or a run of that layer still in flight; the export dialog forces one rebuild when it opens). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A build AWAITS `initDuckDB()` before touching DuckDB and parks its source if the engine is not up (the boot is ~5 s and a restored snapshot lands inside it); `retryEngine()` rebuilds the parked ones. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice — `registerBuffer` CONSUMES its array (the worker transfer detaches it), so a re-registration goes through the entry's `SourceProvider`. The build drops the per-LoD `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*` columns, by the extension's suffix grammar `<prefix>_lod<major>_<minor>` (`implicit_geometry` is kept) (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused. LoDs are DERIVED from the reader's own column names (`{label, suffix}`) and a suffix is never rebuilt from a label: 3D BAG spells LoD 0 `geometry_lod0_0`. A static CityParquet package's table is read from its own Parquet: `read_parquet([...], union_by_name = true)` over every object table with the reader builds' select list, then each member of `other` unpacked into a column (types from `json_group_structure`; a member whose name a column already has, ignoring case, stays packed, because `unnest` would silently replace that column) — the JS reader merges `other` into the attributes, so the model's table had them as columns. Its `sourceCrs` is the files' own CRS. CityGML, its ZIP and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children, bbox`, `parents`/`children` NULL rather than `[]`, `bbox` the reader's own `STRUCT(xmin, ymin, zmin, xmax, ymax, zmax)` of DOUBLEs built from `CityObject.bbox` — NULL for an object with no geometry — so a tool reading `"bbox"."zmin"` binds on every layer kind, `feature_id` from `domain/citymodel/featureId.ts`, with `read_json_auto` pinned to `sample_size = -1, field_appearance_threshold = 0, map_inference_threshold = -1` — the defaults collapse rows whose keys vary into ONE `MAP(VARCHAR, JSON)` column, measured — and an `ALTER COLUMN … TYPE` per fixed column afterwards, because an all-NULL list column infers as JSON and a DATE-shaped id as DATE) so `parents IS NULL` is the feature-root test on every layer. **Every SQL string is a pure function** in `insights/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column, an impossible operator, an empty needle or a non-numeric value BEFORE the query is sent, and `ORDER BY` is table-qualified so a `castText` column sorts on the base column rather than its `::VARCHAR` alias. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json` (with `ARRAY true` for JSON, and no `::VARCHAR` cast: that one is the grid's), and for a package one read of the source into a scratch schema, a CTAS per CityGML module, `cityparquet_init` as its own statement, then `cityparquet_write` zipped with `fflate` — and for CityJSON, CityJSONSeq and FlatCityBuf ONE `COPY (SELECT … FROM read_cityjson[seq](<re-registered source>) …) TO … (FORMAT cityjson|cityjsonseq|flatcitybuf, metadata_from <that source>)` (`buildGeometryExportSql`), no scratch table: the chosen LoD's `geometry|geometry_properties|material|texture` group is picked by pattern so appearance travels when the source has it, `address`, `implicit_geometry` and `other` go with the identity columns, and `metadata_from` carries the CRS, transform, appearance definitions and geometry templates (the extension's wasm I/O fixes, from 294a595 on, are what make these sinks write through the VFS). The FlatCityBuf writer writes neither implicit geometries nor addresses, so that export reports how many objects lost one, and an export that matched nothing says so. **Every read-back is validated BY CONTENT** — `PAR1` and FlatCityBuf magic, `JSON.parse` (a CityJSON document over 64 KiB by its two ends only), a CityJSONSeq header line, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; DuckDB's `glob()` lists names that were never created, so it is fit only for a cleanup check and never for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
 
 ## Known Issues
 
 - **`ViewContext.applyShadowMaterial` is fire-and-forget.** It emits `shadowApplied`; `SunLightDesc.onCreate` is the only listener and it calls `this._instance?.setupMaterialForCSM(m)`. A material registered before the photoreal scene's sun descriptor exists (or after it is destroyed) is silently dropped, and `MaterialStates.setup` never sets `needsUpdate`, so a material that already compiled keeps its stock program. That program loops all four cascade lights (colour ≈1.7 + 1 + 1 + 1, one direction), so the direct term comes out about 4.6× too bright while the cascade shadow maps still read: sunlit and oblique facades pinned near white, cast shadows still visible — measured live by swapping in an unregistered clone (sunlit wall 220, shaded 155–175, roofs washed pink). No app flow reproduces it today (`applyForwardLighting` runs after `addDefaultPhotorealScene`, the plugin registers every material the moment it creates it, and the shadow toggle keeps the CSM define), but any reorder of the scene setup would produce exactly the "no shading" symptom, brighter. Check `material.userData.defines.CSM === 1` on a live city material before suspecting the lighting.
 - **A loaded layer once drew nothing in the colour pass while still casting shadows** (2026-09-06, headless SwiftShader, one page load out of many): the status bar reported the triangles, the mesh was visible with a compiled program and no diagnostics, the ground carried its cast shadows, and the buildings themselves were absent for the page's whole life; a reload rendered normally. Not reproduced since; noted so the next sighting is not mistaken for a lighting regression.
-- **Navara is beta** (`@navaramap/* 0.1.1`; the GitHub releases page is the changelog). `three` and `postprocessing` are pinned exactly (0.183.2 / 6.39.0) to satisfy its peer ranges; bump them only together with a Navara upgrade. The 0.1.1 upgrade (2026-09-04) absorbed four breaking changes on the app side — pointer events + `featureClick`, `flyTo` options object + promise, degree-based geodetic helpers, a 5 px click tolerance — and adopted `view.lit = false` (see the lighting bullet); each upstream item below is re-marked with what the upgrade found. Upstream bugs found during the migration, all worked around locally and worth reporting: (a) the engine inlines a **second** copy of three r185 via `@navaramap/font` and its worker chunk — unfixable by dedupe, so never rely on `instanceof` across the font/label subsystem and treat `window.__THREE__` as unreliable (0.1.1: the "Multiple instances of Three.js" warning still logs — persists); (b) `view.registerMesh()` throws if called before `await view.init()` (`addPlugin()` must still come before init; not re-probed on 0.1.1, the session sequencer never exercises it); (c) the engine emits no pointer events for a cursor over the sky (`convertToMapEvent` returns null and the emit is skipped — persists on 0.1.1, read in source), so `NavaraViewport` also listens on the DOM container to clear hover/cursor state; (d) the tile worker pool is a module-level singleton, so at most one viewport can exist per page; (e) [0.1.1: G-buffer attachments are now DYNAMIC — allocated as the union of the active effects' `static requiredBuffers` (`AerialPerspectiveEffectDesc` declares `["normal"]` and re-binds `ctx.getNormalTexture()` every frame, so a custom effect that reads a buffer must declare it, and `getNormalTexture()` can be `undefined`); the terrain dependency below still stands; since issue #13 the app runs forward-lit and no app effect reads the normal buffer, so the NaN would no longer black the frame — the terrain stays for relief and shadows] the globe contributes NO normals to the MRT normal attachment unless a terrain (or hillshade) layer supplies them, and the `useNormal` view option that would is absent from 0.0.5's `Options`. Without one, a **raster basemap** on the globe made every texel of that attachment read back as half-float NaN (`0x7e00`) — `packNormalToVec2` divides by the L1 norm, so one zero normal poisons the shared buffer — which made the aerial-perspective pass's irradiance term NaN and the whole frame black. FIXED by adding the terrain layer (`terrain.ts`, `requestVertexNormals: true`), which is why `useNormalBuffer: true` is safe now and why removing terrain would re-break the lighting; (f) [persists in 0.1.1, read in source] `EffectDesc.onDestroy()` removes a pass from the composer without disposing it, and the clouds composite through the aerial-perspective pass's `atmosphere.overlay` — so `handle.delete()` alone leaves the clouds frozen in the sky. `disposeCloudsPass` calls `Clouds.dispose()` first; (g) [persists in 0.1.1, read in source] the `ThreeView` constructor branches on `canvas` ALONE, so a view built with `container` but no `canvas` appends its own `<div id="navara-root" style="width:100vw;height:100vh">` to `document.body`, re-parents the canvas out of it during init, and leaves the empty div there until `dispose()` — a second full viewport of document height that made the whole PAGE scroll. `NavaraViewport` therefore creates the canvas itself and passes both `canvas` and `container`; (k) [did NOT reproduce in the one photoreal→cyber→photoreal round trip smoked on 0.1.1 with Positron; still undiagnosed] **a raster basemap re-added a SECOND time through the theme path renders nothing** — `addSource`/`addLayer` both succeed (fresh source and layer ids, no console error, frame alive at 60 fps) but the globe shows bare terrain. Browser-reproduced 2026-08-06 on UNMODIFIED `develop` with photoreal→cartoon→photoreal→cartoon: the first Positron entry drapes correctly, the second leaves a featureless globe. It is NOT the number of swaps — the basemap PICKER swaps rasters repeatedly in one session without a hitch (osm→dark→positron→dark all verified) — so the trigger is something the theme commit does alongside the swap. This is why the cyber theme's new `carto-dark` sheet is intermittent on a second entry; the theme is otherwise correct and a reload restores it. Not diagnosed further — and note it did NOT reproduce on 2026-08-06 with the elevation-heatmap basemap picked: photoreal→cyber→photoreal→cyber→photoreal drew CARTO's dark sheet on both cyber entries and restored the heatmap both times, so the trigger remains unidentified rather than universal; (h) a `geojson` source with `tiled: true` (the documented GeoJSON-VT index for large files) renders **nothing** — no error, no features (browser-verified). `geoLayerDescriptions.ts` emits only the bare `{ type: "geojson", url | data }` form, the one the engine's own examples use; re-test before reintroducing `tiled`; (i) writing the globe's live setters (`view.globe.color`, `view.globe.wireframe`) kills the frame — and colours passed to `skyBox`/`glowGlobe` mesh descs must be engine `Color` INSTANCES (they call `.toArray()`; a bare hex makes `addMesh` throw and the half-registered desc can freeze frame presentation). The scene themes therefore never touch the globe setters (`sceneThemePolicy` pins this with a test) and manufacture colours by cloning `view.globe.color`. **`wireframe` was RETESTED on 2026-08-06** against current code (the two frame-killers it was first convicted alongside — bare-hex mesh colours and the albedoScale-only AP update, (j) — are both fixed), twice and in isolation: through the wireframe theme's entry path, and as a bare `view.globe.wireframe = true` with nothing else changed. **Verdict: still poisoned, and the failure mode is worse than "black"** — frame PRESENTATION freezes on the spot (the canvas keeps showing the last frame while the app's own render loop still reports 60 fps, so hiding a layer or flying the camera changes nothing on screen), no exception and no console error, writing `false` back does NOT recover it, and only a reload does. The globe cannot join the hidden-line drawing on 0.0.5; the wireframe theme buys its ground back with exposure/albedo instead. `view.globe.color` was NOT re-probed and stays banned on the earlier evidence. `view.globe.elevationColormap` (same family) WAS probed the same way and is **clean** — a hand-built `ColorMap` applied with the frame presenting and the irradiance intact — and since 2026-08-11 `addBasemap` writes it (a hand-built RdYlBu `ColorMap`, the docs' own LUT) whenever the elevation-heatmap basemap is added, re-verified live: ramp applied, frame presenting, camera flights and basemap round-trips still draw (`TURBO_COLOR_MAP` remains unexported in 0.0.5, which is why the ramp is hand-built); (j) [persists in 0.1.1, read in `AerialPerspectiveEffectDesc`] an effect update's `onUpdateConfig` does `Object.assign(this.config, e)` — top-level keys are REPLACED in the stored config even when the live instance applies per-field, and an internal pass rebuild reconstructs from that config. Any `aerialPerspective.update` must therefore carry the FULL `{ irradiance, useNormalBuffer, albedoScale }` calibration, never `albedoScale` alone — moot since issue #13, because the app no longer writes the pass at all, but binding for whoever does next; (l) [persists in 0.1.1: both bundles import only `three` and `@navaramap/engine*` and carry the `postprocessing@6.39.3` region; the cyber halo re-verified 2026-09-04] the engine INLINES its own copy of `postprocessing` (6.39.3) into its bundle — the peer dep is declared but never imported — and `EffectDesc.insertPass` picks the pass to hand the composer with `instanceof` against the engine's own Pass classes, so a pass built from the app's `postprocessing` import matches nothing and `addEffect` SUCCEEDS while inserting nothing: a silent no-op with no error anywhere. A custom effect must therefore wrap the app-built effect in the ENGINE'S exported `Effect` class (verified structural-only, no instanceof inside it) — see `src/scene/bloomEffect.ts` (`cityBloom`, the cyber theme's halo), and re-verify the halo renders on any Navara or `postprocessing` bump.
+- **Navara is beta** (`@navaramap/* 0.2.1`; the GitHub releases page is the changelog). `three` and `postprocessing` are pinned exactly (0.183.2 / 6.39.0) inside its peer ranges (`three >=0.183.0`, `postprocessing >=6.38.0`); a `three` bump is its own change. The 0.2.1 upgrade (2026-10-16) needed no code change; what it changes for the app: `setCamera`, `lookAt` and `rotate` emit `move` and `moveend` (#831; every programmatic move already runs inside the settle suppression, which swallows them, and the viewport still publishes the commanded pose because the event's pose lags a frame), deferred lighting casts shadows (#838; the forward-lit calibration is unchanged), G-buffer defines are stamped every frame (#835), terrain and raster tiles were reworked (#836/#845/#848; a headless A/B showed more tile requests for the same view, unconfirmed on a real GPU) and the WASM needs SIMD (#814; Safari 16.4 or later). The bundle inlines `postprocessing@6.39.4`. The 0.1.1 upgrade (2026-09-04) absorbed four breaking changes on the app side — pointer events + `featureClick`, `flyTo` options object + promise, degree-based geodetic helpers, a 5 px click tolerance — and adopted `view.lit = false` (see the lighting bullet); each upstream item below is re-marked with what the upgrade found. Upstream bugs found during the migration, all worked around locally and worth reporting: (a) the engine inlines a **second** copy of three r185 via `@navaramap/font` and its worker chunk — unfixable by dedupe, so never rely on `instanceof` across the font/label subsystem and treat `window.__THREE__` as unreliable (0.1.1: the "Multiple instances of Three.js" warning still logs — persists); (b) `view.registerMesh()` throws if called before `await view.init()` (`addPlugin()` must still come before init; not re-probed on 0.1.1, the session sequencer never exercises it); (c) the engine emits no pointer events for a cursor over the sky (`convertToMapEvent` returns null and the emit is skipped — persists on 0.1.1, read in source), so `NavaraViewport` also listens on the DOM container to clear hover/cursor state; (d) the tile worker pool is a module-level singleton, so at most one viewport can exist per page; (e) [0.1.1: G-buffer attachments are now DYNAMIC — allocated as the union of the active effects' `static requiredBuffers` (`AerialPerspectiveEffectDesc` declares `["normal"]` and re-binds `ctx.getNormalTexture()` every frame, so a custom effect that reads a buffer must declare it, and `getNormalTexture()` can be `undefined`); the terrain dependency below still stands; since issue #13 the app runs forward-lit and no app effect reads the normal buffer, so the NaN would no longer black the frame — the terrain stays for relief and shadows] the globe contributes NO normals to the MRT normal attachment unless a terrain (or hillshade) layer supplies them, and the `useNormal` view option that would is absent from 0.0.5's `Options`. Without one, a **raster basemap** on the globe made every texel of that attachment read back as half-float NaN (`0x7e00`) — `packNormalToVec2` divides by the L1 norm, so one zero normal poisons the shared buffer — which made the aerial-perspective pass's irradiance term NaN and the whole frame black. FIXED by adding the terrain layer (`terrain.ts`, `requestVertexNormals: true`), which is why `useNormalBuffer: true` is safe now and why removing terrain would re-break the lighting; (f) [persists in 0.1.1, read in source] `EffectDesc.onDestroy()` removes a pass from the composer without disposing it, and the clouds composite through the aerial-perspective pass's `atmosphere.overlay` — so `handle.delete()` alone leaves the clouds frozen in the sky. `disposeCloudsPass` calls `Clouds.dispose()` first; (g) [persists in 0.1.1, read in source] the `ThreeView` constructor branches on `canvas` ALONE, so a view built with `container` but no `canvas` appends its own `<div id="navara-root" style="width:100vw;height:100vh">` to `document.body`, re-parents the canvas out of it during init, and leaves the empty div there until `dispose()` — a second full viewport of document height that made the whole PAGE scroll. `NavaraViewport` therefore creates the canvas itself and passes both `canvas` and `container`; (k) [did NOT reproduce in the one photoreal→cyber→photoreal round trip smoked on 0.1.1 with Positron; still undiagnosed] **a raster basemap re-added a SECOND time through the theme path renders nothing** — `addSource`/`addLayer` both succeed (fresh source and layer ids, no console error, frame alive at 60 fps) but the globe shows bare terrain. Browser-reproduced 2026-08-06 on UNMODIFIED `develop` with photoreal→cartoon→photoreal→cartoon: the first Positron entry drapes correctly, the second leaves a featureless globe. It is NOT the number of swaps — the basemap PICKER swaps rasters repeatedly in one session without a hitch (osm→dark→positron→dark all verified) — so the trigger is something the theme commit does alongside the swap. This is why the cyber theme's new `carto-dark` sheet is intermittent on a second entry; the theme is otherwise correct and a reload restores it. Not diagnosed further — and note it did NOT reproduce on 2026-08-06 with the elevation-heatmap basemap picked: photoreal→cyber→photoreal→cyber→photoreal drew CARTO's dark sheet on both cyber entries and restored the heatmap both times, so the trigger remains unidentified rather than universal; (h) a `geojson` source with `tiled: true` (the documented GeoJSON-VT index for large files) renders **nothing** — no error, no features (browser-verified). `geoLayerDescriptions.ts` emits only the bare `{ type: "geojson", url | data }` form, the one the engine's own examples use; re-test before reintroducing `tiled`; (i) writing the globe's live setters (`view.globe.color`, `view.globe.wireframe`) kills the frame — and colours passed to `skyBox`/`glowGlobe` mesh descs must be engine `Color` INSTANCES (they call `.toArray()`; a bare hex makes `addMesh` throw and the half-registered desc can freeze frame presentation). The scene themes therefore never touch the globe setters (`sceneThemePolicy` pins this with a test) and manufacture colours by cloning `view.globe.color`. **`wireframe` was RETESTED on 2026-08-06** against current code (the two frame-killers it was first convicted alongside — bare-hex mesh colours and the albedoScale-only AP update, (j) — are both fixed), twice and in isolation: through the wireframe theme's entry path, and as a bare `view.globe.wireframe = true` with nothing else changed. **Verdict: still poisoned, and the failure mode is worse than "black"** — frame PRESENTATION freezes on the spot (the canvas keeps showing the last frame while the app's own render loop still reports 60 fps, so hiding a layer or flying the camera changes nothing on screen), no exception and no console error, writing `false` back does NOT recover it, and only a reload does. The globe cannot join the hidden-line drawing on 0.0.5; the wireframe theme buys its ground back with exposure/albedo instead. `view.globe.color` was NOT re-probed and stays banned on the earlier evidence. `view.globe.elevationColormap` (same family) WAS probed the same way and is **clean** — a hand-built `ColorMap` applied with the frame presenting and the irradiance intact — and since 2026-08-11 `addBasemap` writes it (a hand-built RdYlBu `ColorMap`, the docs' own LUT) whenever the elevation-heatmap basemap is added, re-verified live: ramp applied, frame presenting, camera flights and basemap round-trips still draw (`TURBO_COLOR_MAP` remains unexported in 0.0.5, which is why the ramp is hand-built); (j) [persists in 0.1.1, read in `AerialPerspectiveEffectDesc`] an effect update's `onUpdateConfig` does `Object.assign(this.config, e)` — top-level keys are REPLACED in the stored config even when the live instance applies per-field, and an internal pass rebuild reconstructs from that config. Any `aerialPerspective.update` must therefore carry the FULL `{ irradiance, useNormalBuffer, albedoScale }` calibration, never `albedoScale` alone — moot since issue #13, because the app no longer writes the pass at all, but binding for whoever does next; (l) [persists in 0.1.1: both bundles import only `three` and `@navaramap/engine*` and carry the `postprocessing@6.39.3` region; the cyber halo re-verified 2026-09-04] the engine INLINES its own copy of `postprocessing` (6.39.3) into its bundle — the peer dep is declared but never imported — and `EffectDesc.insertPass` picks the pass to hand the composer with `instanceof` against the engine's own Pass classes, so a pass built from the app's `postprocessing` import matches nothing and `addEffect` SUCCEEDS while inserting nothing: a silent no-op with no error anywhere. A custom effect must therefore wrap the app-built effect in the ENGINE'S exported `Effect` class (verified structural-only, no instanceof inside it) — see `src/scene/bloomEffect.ts` (`cityBloom`, the cyber theme's halo), and re-verify the halo renders on any Navara or `postprocessing` bump.
 - **Vertical placement depends on a third-party service, and is EGM2008-accurate, not NAP-exact.** `geoidHeightAt()` fetches from `terrain.reearth.land`, which is **best effort with no SLA**. On any failure (offline dev, service down, unexpected tile encoding) it resolves `0` with one `console.warn` per layer and the model renders at its old, geoid-separation-low position — visibly sunk against photoreal terrain, not missing. Even on success the GEOID residual is decimetre-level (EGM2008 vs the national datum, and Terrain-RGB quantises to 0.1 m) — verified end-to-end 2026-08-06: the browser decodes N = 43.90 m at Delft byte-identically to ground truth, and building shells wrap Google's independently-georeferenced photogrammetry to ~1 m. But building bases can still visibly float or sink a few metres against the **quantized-mesh terrain skin**, because Mapterhorn derives from a ~30 m global DSM that averages streets, canal walls and vegetation in cities (the z12 tile over Delft spans 36.5–57.3 m ellipsoidal where street level is ~44 m). That is the terrain data's urban accuracy, not a bug in the height pipeline; do not "fix" the offset to make bases touch this terrain, and do not treat placed heights as survey-grade.
 - Vertex normals are computed in source-CRS space by `buildCityMeshArrays` and are **not** recomputed after the ENU projection, so shading carries a slight distortion from the projection's scale factor and convergence. Shared by the static and streaming paths; visually negligible at city scale, but it is a known limitation, not an oversight.
 - **A streaming commit is bounded for LIVENESS, never for performance.** `LEVEL_SWAP_TIMEOUT_MS = 1500` was a performance deadline and was removed on 2026-08-05: a layer's SECOND commit is always a LoD swap (the first runs with an unlearned ladder, so it resolves to `all`), and on any host where that full-cover swap exceeded 1.5 s the timeout path returned _before_ recording `_lastLod`/`_level` — so the next settle recomputed the same equally-slow plan. Once triggered it was permanent: nothing loaded on camera movement again. The replacement is `COMMIT_FETCH_TIMEOUT_MS = 30_000`, ~3x the slowest healthy commit measured, which exists only so a silent range read cannot leave the status on "fetching" forever; it records nothing, so the next settle retries in full. Cancelling work the user has moved on from is `abortInFlight()` + the worker epoch, not a timer.
 - Measure and box-select are **disabled**, not implemented: `ViewerToolbar` still offers the modes and `pickEventHandlers` still routes them (picking turns off), but nothing draws a rubber band or a measurement. Pending re-implementation against Navara.
 - The vite-plus test runner has a bug that breaks `describe` for files importing from `"vite-plus/test"`; all test files were migrated to import from `"vitest"` instead (2026-07-28) and `npx vitest run` is green (0 failed files). Do not reintroduce `"vite-plus/test"` imports in new test files.
 - **The DuckDB status pill holds a SNAPSHOT.** `App` reads `getDuckDBStatus()` once, after `retryEngine()` resolves, and keeps it in React state — but `ensureExtension` publishes a fresh status every time it loads `spatial` or `three_d`, and nothing re-reads it. Nothing calls `ensureExtension` today, so the pill is never wrong; the first analysis feature that loads an extension lazily will leave the tooltip listing the boot-time extensions and omitting the one it just fetched — exactly the drift the tooltip exists to make visible. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` which `publishReady` notifies, with `App` subscribing rather than snapshotting.
-- **`spatial` and `three_d` are loadable but have nothing to operate on.** The layer table is attribute-only; a geometry predicate needs either geometry columns materialised (the memory the design exists to avoid) or a computed-columns feature that reads the re-registered source. Neither extension autoloads in wasm, and `spatial` is a CORE extension — `INSTALL spatial` (~5 s / 23.6 MB), never `FROM community`, which is what `cityjson` and `three_d` use. Two `three_d` traps for that follow-up: `ST_3DFromWKB` throws on a MultiPolygon Z row and ONE such row poisons a whole column query (use `ST_3DTryFromWKB`), and `ST_3DVolume` raises "solid is not manifold" on an unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`).
+- **A streamed LOCAL CityParquet folder restores from one table only.** A picked folder over 128 MiB of object tables streams from its `{blobs}` (`src/features/cityparquet/streamDecision.ts`), but its snapshot records only `{type:"file", fileName}` and re-linking an unavailable layer (`App.tsx` `handleResolveUnavailableLayer`) accepts ONE file, so the re-linked layer is that table alone. URL sources are unaffected: their `modelRef` is the URL, and every restore re-runs the static/stream decision.
+- **`spatial` and `three_d` are loadable but have nothing to operate on.** The layer table is attribute-only; a geometry predicate needs either geometry columns materialised (the memory the design exists to avoid) or a computed-columns feature that reads the re-registered source. Neither extension autoloads in wasm; both install from the vendored repository at `public/duckdb-ext/` (`spatial` is 23.6 MB). Two `three_d` traps for that follow-up: `ST_3DFromWKB` throws on a MultiPolygon Z row and ONE such row poisons a whole column query (use `ST_3DTryFromWKB`), and `ST_3DVolume` raises "solid is not manifold" on an unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`).
 
 ## Milestone records moved from CLAUDE.md
 
@@ -736,3 +740,672 @@ line in an areas-only source).
 Browser acceptance procedure: `scripts/smoke/processing-m1.md` (M13.1),
 `scripts/smoke/processing-m2.md` (M13.2) and `scripts/smoke/processing-m3.md`
 (M13.3).
+
+## Geographic PLATEAU CityParquet (2026-09-21)
+
+The Nishitokyo `building.parquet` dataset uses EPSG:6697 (JGD2011 geographic
+coordinates with JGD2011 gravity-related heights). It downloads and decodes
+successfully, but the viewer's metric CRS gate previously rejected it.
+The WKB and row bounds store **longitude, latitude, height**, despite the EPSG
+CRS authority's latitude-first axis order; the source CityJSON transform in the
+footer is provenance and must not be applied to these already-decoded coordinates.
+
+`normalizeCityParquetCrs` runs after package assembly for both URL and local-file
+loads. It converts EPSG:6697 horizontally into the WGS84 UTM zone selected from
+the package bounds (Nishitokyo: EPSG:32654). All ring vertices and object bounds
+are converted, including geometryless parents; model bounds are recomputed.
+Heights, LoDs, IDs, semantics, attributes and appearance are retained. Other CRSs
+keep the existing admission checks. This deliberately supports this known
+compound CRS rather than assuming every geographic CRS uses orthometric metres.
+
+The horizontal conversion uses the metre-level JGD2011/WGS84 null-datum
+approximation. Vertical values remain unchanged and use the renderer's existing
+EGM2008 geoid approximation, not a Japan-specific vertical datum transformation.
+The normalized model advertises its metric CRS; the layer's original source URL
+or files remain the reload source. This also keeps app-side area/slope/distance
+calculations in metres instead of merely allowing degree coordinates past the gate.
+
+## Multiple display LoDs (2026-09-21)
+
+Static city layers now select a set of LoDs and render only each city object's
+highest available selected representation. New loads select every available
+LoD; an empty selection intentionally draws no labelled geometry. In the
+Nishitokyo fixture this keeps 468 objects at LoD 2 and 84,394 at LoD 1 instead
+of silently hiding the objects without LoD 2. Selection is per CityObject,
+including independently modelled BuildingParts; it does not merge geometry
+or infer equivalent representations across parent/child objects.
+
+The core mesh builder and static plugin's `lod`/`setLod` accept a readonly
+array in addition to their existing string/null contract. Arrays choose the
+best selected LoD per object. Strings still mean exact LoD, and null retains
+the plugin's legacy unfiltered behavior. Object and surface picking indices
+remain tied to the original model, including objects excluded by selection.
+
+The app stores `selectedLods` separately from streaming's single `selectedLod`.
+It is persisted in workspaces and URL shares, restored on file relinking,
+and copied to derived layers. Older workspace single-LoD choices remain exact.
+Export and analysis retain their explicit single-LoD controls. Streaming
+FlatCityBuf's zoom-driven/manual policy is unchanged.
+
+### A LoD change rebuilds only when some object's drawn LoD changes
+
+`CityModelMesh.setLod` always records the new selection (every later rebuild —
+appearance, placement — reads it) but calls
+`rebuildGeometry` only when `sameLodGeometry` (navara-core `lodSelection.ts`)
+finds an object whose drawn LoD differs. The store hands `setLod` a fresh array
+on every checkbox toggle, so the old identity check rebuilt every time:
+Nishitokyo `[2,1,0] → [2,1]` changes no object's winner yet re-triangulated all
+1.9 M triangles (~2.7 s, M4 Max, dev build).
+
+- The builder and the comparison share `selectedSurfaceLod`; never give the
+  comparison its own copy of the winner rule, or a skip silently draws stale
+  geometry. `lodSelection.test.ts` checks the helper against the real builder
+  for every pair of a set of selections.
+- A legacy string is the one-element selection (it draws exactly the same
+  surfaces). `null` equals only `null`: it also draws unlabelled surfaces.
+- Hidden and id-filtered objects are compared too. Skipping them would save a
+  rare rebuild but couple the comparison to the filters; revealing an object
+  rebuilds with the recorded selection anyway.
+- Cost: equal LoD sets answer without visiting objects; otherwise one pass over
+  the surfaces' LoD labels, no geometry copied. Real Nishitokyo
+  (`plateau/nishitokyo-shi/building.parquet`, same SHA as the capture;
+  1,913,792 triangles; Linux, Node 24, not a browser): `[2,1,0] → [2,1]`
+  141 ms and no rebuild, against 11.2 s for the same rebuild forced;
+  reordering 0.1 ms; `[2] → [2,1]` still rebuilds (10.7 s). The synthetic
+  before/after (6.0 s → 95 ms) agrees. Logs:
+  `docs/performance/cityparquet-2026-09-21/lod-switch-*.jsonl`; rerun with
+  `npx vitest run -c scripts/performance/vitest.config.ts lod-switch`
+  (`AUDIT_FILE=<nishitokyo parquet>` for the real dataset).
+- Streaming layers (`StreamLayerHandle.setLod`) are untouched.
+
+### The geoid height correction moves vertices; it does not rebuild
+
+The mesh is built at height offset 0 and the geoid sample lands later, on
+every load. `setHeightOffset` used to rebuild the whole mesh for it —
+Nishitokyo 2.7 s on the M4 Max (dev build), 9.25 s on the Linux host (Node) —
+and now calls `raisePositionsInEnu` (navara-core `geo/raiseEnu.ts`) on the
+existing position buffer: 0.27 s on the same host and file, no rebuild.
+
+- Why not just move the frame: the origin rises `dh` along its normal, each
+  vertex along its OWN normal, and those fan out — a frame-only shift is
+  `≈ N·d/R` off (6 cm at 10 km, 89 mm at a 21 km corner for N = 37 m).
+  In the (unchanged-rotation) frame the move is `p + dh·(Rᵀn − ẑ)`.
+- `n` must be the geodetic normal: the ellipsoid gradient at the FOOT point.
+  The gradient at the raised vertex is µm off (Codex review: 16 Float32 steps
+  on a coordinate 1 m from the origin). The foot is found without trig
+  (height from the ellipsoid equation, one step down the approximate normal).
+- Accuracy: within two Float32 roundings of a fresh `projectPositionsToEnu`
+  (one for the stored input, one for the store; floored at 1e-8 m each for the
+  double rounding of ECEF) for building heights. The foot-point step leaves
+  ~dh·e²·(h/a)² — 4e-8 m at 5 km above the ellipsoid, nothing at city heights. `raiseEnu.test.ts` holds the oracle; the mesh test
+  compares against a mesh built at the new offset over a 10 km span.
+- Unchanged by the move: normals (they turn by ~N/R ≈ 1e-5 rad, which no
+  lighting shows), colours, picking indices, UVs, texture groups. Refreshed:
+  position upload, bounding sphere (Navara culls on it), a cached bounding box,
+  edge lines. Later rebuilds (LoD, appearance) project into the
+  new frame as before.
+- Streaming layers place per cell in the worker and are untouched.
+- Logs: `docs/performance/cityparquet-2026-09-21/geoid-nishitokyo-*.jsonl`
+  (same `lod-switch` benchmark; its `setHeightOffset(0 -> 37)` step).
+
+## CityParquet streams through the FlatCityBuf worker protocol (2026-09-22)
+
+Yokohama's 335 MB `building.parquet` read whole exhausted a 4 GiB V8 heap
+inside the reader (`docs/performance/cityparquet-2026-09-21/README.md`), and
+the browser tab was lost. A large CityParquet source now streams by viewport
+through the SAME machinery as FlatCityBuf rather than a second streaming
+stack: a second worker, `navara-cityparquet/src/stream.worker.ts`, speaks
+the existing worker protocol through the format-agnostic `streamWorkerCore.ts`
+(grid, cell cache, bucketing, per-cell ENU baking), and each format supplies a
+`StreamSourceAdapter` (`navara-flatcitybuf/src/fcbSourceAdapter.ts`, `navara-cityparquet/src/streamAdapter.ts`).
+The planner, settle gate, resident budgets, picking and inspector are shared.
+
+- **Transport.** `navara-cityparquet/src/rangeSource.ts` is our own range
+  buffer, not hyparquet's `asyncBufferFromUrl` (which answers a `200` by
+  downloading and keeping the whole file): HEAD (else `bytes=0-0`) for the
+  length, one ranged GET per slice, nothing cached, a per-request signal. A
+  `200` for a resource over 4 MiB throws `RangeNotSupportedError`, which the
+  adapter reports as the `no-range` admission refusal. Local files are lazy
+  `Blob` slices; a `File` is never read into memory.
+- **Open reads an index, not the table.** `streamReader.ts` reads each table's
+  footer and then only `bbox` + `parents`, one row group at a time, into
+  typed arrays (49 bytes a row). `familyIndex.ts` groups rows into FAMILIES (a
+  root row plus the contiguous part rows after it) with a union bbox each, and
+  merges hit families across gaps of ≤ `MERGE_GAP_ROWS` (1 024) rows into row
+  ranges. `readRows` then reads identity, attribute and geometry columns ≤ the
+  requested LoD for those ranges with `useOffsetIndex`, so a range inside a
+  row group decodes only its pages (1 000 rows: 2.47 MB vs 21.1 MB without).
+  Yokohama: 24.5 MB read (7 % of the file) and ~40 MB retained to open
+  884 106 rows.
+- **Attributes travel WITH the geometry, and that was measured rather than
+  assumed (2026-09-23).** Deferring the footer's attribute columns out of the
+  fetch, to be read per object on click, saves nothing worth a second
+  transport: those columns are **0.79 MB of Yokohama's 318.93 MB** compressed
+  — **0.25 %** of what a fetch reads, **0.62 %** at rung 0 where the geometry
+  is cheapest — and **0.99 %** on Nishitokyo (**2.35 %** at rung 0). Nor is
+  there heap to reclaim: `readAttributes`
+  (`navara-cityparquet/src/decodeTable.ts`) skips null cells, so a resident
+  record carries only attributes it can show — exactly **one key** on the real
+  PLATEAU data, where six of Yokohama's seven declared columns are all-null.
+  And the proposed transport is strictly worse than what ships: a ONE-row
+  attribute read (`rowStart = row, rowEnd = row + 1, useOffsetIndex: true`)
+  costs **0.40 MB over 23 range requests, ~470–710 ms warm — identical to a
+  2000-row read of the same columns**, because offset indexes and PAGES are
+  the granularity, not rows; a WIDER attribute table makes the per-object read
+  worse still, one more offset-index fetch and one more whole page per column.
+  So an on-demand per-object attribute fetch was **refused by measurement, not
+  deferred**. Method, tables and the two files to re-run it against:
+  `docs/plans/2026-09-22-cityparquet-on-demand-attributes.md` and "Task 4" in
+  `docs/performance/cityparquet-2026-09-21/README.md`. The one place a
+  per-object lookup would genuinely pay is a correctness bug rather than a
+  performance task — a restored selection of a NON-resident object never
+  resolves — and it is recorded in `docs/roadmap.md`, not here.
+- **Two row bounds, and a byte bound.** The probe answers `readCost` (rows the
+  query would read, gap rows included) against the planner's
+  `VIEWPORT_FEATURE_BUDGET` (20 000). A fetch queries the UNION of its
+  requested cells' extents — larger than the probed footprint — so `select`
+  refuses above `MAX_FETCH_READ_ROWS` (60 000) with `code: "budget"`, which the
+  plugin reports as "too far", not an error. Querying whole cells also fixed
+  FlatCityBuf boundary cells that used to bake with only the part of their
+  objects inside the view.
+  Rows are not bytes: `useOffsetIndex` is a request, not a requirement, and
+  hyparquet reads a column chunk WHOLE when that chunk carries no offset index,
+  so one enormous row group (or a file written without a page index) could
+  serve hundreds of MB to a fetch of a few families. `estimateReadBytes` plans
+  the physical read from the footer alone — the selected row fraction of an
+  indexed chunk's `total_compressed_size`, the whole of an unindexed one, and
+  the whole file when a size is missing — and `select` refuses above
+  `MAX_FETCH_READ_BYTES` (96 MiB) through the same `"budget"` path, before a
+  slice is read. The estimate is asymmetric on purpose: an UNINDEXED chunk is
+  charged whole, which is what is really read, so the gate is tight on the
+  unbounded case; an indexed read fetches whole pages and so costs more than
+  its row fraction (Yokohama's 1 km viewport plans 2.45 MB and reads 12.83 MB,
+  5.2× low), which the row gates already bound. Tightening it would mean
+  reading each chunk's offset index — a read on the path this protects.
+- **Families stay whole.** The adapter declares `ownership: "feature"`, so a
+  Building and its BuildingParts land in one cell (the root's) and are baked
+  and evicted together.
+- **Residency counts what the WORKER holds, not what it sent.** The worker
+  keeps a whole decoded `CityModel` per resident cell (~5 MB a Yokohama cell,
+  4–5× the geometry the cache used to meter). Every `cell` message therefore
+  carries `retainedBytes`, a cheap structural estimate (typed arrays kept,
+  plus per-object / per-surface / per-ring / per-vertex charges; ±50 %, and it
+  does not count attribute values), which `cellStatsFromGeometry` ADDS to the
+  transferred bytes. The worker also enforces its own LRU cap,
+  `WORKER_RETAINED_BYTE_BUDGET` (512 MiB), as a backstop, never dropping a key
+  of the commit in flight; a dropped cell degrades gracefully (`recolor` skips
+  it, `surfaces` answers not-found). And a commit the main thread ABANDONS
+  (stale epoch, refused fetch, liveness timeout) now evicts exactly the keys it
+  received and did not adopt — the worker bakes and posts before it can read a
+  `cancel`, so those were otherwise unreachable forever.
+- **LoD rule.** `bakeLod(rung)` bakes, per object, the highest LoD ≤ the rung
+  it has (every known LoD, highest first; `null` = every LoD, never "draw all
+  surfaces"). `header.lods` seeds the ladder before any cell arrives, so the
+  zoom-driven policy is complete from the first commit.
+  Every CityParquet geometry column names its LoD (`geometry_lod<major>_<minor>`),
+  so a streamed source has no unlabelled geometry. CityJSON geometry without
+  an `lod` decodes with `lod: null`, which no labelled selection can name;
+  `null` is therefore a rung of core's `LodSelection` array, ranked below every
+  label, so such an object draws its unlabelled surfaces only when it has no
+  labelled surface at or below the rung, and is never silently invisible while
+  the layer counts it as loaded.
+- **Geographic sources: one seam.** `geographicToProjected.ts` maps EPSG:6697
+  to ONE fixed UTM zone per open (the source extent's centre; Yokohama
+  EPSG:32654) for the index and every batch. It is the only place that knows.
+  Performance task 6 replaced it ON THE STREAMED PATH ("Three coordinate
+  spaces" below); the STATIC path still runs through it.
+- **Static or stream is decided once, by size, for every door.**
+  `src/features/cityparquet/streamDecision.ts`: object tables over
+  `CITYPARQUET_STREAM_THRESHOLD_BYTES` (128 MiB) stream. The size comes from
+  the manifest's `file:size`, else a HEAD, else a ranged open of the table,
+  which reports the byte length its range probe learned — NOT the sum of the
+  row groups' compressed sizes, which omits the footer and page indexes and
+  could flip a table over the threshold to static; sidecars never count. No size learnable → static, as before (a server that
+  answers neither cannot serve ranges either). Over the threshold with no
+  range support FAILS with the no-range message — no static fallback, since a
+  whole-file load of such a table is exactly the OOM this removed.
+  `addCityParquetLayer.ts` is the one implementation behind URL, file, folder,
+  STAC, workspace restore and share links, re-deciding on every restore
+  (`modelRef` records only what the user gave). A streamed open from the
+  landing page runs under `holdEngine`, since a stream cannot exist without
+  the viewport.
+- **Counts.** A streamed layer reads "N of M loaded objects" when the source
+  knows M (`header.objectsCount`, CityParquet); FlatCityBuf's header does not,
+  so it keeps the bare resident count. Since object families (below) M is the
+  sum of the OPENED families' rows, not the whole package's.
+
+Known limits, deliberately left:
+
+- No appearance under CityParquet streaming: `readRows` never reads the
+  appearance columns and the adapter's `appearance()` is `undefined`.
+- A FlatCityBuf stream's DuckDB table covers RESIDENT rows only. A streamed
+  CityParquet layer's no longer does: performance task 5 gave each object
+  family a view over its file (below).
+- Relinking a saved local multi-file layer accepts one file.
+- Share-link `selectedLods` are dropped on the stream path (as for `.fcb`); a
+  stream's LoDs come from the zoom policy.
+- An extensionless URL forced to CityParquet by the encoding override always
+  loads static (the decision cannot classify it).
+- Nishitokyo (31 MB, under the threshold) keeps the ~9 s static main-thread
+  load; the static path's costs are tasks 4–6.
+- No byte cache across fetches: a pan re-reads rows its neighbours already
+  read (10 × 1 km views, 600 m apart: 134 MB, 40 % of the file). A page cache
+  is a candidate if HTTP latency matters; the resident cell cache already
+  avoids refetching cells.
+
+Evidence (`docs/performance/cityparquet-2026-09-21/`, "Bounded loading" in its
+README): Node benchmark `scripts/performance/cityparquet-stream.test.ts`
+(`stream-node-yokohama.jsonl`, `stream-http-yokohama.jsonl`) and the browser
+smoke `stream-browser-smoke-yokohama.{json,png}` — first resident objects 43 s
+after navigation (engine boot and geoid included, SwiftShader), 4.5 K of
+884.1 K loaded in 21 cells, JS heap 175 MB, no errors.
+
+### Object families, each with a table over its own file (2026-09-23)
+
+A PLATEAU CityParquet package is a set of object tables — building, bridge,
+water_body, transportation, vegetation, city_furniture — and task 3 opened every
+one of them to show a city's buildings. A streamed layer now opens only the
+families the user asked for, and every family has its own queryable table that
+reads STRAIGHT FROM THE FILE. The table panel, filters, statistics and export
+stopped depending on what geometry the camera happened to deliver.
+
+- **Families come from the manifest, and a key is a label while the href is the
+  identity.** `CityParquetManifest.families` is one `{key, href, size}` per
+  object table, in manifest order, pairing one-to-one with `objectTables`
+  (sidecars are never families). The key is the asset key when the manifest gave
+  the table a descriptive one, else the href's base name — in BOTH cases with
+  `.parquet` stripped, because the reference writer keys each table by its own
+  file name, so the raw key would read `building.parquet` and the Building
+  default and every label would have to strip it anyway. A key that only names
+  the asset's role loses to the file name (`GENERIC_ASSET_KEYS`: `data`,
+  `objects`, `cityparquet-objects`, compared case-insensitively). Duplicate keys
+  are NOT deduped: `east/building.parquet` and `west/building.parquet` stay two
+  families, and the app disambiguates the second (`building`, `building#2`) with
+  the href in the label, because the table registry is keyed by the family key
+  and two families sharing one key would collide on one table.
+  `CityParquetStreamHeader.tables[i].name` is a label too — a URL base name, a
+  `File`'s name, else `table-<i>` — so families and header tables are paired
+  strictly BY ARRAY ORDER against the families the stream was opened with
+  (`familyStore.applyStreamTables`), never by matching those names.
+- **A family's table is a DuckDB VIEW over `read_parquet`, not a copy of the
+  rows.** The source is registered once per layer and per FAMILY — one
+  registration per view, so two families whose hrefs resolve to the same URL do
+  not share a name one of them can release under the other's live view (the
+  cached name still records its source identity, so a family whose source
+  changed registers the new one instead of reading the old file) — a
+  URL by its text through `registerFileURL` (`DuckDBDataProtocol.HTTP`), a
+  picked `File` by its OBJECT through `registerFileHandle` +
+  `BROWSER_FILEREADER`, both behind `registerParquetUrl` / `registerParquetFile`
+  in `src/insights/duckdb.ts` — under a name this app generates
+  (`family_<n>.parquet`), because that name is interpolated into
+  `read_parquet('…')` as a literal. `src/insights/familyViews.ts` then
+  `DESCRIBE`s the file, keeps the non-dropped columns (`isDroppedColumn`: 15 of
+  the real Yokohama building table's 37; `address`, `children_roles` and `other`
+  are KEPT, and the LoD ladder is read from the DROPPED `geometry_lod*` names)
+  and publishes `CREATE OR REPLACE VIEW <name> AS SELECT <kept> FROM
+read_parquet('<registered>')` through the ordinary `adoptLayerTable`, so the
+  family's table is `ready` in the registry like any other.
+  Measured in the browser on that 884 106-row table
+  (`docs/performance/cityparquet-2026-09-21/duckdb-read-parquet-spike.json`):
+  the view costs 26 ms to publish, a filtered count 34 ms, a 100-row page
+  793 ms, a deep page 1.5 s, and the JS heap reads 115 MB either way.
+  Materialising the same 15 columns instead costs 961 ms and 247 MB of DuckDB
+  memory, and pages in 97 ms. A view was chosen because it cannot DRIFT from the file, needs no JSON
+  encoding, no type map and no whole-set `feature_id` pass (the file has that
+  column), and does not hold the shared table FIFO for minutes. The escape
+  hatch, if paging ever proves too slow, is the same code saying
+  `CREATE TABLE … AS SELECT` — at those two costs.
+  Not chunked `INSERT`s, which the first plan specified: that machinery existed
+  only because this build was believed to have no `registerFileURL`, which the
+  plan review corrected and the spike disproved.
+  One engine fact the view forces: DuckDB 1.5.5 REFUSES `DROP TABLE IF EXISTS`
+  over a view ("Existing object … is of type View"), it does not no-op, so
+  `layerTables.retire` branches to `DROP VIEW` for a file-backed table.
+- **Table keys are `${layerId}::${family}`, and every consumer that OWNS a table
+  freezes the triple.** `layerTableKey(layerId, family)` with `family === null`
+  is the BARE layer id, so every single-table layer keeps the key it had. A
+  layer has ONE active family, which is what the table panel shows and what the
+  readers (`useLayerQuery`, `useLayerCounts`, `StatsTab`, `LayerExport`,
+  `useEligibilityContext`, `useToolForm`) resolve through; query state is keyed
+  per table (`getActiveTableKey`), so each family keeps its own filter, page and
+  reading. The keys are not layer ids: every enumeration site
+  (`mapFilterSync.reconcile`, `runQueue`'s stale watcher) takes the layer id
+  from `parseTableKey`, and the owners — a processing run, an export, the
+  computed columns it writes — freeze `{layerId, familyKey, tableName}` at
+  start, so switching family mid-run cannot retarget the work.
+- **Building alone by default, else the whole package.** `defaultEnabledKeys`
+  enables every family whose raw key case-folds to `building`, and if there is
+  none, every available family — a one-table source is a one-family package and
+  gets it. The fold is deliberate: an exact match would silently open a whole
+  package for a writer who spelt the key `Building`. Only the comparison folds;
+  labels keep the writer's casing. The same test gates the panel's "Buildings"
+  reading (`familyOffersBuildings`), since a bridge table holds no root Building
+  and the reading would answer zero for everything.
+- **Changing the open families is a serialised, transactional reopen.**
+  `reopenStreamingLayer` runs the old entry's disposers, unregisters it, calls
+  `plugin.remove(layerId)` — never `handle.delete()` alone, which leaves the
+  plugin's registry entry and makes the next open fail on the duplicate id —
+  then reopens under the SAME layer id, seeded from the layer row (rules, their
+  enabled flag, visibility, hidden types, the picked appearance), so the camera,
+  selection and tables survive. `familyStore` holds one promise chain per layer
+  and the queued job reads the latest desired set, so two rapid toggles cost one
+  reopen; a completion for a layer removed mid-open loses the generation check
+  and is disposed with `plugin.remove`, never registered. The store keeps
+  `enabled` (what the user wants) apart from `opened` (what the live stream
+  holds) because a failure has to roll one back while saying honestly that
+  nothing is open: on a failure the rollback target is `opened` when something is
+  open and the DESIRED set when nothing is, which is what keeps Retry alive
+  across two consecutive failures. Closing the last open family is refused with
+  an outcome rather than reaching `openStream` with an empty source list.
+- **A file-backed table is never rebuilt from residents.** `layerTableLifecycle`
+  refuses the resident enqueue for a layer that has a file-backed table OR has
+  families at all (`enqueueAt`, `rebuildWanted`, the consumer sweep,
+  `refreshStreamingTable`) — the second half covers the window between a family
+  layer's row landing and its first view, so there is never a frozen resident
+  snapshot for a reader to find. Removal goes through `dropFamilyViews`, which
+  drops the views AND releases their registrations: a dropped VFS name still
+  resolves, to nothing, forever, so the cache must forget it or the next ensure
+  builds a view over an empty file with no error anywhere. An engine death
+  clears the registry and every registration, and the revival is the
+  `onEngineRetry(hook)` seam on `layerTables`: `retryEngine` runs it after a
+  successful boot and `installLayerTableLifecycle` re-ensures every family
+  layer's active view. The seam exists because `insights/` may not import
+  `features/` — only the family store knows which layers have families.
+- **The bbox stays in the FILE's CRS, and the file's own footer says which.**
+  A family's view reads the file directly, so its `bbox` column is in the file's
+  coordinates — degrees for a PLATEAU package. `familySourceCrs` therefore reads
+  the Parquet FOOTER (`readCityParquetSchema(...).footer.epsg`, the same ranged
+  read the stream decision already makes, cached per source): the stream header
+  publishes the PROJECTED UTM target `coordinateTargetFor` picked, so recording
+  it would have claimed metres for a degree table and the refusal below would
+  never have fired on the data it exists for. The three tools that need metric
+  bounds — join by location, distance to nearest, aggregate per area — declare
+  `needsMetricBounds` and `metricBoundsRefusal` refuses such a layer by name,
+  temporarily, until performance task 6 makes the coordinate story coherent;
+  Aggregate writes to a vector layer, so the same sentence is applied to its
+  city SOURCE rows in `useToolForm`. A CRS of `null` is NO CLAIM and refuses
+  nothing, which is every other layer — an unreadable footer must not refuse a
+  tool.
+- **The family choice is persisted.** `LayerSnapshot.families {enabled, active}`
+  (`SNAPSHOT_VERSION` 5; `migrateSnapshot` carries v3 and v4 forward, where an
+  absent field means the Building default) and the same optional field in the
+  share hash, which stays `v: 3` as `colorBy` did. Capture takes the DESIRED set,
+  so a save during a failed reopen restores what the user asked for, and restore
+  validates the keys against the families the open actually resolved: unknown
+  keys are dropped and nothing surviving falls back to the default rather than a
+  layer with no stream.
+
+Known limits, deliberately left:
+
+- **Streamed only.** A package under `CITYPARQUET_STREAM_THRESHOLD_BYTES` still
+  merges every object table into ONE layer with ONE table, and
+  `addCityParquetLayer` ignores a restored family choice on that path. The merge
+  is first-wins on a duplicate id with a single summary warning.
+- Ids are assumed unique across families: the scene cannot disambiguate a
+  duplicate, and nothing checks across the open families.
+- Map filtering stays disabled for every streaming layer (`mapFilterSync` skips
+  `source.access === "stream"`), so the panel still reads "Table only" — but no longer
+  "currently loaded" for a family's view.
+- Only the ACTIVE family's view is ensured. Another enabled family's table stays
+  `absent` until its Table button asks for one; the families block says so
+  rather than implying a table exists.
+- **A tool has nowhere to write on a family target, and both destinations say
+  so.** `ALTER TABLE` is refused over a view, so "This layer" is refused for a
+  target whose table is `fileBacked` — `FILE_BACKED_NO_LAYER_COLUMNS` disables
+  the radio in `useToolForm` and fails the run at `execute`'s head, for a draft
+  frozen before a retarget and for `retryRun` replaying one. "New layer" is
+  refused too, by the older streaming rule (`runQueue` takes every streaming city
+  target out), so the copy sentence says plainly that there is no route rather
+  than pointing at that one. Only about the WRITE TARGET: Aggregate writes to a
+  vector layer's feature properties, which have no schema to alter, and its city
+  SOURCE being a view costs it nothing.
+- The re-link placeholder for a saved local package DOES carry the family choice
+  (`UnavailableLayer.families` → `LayerOverrides.families` → the picked-files
+  open), but the row's re-link takes ONE `File`: re-linking a multi-table package
+  that way opens a one-table package, and the saved keys that name its other
+  tables are dropped by `restoredFamilyChoice` as usual.
+
+Evidence: the spike above, and the real-package browser validation
+(`families-browser-validation-yokohama.{json,png}`, "Object families" in
+`docs/performance/cityparquet-2026-09-21/README.md`).
+
+### Three coordinate spaces for a streamed geographic source (2026-09-23)
+
+A streamed PLATEAU table (EPSG:6697) used to be reprojected TWICE: lon/lat →
+UTM with proj4 when a row was read, then UTM → lon/lat → ECEF → ENU with proj4
+again when the cell was baked. Both passes are gone. Longitude/latitude/height
+is already geodetic, so a vertex reaches its render frame by arithmetic alone,
+and the index never leaves metres. Yokohama's stream open dropped from 8.4 s to
+about 6.2 s in Node (9.6 s from 16.3 s over HTTP) with the bytes read
+unchanged; the reads were already decode-bound.
+
+The price of removing the projection is that "metres" now means three
+different things, so they are NAMED and kept apart. Mixing two of them is the
+one way to get this wrong, and it fails silently in every case.
+
+1.  **Bucket space — an INDEX, never geometry.** One closed-form local metric
+    transform about the dataset centre (`navara-core/src/geo/localMetricFrame.ts`):
+
+        x = (λ − λ0) · π/180 · N(φ0) · cos φ0
+        y = (φ − φ0) · π/180 · M(φ0)
+
+    with `N` the WGS84 prime-vertical and `M` the meridional radius of curvature
+    at the centre latitude `φ0`; the inverse is the algebraic inverse. The
+    family index, the tile grid, the camera footprint (`toSourceXY`), cell
+    centres (`toLngLat`), `StreamHeader.extent` and every
+    `ResidentObjectRecord.bbox` speak it, and they all call the SAME function —
+    all it has to be is invertible and identical for every user, which holds for
+    any consistent linear map.
+
+    **It is not ENU.** Its y = 0 is a parallel, not a geodesic, and it ignores
+    the tangent plane's fall-away: 15 km east of the origin it disagrees with
+    true ENU by 12.6 m horizontally and 17.6 m vertically, and at a point 15 km
+    east AND 15 km north (≈ 21 km out, not 15) by 28.2 m horizontally — both
+    pinned in `localMetricFrame.test.ts`. Across one stream
+    cell it is about 20 mm at 400 m and 3 mm at 100 m. Irrelevant for a box
+    query, fatal for a vertex.
+
+2.  **Render space — each CELL's own ENU frame.** `geodeticRingsToEnu`
+    (`navara-core/src/geo/sourceToEnu.ts`) converts a family's rings
+    lon/lat/h → ECEF → the owning cell's ENU frame BEFORE triangulation, so
+    normals and edge creases are computed where they are drawn. No proj4 runs in
+    the read or the bake (a spy pins zero factory calls over a four-cell fetch).
+    Ownership is decided FIRST, in bucket space, from the family's geographic
+    bbox; only then are its rings converted.
+
+3.  **Analysis — the same per-cell ENU frame.** Area, slope, azimuth and volume
+    are frame-independent scalars at cell size, so the render frame doubles as
+    the metric frame for that cell's records. Two cells measure the same
+    building to 6e-14 m² and 0.0006°.
+
+`surfaceData` rings therefore come back in the owning cell's metres and carry a
+`CellEnuFrameDescriptor` naming that origin. Two differently tagged frames
+travel on the protocol and both read `{lngDeg, latDeg, …}`:
+`kind: "local-metric"` is the dataset's bucket index, `kind: "enu"` is one
+cell's render frame. `streamRegistry.georeference` checks `kind` rather than
+truthiness, because reading one as the other places the layer by the wrong
+scale instead of visibly failing.
+
+#### Why only the STREAMED path converts
+
+`computeInclination` reads the z axis as up and `computeAzimuth` reads x/y as
+east/north (`navara-core/src/roofMetrics/metrics.ts`), so an ENU frame that
+spans a whole dataset TILTS against local vertical. At 15 km from its origin
+"up" has dropped about 17.7 m and a roof's apparent inclination has shifted
+about 0.135° — enough to move elevations, roof classifications and rule colours
+with nothing reporting it. A stream CELL is 50–400 m (`BASE_CELL_M = 100`,
+`makeGrid`'s level-2 cell is 400 m on the 6697 fixture), where the same errors
+are about 3 mm and 0.002°.
+
+That is the whole reason the static path keeps UTM. Converting it properly
+needs metrics anchored per OBJECT rather than per model, which is a core change
+to the `roofMetrics`/footprint/volume call sites and a milestone of its own.
+
+#### The geoid, and the one sentence never to write
+
+The vertical datum is untouched. The plugin resolves the EGM2008 undulation `N`
+before it sends `open`, so the worker never performs a network request and
+every cell — including a LoD rebuild — is baked at the right height from the
+first fetch. The arithmetic is: **h = z + N**, fed to `geodeticToEnu` against a
+frame whose origin already sits at `N` (`makeEnuFrame(lng, lat, N)`). That is
+bit for bit the height arithmetic the old `projectPositionsToEnu` performed,
+which is why no separate `raisePositionsInEnu` call exists on this path.
+
+The consequence for a consumer: a ring's local z is ALREADY ≈ the file's own z.
+Rebuild `makeEnuFrame(frame.lngDeg, frame.latDeg, frame.heightM)` from the
+descriptor and read z directly. **Never subtract `heightM`** — that is the
+double application, and it sinks the whole layer by an undulation (37 m at
+Yokohama). If a streamed layer ever gains an in-place `setHeightOffset`,
+`raisePositionsInEnu` becomes the right tool again, in `streamLayer`/
+`cellMeshes`, not in the bake.
+
+#### Changed numbers, not better ones
+
+Leaving UTM changes what some measurements MEAN. State them as changed:
+
+- **Areas and distances** lose UTM's scale factor — ≈ 0.99979868 at
+  139.6°E/35.5°N, about 2.01 m per 10 km and 0.040 % of an area.
+- **Azimuths** lose its ≈ 0.813° grid convergence: "north" is now true north,
+  not grid north. And, since the milestone review, a surface tilted by less
+  than `FLAT_INCLINATION_DEG` = 0.1° has NO azimuth: `computeAzimuth` answers
+  `null`, on the static path too. That is not a refinement of the convergence
+  change, it repairs a defect the milestone introduced — a level ENU frame is
+  tangent at exactly one point, so a constant-height roof leans away from its
+  cell's origin by d/R (0.0032° at 360 m), and reading a bearing off that tilt
+  made the SAME roof face read a different bearing per cell. The external
+  reviewer measured 88.28° against 271.80° on a real PLATEAU object. What this
+  repo's own test pins is the REPAIR, not the defect: "give a constant-height
+  roof no azimuth, in either cell" (`streamWorkerFrame.test.ts`) bakes one
+  constant-height roof in two cells 400 m apart and asserts `azimuthDeg` is
+  `null` in both. The pre-fix pair on that synthetic case — 225.18° against
+  244.83° — is a one-off measurement taken under revert by the fix round's
+  implementer and reproduced by its reviewer, recorded in the milestone's SDD
+  ledger outside the repository; no assertion holds it, and it is only
+  observable by reverting the convention. Every
+  app reader treats `null` as "no aspect", never as due north (the Details
+  panel and the hover tooltip print "Flat"; `roof_azimuth_deg` writes NULL; an
+  azimuth rule condition matches nothing). This does NOT cover a STATIC
+  model-wide frame, which tilts 0.135° at 15 km — past the threshold; that is
+  the deferred per-object anchoring below.
+- **Normals** are computed in ENU instead of being left in UTM space with that
+  convergence unremoved.
+
+One can argue each of these is the more correct number. The point of recording
+them here is that a value read before this milestone and a value read after it
+are not the same value, and a comparison across the boundary is not a
+regression.
+
+- **Winding.** `geodeticRingsToEnu` re-boxes each object's bbox in the cell's
+  ENU frame, because `buildCityMeshArrays` → `orientExteriorRing` orients an
+  exterior ring against the object's bbox CENTRE (a bbox left in another space
+  flips roughly half of an object's surfaces). The milestone first re-boxed that
+  TIGHT around the rings actually PRESENT, where the old path handed the
+  heuristic the file's own row box — and that was a SIGN FLIP, not a changed
+  heuristic. Two rounds of review measured it:
+  - one planar face (a roof-only or footprint-only LoD): the tight box's centre
+    lies IN that face's plane, so all that is left to read is rounding —
+    sub-nanometre for a symmetric ring. Measured normal z = −1 against +1 for
+    the same input with a full-height box.
+  - MORE than one face in the same near-plane: the faces give each OTHER a
+    reference far above any noise floor, and the tight box sits between them and
+    inverts the upper one. Measured on a two-part LoD 0 footprint, `normals[2]`
+    of the lower and upper polygon: tight `−1 / +1` at 5 cm, 50 cm and 2 m of
+    step where the file's row box gives `−1 / −1` at all three; two roof planes
+    3 m apart over a 40 m footprint give tight `−1 / +1` against the row box's
+    `+1 / +1`. The pre-milestone reference was CORRECT for that identical input,
+    so this was milestone-introduced too — an earlier report called it "the
+    original concave weakness of the heuristic", which the measurement refutes.
+
+  The fix is to restore the reference: `geodeticRingsToEnu` takes the objects'
+  FULL geodetic extents — the source file's own row boxes, including the
+  surfaces a LoD filter dropped at READ time — and seeds each object's new box
+  with one before the rings extend it, exactly as `projectCityObjects` seeds from
+  `projectBBox` on the projected path. The stream worker takes them off the
+  bucket boxes the adapter already converted (`geodeticExtentsOf`), and their
+  heights carry `heightOffset` like a vertex does.
+
+  `orientExteriorRing` keeps the `2.5e-4`-of-the-diagonal magnitude floor added
+  in between, now as the BACKSTOP for an object the row box cannot judge. The
+  constant sits between the measured populations (residue 1.5e-6 … 2.0e-5 of the
+  diagonal, a real reference 1.0e-1 for a 30 m building down to 3.4e-3 for a
+  pathological 1 m slab), and it covers exactly one shape: ONE planar face. For
+  an object with two or more near-coplanar faces the upper one is still inverted
+  above a step of 2.5e-4 of the diagonal (2.2 cm over 40 m). Note also that a
+  refused flip keeps the FILE's winding, which is deterministic and
+  spec-conformant but not necessarily right — real CityJSON does point normals
+  into the building on the faces this heuristic exists for.
+
+  It is narrowed, not closed, and the boundary is worth stating because the next
+  person will meet it. `orientExteriorRing` is a one-bit test — does this face's
+  centroid sit on the far side of the object's bbox CENTRE from where its normal
+  points — so **a face is inverted whenever the object's box fails to put that
+  face clearly on ONE side of its centre.** Four ways in, each measured by the
+  fix round's re-review and each pinned in
+  `navara-core/tests/geo/geodeticRingsToEnu.test.ts` except the last:
+  - **no box** — a CityParquet child row whose `bbox` columns are null
+    (`readBBox` returns `null` if any of the six fields is missing or
+    non-finite). The row is still read, still placed, and counted as
+    `invalidBBoxRows`.
+  - **a z-degenerate or near-flat box**, which is VALID data: `readBBox` accepts
+    `zmin == zmax` and `familyIndex` accepts `minZ <= maxZ`. A table whose only
+    geometry is LoD 0 footprints has such a box legitimately — `zmin..zmax` IS
+    the footprint's own step — so the row box equals the tight box, the
+    inversion returns on entirely correct data, and `invalidBBoxRows` stays 0:
+    nothing says the reference carried no information.
+  - **the read LoD's geometry on the wrong side of a box dominated by geometry
+    the read dropped** — a single roof at 8 m inside a 0..40 m row box inverts,
+    flipping at exactly `boxHeight / 2`. A child row carrying its parent's
+    extent, a tower's LoD dropped for a low block's LoD 0, and a basement extent
+    under a ground face all reach it.
+  - **a face legitimately facing its own centroid** — the pre-existing concave
+    weakness (an L-shape's inner walls, a courtyard), described in the
+    double-sided-material bullet at the top of this file and untouched by this
+    milestone.
+
+  The middle two are NOT this milestone's regression: `projectCityObjects` seeds
+  from the same row box on the projected path, so they are the bbox-centre
+  heuristic's own limit, restated with numbers. Closing all four at once needs a
+  real inside/outside test instead of a box centre — signed volume, or
+  consistency across a closed shell — which is the follow-up in
+  `docs/roadmap.md`.
+
+  What the fix is worth on real data was measured in the browser, not inferred: a
+  per-triangle census of the live meshes over real Yokohama PLATEAU found 16,049
+  of 16,058 horizontal LoD 0 footprint faces — 99.94 % — agreeing on one
+  direction (down, which is what a terrain-following footprint's outward normal
+  does), against the `−1 / +1` mixture the tight box gives the same shape in the
+  unit measurement above. The pre-fix state was NOT re-smoked in the browser, so
+  the before/after comparison there is unit-level; the nine dissenters are
+  untraced and fit the null-box population. Evidence and its caveats (the
+  `DoubleSide` material makes the normal G-buffer unable to discriminate a
+  winding on its own, so the census reads the meshes' own face normals) in
+  `docs/performance/cityparquet-2026-09-21/README.md` and the
+  `winding-flatness-browser-smoke-yokohama.json` beside it.
+
+- **Coverage, not equality.** Two different transforms need not select
+  identical rows for the same axis-aligned box. The tests assert CONSERVATIVE
+  coverage (every object the UTM index returned for a view is still returned),
+  and the browser smoke shows it: the same camera loads 4,508 objects /
+  12,568 roof surfaces where it used to load 4,450 / 12,756.
+
+#### Deferred, with reasons
+
+- **The static path keeps UTM normalisation.** Same prerequisite as above
+  (per-object metric anchoring in core). Until then a static 6697 layer pays
+  the ~1.5–2.4 s normalisation and the ~2.2–3.5 s render projection it pays
+  today.
+- **Projected sources (RD New, UTM CityJSON/CityParquet, FlatCityBuf) keep
+  proj4.** Normalising them to ENU at load would save every rebuild's
+  projection pass, and needs the same prerequisite.
+- **Geographic table tools.** A family table still holds geographic bboxes, so
+  join-by-location, distance-to-nearest and aggregate-per-area stay refused.
+  Making them work means a frame-aware spatial path in SQL.
+- **`useObjectSurfaces` has no consumer.** The surfaces path carries its cell
+  frame correctly, but nothing renders it; whoever wires the Surfaces tab or
+  solar scoring to a streamed layer must read `frame` before treating a ring as
+  a position.
+
+Evidence: "Direct geographic → ENU (task 6)" in
+`docs/performance/cityparquet-2026-09-21/README.md` —
+`stream-node-yokohama-after-task6.jsonl` and the browser smoke
+`geographic-enu-browser-smoke-yokohama.{json,png}`.

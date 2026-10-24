@@ -39,6 +39,7 @@ import {
 import { toolById } from "../../features/processing/toolRegistry";
 import {
   derivedLayerName,
+  FILE_BACKED_NO_LAYER_COLUMNS,
   nameTaken,
   STREAMING_NO_NEW_LAYER,
 } from "../../features/processing/deriveLayer";
@@ -64,12 +65,15 @@ import { sourceWorkloadNote } from "../../features/processing/sourceRead";
 import type { ToolDefinition, ToolId } from "../../features/processing/types";
 import type { LayerTable } from "../../insights/layerTables";
 import {
+  citySourceReason,
   eligibilityContextFor,
+  tableEntryFor,
   useEligibilityInputs,
 } from "./useEligibilityContext";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { NO_LOD, useLodOptions } from "./useLodOptions";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 
 /** An EMPTY prefix is a legal prefix — it is how the bare column names are
  *  asked for, and the collision check below is what refuses it when they are
@@ -161,7 +165,6 @@ export function useToolForm(toolId: ToolId) {
   const layers = useLayerStore((s) => s.layers);
   const geoLayers = useGeoLayerStore((s) => s.layers);
   const inputs = useEligibilityInputs();
-  const { tables } = inputs;
   const drafts = useProcessingStore((s) => s.drafts);
   const runs = useProcessingStore((s) => s.runs);
   useComputedColumnStore((s) => s.byLayer); // subscribe: the replace warning depends on it
@@ -176,8 +179,10 @@ export function useToolForm(toolId: ToolId) {
   // opens on a layer rather than on a blank select — §5's "a disabled row still
   // opens the tool view".
   const candidates = useMemo(
-    () => layers.filter((l) => tables[l.id]?.state === "ready"),
-    [layers, tables],
+    () => layers.filter((l) => tableEntryFor(inputs, l.id)?.state === "ready"),
+    // `inputs` carries both halves of the resolution (the tables and the family
+    // records), and both are referentially stable between store writes.
+    [layers, inputs],
   );
   const eligibleTargets = useMemo(
     () =>
@@ -327,15 +332,21 @@ export function useToolForm(toolId: ToolId) {
       });
     }
     if (tool.sourceKind === "city") {
-      return candidates.map((l) => ({
-        id: l.id,
-        name: l.name,
-        disabled: false,
-        reason: null,
-      }));
+      return candidates.map((l) => {
+        // Ruling S2 reaches the SOURCE too: Aggregate measures this layer's
+        // bounds while writing to the vector target, so a degree-based family
+        // table is refused here — `toolEligibility` never sees it.
+        const reason = citySourceReason(inputs, l.id, toolId);
+        return {
+          id: l.id,
+          name: l.name,
+          disabled: reason !== null,
+          reason,
+        };
+      });
     }
     return [];
-  }, [tool.sourceKind, toolId, vectorCandidates, candidates]);
+  }, [tool.sourceKind, toolId, vectorCandidates, candidates, inputs]);
   const storedSourceValid =
     base.sourceLayerId !== null &&
     sourceOptions.some((o) => o.id === base.sourceLayerId);
@@ -376,7 +387,9 @@ export function useToolForm(toolId: ToolId) {
   const cityLayer: Layer | null = vectorTargeted
     ? (layers.find((l) => l.id === sourceLayerId) ?? null)
     : target;
-  const cityTableState = cityLayer ? tables[cityLayer.id] : undefined;
+  const cityTableState = cityLayer
+    ? tableEntryFor(inputs, cityLayer.id)
+    : undefined;
   const cityTable =
     cityTableState !== undefined && cityTableState.state === "ready"
       ? cityTableState.info
@@ -442,8 +455,16 @@ export function useToolForm(toolId: ToolId) {
   // `useLayerCounts` answers the ALL count for `matching` when nothing is
   // filtered (its SQL has no WHERE), so "no filter applied" has to come from
   // the query store itself rather than from a null count.
+  //
+  // Through the ACTIVE family's key (R-C′), like the counts beside it and like
+  // the snapshot `submitRun` freezes: the bare key holds no filter for a
+  // CityParquet layer, so reading it disabled the Matching scope over a table
+  // that plainly showed a matching number.
+  const scopeQueryKey = useActiveTableKey(cityLayer?.id ?? null);
   const noFilter = useQueryStore((s) =>
-    cityLayer === null ? true : layerQuery(s, cityLayer.id).applied === null,
+    scopeQueryKey === null
+      ? true
+      : layerQuery(s, scopeQueryKey).applied === null,
   );
 
   // §7.5's defaults need the SOURCE's keys and the TARGET's table, so they are
@@ -570,11 +591,20 @@ export function useToolForm(toolId: ToolId) {
   // impossible. Same constant as the radio's title and the head's pre-flight.
   // Only a CITY target can be streaming, and `target` is exactly that layer.
   const newLayerBlocked =
-    tool.destinations.includes("new") && target?.isStreaming === true;
+    tool.destinations.includes("new") && target?.source.access === "stream";
+  // The same for "This layer", about the WRITE TARGET's own table: a CityParquet
+  // family's table is a VIEW over its file (R-B′), and the write ends in an
+  // `ALTER TABLE` DuckDB refuses over one. `cityTable` IS the write target's
+  // table here — for a city tool `cityLayer === target` — and for a VECTOR-target
+  // tool it is the SOURCE's, which this must not refuse: §7.6 writes to feature
+  // properties, which have no schema to alter.
+  const layerBlocked = !vectorTargeted && cityTable?.fileBacked === true;
   const destinationReason =
     draft.destination === "new" && newLayerBlocked
       ? STREAMING_NO_NEW_LAYER
-      : null;
+      : draft.destination === "layer" && layerBlocked
+        ? FILE_BACKED_NO_LAYER_COLUMNS
+        : null;
   // §6: the replace warning is SCOPED TO THE COPY for a New-layer run — "2
   // inherited computed columns will be replaced in the new layer". The
   // non-computed collisions are already the prefix error (`sourceCollisions`),
@@ -680,6 +710,9 @@ export function useToolForm(toolId: ToolId) {
     // it (Design decision (f) — a streaming parent has no geometry to copy).
     // Computed above, because `runReason` needs it too.
     newLayerBlocked,
+    // Its twin for the other destination (Design decision (f)'s neighbour): the
+    // target's table is a view over a file, which cannot take new columns.
+    layerBlocked,
     destinationReason,
     prefixError,
     paramsError,

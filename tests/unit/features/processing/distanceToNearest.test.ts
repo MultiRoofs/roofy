@@ -15,6 +15,7 @@
  * ruling is asserted by the sentence §6.1 actually throws, not by a mock's call
  * log.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LayerTable } from "../../../../src/insights/layerTables";
 import type {
@@ -195,7 +196,7 @@ function context(
   const labels: string[] = [];
   const phases: string[] = [];
   const ctx = {
-    layer: { id: "L1", name: "Delft", isStreaming: false },
+    layer: { id: "L1", name: "Delft", source: RESIDENT_SOURCE },
     table: table(),
     target: { kind: "city", layer: { id: "L1" }, table: table() },
     source: source(),

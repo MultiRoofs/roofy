@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import type { CityObject } from "../../../../src/domain/citymodel/types";
 import {
   summarizeCityModel,

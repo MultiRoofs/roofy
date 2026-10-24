@@ -3,6 +3,8 @@ import {
   buildAttributeExportSql,
   buildCityParquetModuleSql,
   buildCityParquetSourceSql,
+  buildFlatCityBufLossSql,
+  buildGeometryExportSql,
   buildRootTypeWhere,
   exportColumnNames,
 } from "../../../src/insights/sql";
@@ -486,5 +488,87 @@ describe("buildRootTypeWhere", () => {
         moduleTypes: ["Building"],
       }),
     ).toContain(predicate);
+  });
+});
+
+describe("buildGeometryExportSql", () => {
+  const base = {
+    reader: "read_cityjson" as const,
+    sourceFile: "export_1_src.city.json",
+    table: "layer_1",
+    lodSuffix: "2_2",
+    attributes: ["bouwjaar"],
+    computedAttributes: [] as ReadonlyArray<string>,
+    where: null,
+    sourceFeatureIds: null,
+    rootTypes: null,
+    format: "cityjson" as const,
+    outFile: "export_1.city.json",
+  };
+
+  it("copies the reader's rows straight to the writer, naming the source for metadata", () => {
+    expect(buildGeometryExportSql(base)).toBe(
+      "COPY (SELECT COLUMNS(c -> c IN ('id', 'feature_id', 'object_type', 'parents', 'children', 'children_roles', 'bbox', 'address', 'implicit_geometry', 'other', 'bouwjaar') OR regexp_matches(c, '^(geometry|geometry_properties|material|texture)_lod2_2$')) FROM read_cityjson('export_1_src.city.json')) TO 'export_1.city.json' (FORMAT cityjson, metadata_from 'export_1_src.city.json')",
+    );
+  });
+
+  it("names the writer the format asks for", () => {
+    expect(
+      buildGeometryExportSql({
+        ...base,
+        format: "flatcitybuf",
+        outFile: "o.fcb",
+      }),
+    ).toContain("TO 'o.fcb' (FORMAT flatcitybuf, metadata_from ");
+    expect(
+      buildGeometryExportSql({
+        ...base,
+        reader: "read_cityjsonseq",
+        format: "cityjsonseq",
+      }),
+    ).toContain("FROM read_cityjsonseq('export_1_src.city.json')");
+  });
+
+  it("ANDs the filter, the derived cut and the root types together", () => {
+    const sql = buildGeometryExportSql({
+      ...base,
+      where: `"bouwjaar" > 2000`,
+      sourceFeatureIds: ["a"],
+      rootTypes: ["Building"],
+    });
+    expect(sql).toContain(
+      `WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "bouwjaar" > 2000) AND COALESCE("feature_id", "id") IN ('a') AND COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN ('Building'))) TO`,
+    );
+  });
+
+  it("joins a computed column in from the layer table", () => {
+    const sql = buildGeometryExportSql({
+      ...base,
+      attributes: ["bouwjaar", "extent_height_m"],
+      computedAttributes: ["extent_height_m"],
+    });
+    expect(sql).toContain(
+      `FROM read_cityjson('export_1_src.city.json') LEFT JOIN (SELECT "id", "extent_height_m" FROM "layer_1") AS "computed" USING ("id")) TO`,
+    );
+  });
+
+  it("refuses an LoD suffix outside the reader's grammar rather than splice it into a pattern", () => {
+    for (const lodSuffix of ["2", "2_2|.*", "02_2", ""]) {
+      expect(() => buildGeometryExportSql({ ...base, lodSuffix })).toThrow(
+        /LoD/,
+      );
+    }
+  });
+
+  it("selects no LoD group for a layer drawn only through implicit geometries", () => {
+    expect(buildGeometryExportSql({ ...base, lodSuffix: null })).toContain(
+      "SELECT COLUMNS(c -> c IN ('id', 'feature_id', 'object_type', 'parents', 'children', 'children_roles', 'bbox', 'address', 'implicit_geometry', 'other', 'bouwjaar')) FROM",
+    );
+  });
+
+  it("counts what a FlatCityBuf cannot hold over the same scoped rows", () => {
+    expect(buildFlatCityBufLossSql({ ...base, rootTypes: ["Building"] })).toBe(
+      `SELECT count(*) FILTER (WHERE "implicit_geometry" IS NOT NULL) AS "implicit", count(*) FILTER (WHERE len("address") > 0) AS "address" FROM read_cityjson('export_1_src.city.json') WHERE COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN ('Building'))`,
+    );
   });
 });

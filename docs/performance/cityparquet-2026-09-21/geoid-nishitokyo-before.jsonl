@@ -1,0 +1,2 @@
+{"source":"nishitokyo-file","step":"construct [2,1,0]","ms":10420.3,"rebuilds":0,"triangles":1913792,"heapMB":722}
+{"source":"nishitokyo-file","step":"setHeightOffset(0 -> 37)","ms":9250.5,"rebuilds":1,"triangles":1913792,"heapMB":729}

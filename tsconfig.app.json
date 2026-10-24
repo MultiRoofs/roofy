@@ -32,10 +32,16 @@
       "@cityjson/navara-flatcitybuf": [
         "./packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/index.ts"
       ],
-      // Likewise engine-bound: `FlatCityBufPlugin` plus the `getPickRay`
+      "@cityjson/navara-stream": [
+        "./packages/cityjson-navara-plugins/packages/navara-stream/src/index.ts"
+      ],
+      "@cityjson/navara-stream/worker": [
+        "./packages/cityjson-navara-plugins/packages/navara-stream/src/worker.ts"
+      ],
+      // Likewise engine-bound: `CityStreamPlugin` plus the `getPickRay`
       // binding (Task C11).
-      "@cityjson/navara-flatcitybuf/plugin": [
-        "./packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/plugin.ts"
+      "@cityjson/navara-stream/plugin": [
+        "./packages/cityjson-navara-plugins/packages/navara-stream/src/plugin.ts"
       ],
       "@cityjson/navara-cityparquet": [
         "./packages/cityjson-navara-plugins/packages/navara-cityparquet/src/index.ts"

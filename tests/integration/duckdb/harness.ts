@@ -1,6 +1,18 @@
 /**
  * A real DuckDB 1.5.5 with the cityjson extension, under Node.
  *
+ * THE EXTENSIONS THE APP SHIPS: every one installs from `public/duckdb-ext/`,
+ * served over HTTP by a child process (the blocking bindings fetch an
+ * extension synchronously, so a server on this process's own event loop could
+ * never answer, and a `LOAD '<path>'` hangs). What the suite proves is
+ * therefore about the exact builds a deploy serves.
+ *
+ * The node runtime caches what it installs under
+ * `~/.duckdb/extensions/<last segment of the repository URL>/` and loads that
+ * copy ever after: `FORCE INSTALL` does not refresh it and `extension_directory`
+ * does not move it. So the repository's last segment carries a hash of the
+ * manifest, and a re-vendored build is downloaded afresh.
+ *
  * The BLOCKING node bindings, not the app's async browser ones: the app's
  * module boots a `Worker` from a jsDelivr blob, which Node has no equivalent
  * for. Reads over `registerFileBuffer` share the code path with the browser
@@ -21,13 +33,58 @@
  * clean up after itself with `fs`.
  */
 
+import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
+
+/** `public/`, whose `duckdb-ext/` is the vendored extension repository. */
+const PUBLIC_DIR = resolve(here, "../../../public");
+
+/** A static server over `public/` on an ephemeral port, in its own process. */
+const SERVER = `
+const http = require("node:http"), fs = require("node:fs"), path = require("node:path");
+const root = process.argv[1];
+const server = http.createServer((req, res) => {
+  // "/duckdb-ext-<hash>/…" is "/duckdb-ext/…" under public/.
+  const asked = new URL(req.url, "http://x").pathname.replace(/^\\/duckdb-ext-[0-9a-f]+\\//, "/duckdb-ext/");
+  const file = path.join(root, decodeURIComponent(asked));
+  if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+  fs.readFile(file, (err, bytes) => {
+    if (err) { res.writeHead(404).end(); return; }
+    res.writeHead(200, { "content-type": "application/wasm" }).end(bytes);
+  });
+});
+server.listen(0, "127.0.0.1", () => process.stdout.write(server.address().port + "\\n"));
+`;
+
+async function serveExtensions(): Promise<{
+  repository: string;
+  child: ChildProcess;
+}> {
+  const child = spawn(process.execPath, ["-e", SERVER, PUBLIC_DIR], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const port = await new Promise<string>((done, fail) => {
+    child.once("error", fail);
+    child.once("exit", (code) =>
+      fail(new Error(`extension server exited (${code})`)),
+    );
+    child.stdout!.once("data", (chunk: Buffer) =>
+      done(chunk.toString().trim()),
+    );
+  });
+  const key = createHash("sha256")
+    .update(readFileSync(resolve(PUBLIC_DIR, "duckdb-ext/manifest.json")))
+    .digest("hex")
+    .slice(0, 16);
+  return { repository: `http://127.0.0.1:${port}/duckdb-ext-${key}`, child };
+}
 
 /** `fixtures/`, resolved from THIS file rather than from the cwd. */
 export const FIXTURE_DIR = resolve(here, "../../../fixtures");
@@ -69,6 +126,7 @@ interface NodeConnection {
 
 interface NodeDuckDB {
   instantiate(): Promise<void>;
+  open(config: { allowUnsignedExtensions?: boolean }): void;
   connect(): NodeConnection;
   registerFileBuffer(name: string, bytes: Uint8Array): void;
   copyFileToBuffer(name: string): Uint8Array;
@@ -108,11 +166,16 @@ export async function openDuckDB(): Promise<Harness> {
     duckdb.NODE_RUNTIME,
   );
   await db.instantiate();
+  // As the app opens it: the vendored develop builds are CI artefacts, not
+  // signed by a repository.
+  db.open({ allowUnsignedExtensions: true });
   const conn = db.connect();
-  // The one statement that needs the network. A failure here is the report the
-  // suite exists to make — the community slot for this DuckDB version is gone
-  // or was rebuilt — so it is left to throw with the extension's own words.
-  conn.query("INSTALL cityjson FROM community;");
+  const { repository, child } = await serveExtensions();
+  conn.query(`SET custom_extension_repository = '${repository}';`);
+  conn.query(`SET autoinstall_extension_repository = '${repository}';`);
+  // Left to throw with the extension's own words: a vendored build this
+  // DuckDB refuses is the report the suite exists to make.
+  conn.query("INSTALL cityjson;");
   conn.query("LOAD cityjson;");
 
   return {
@@ -154,6 +217,7 @@ export async function openDuckDB(): Promise<Harness> {
     },
     close() {
       conn.close();
+      child.kill();
     },
   };
 }
@@ -168,17 +232,13 @@ export async function openDuckDB(): Promise<Harness> {
  * statements are spelled here — the ONE place in the integration suites that
  * may, and the reason a probe suite for both extensions is possible at all.
  *
- * `three_d` comes from the COMMUNITY repository and `spatial` from core, which
- * is the only difference between them. Left to throw: a failure is the report
- * the suite exists to make — the slot for this DuckDB version is gone or was
- * rebuilt — and the extension's own words say more than any wrapper could.
+ * Both come from the vendored repository the harness points at. Left to
+ * throw: the extension's own words say more than any wrapper could.
  */
 export function installExtension(
   db: Harness,
   name: "spatial" | "three_d",
 ): void {
-  db.query(
-    name === "three_d" ? "INSTALL three_d FROM community;" : "INSTALL spatial;",
-  );
+  db.query(`INSTALL ${name};`);
   db.query(`LOAD ${name};`);
 }

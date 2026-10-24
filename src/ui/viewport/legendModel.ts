@@ -26,6 +26,7 @@ export type LegendRowKind =
   | "rule"
   | "unmatched"
   | "single"
+  | "expression"
   | "category"
   | "fill";
 
@@ -62,9 +63,18 @@ export function legendGroups(
   return groups;
 }
 
-/** A city layer's rows, from its own `colorBy` — the three modes the Style
- *  section offers, and nothing read off the effective rule list. */
+/** A city layer's rows, from its own `colorBy` — the modes the Style section
+ *  offers, and nothing read off the effective rule list. */
 export function cityRows(layer: Layer): LegendRow[] {
+  const expression =
+    layer.colorBy === "expression" ? (layer.styleExpression ?? null) : null;
+  if (expression !== null) {
+    // An expression has no rows to name, only colours: one row, swatched with
+    // the literal colours it can paint.
+    return [
+      { label: "Expression", color: swatch(expression), kind: "expression" },
+    ];
+  }
   switch (layer.colorBy) {
     case "rules":
       return [
@@ -114,6 +124,31 @@ export function cityRows(layer: Layer): LegendRow[] {
         },
       ];
   }
+}
+
+const COLOUR_LITERAL =
+  /^(#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|(rgb|rgba|hsl|hsla)\(.*\))$/i;
+const MAX_SWATCH_COLOURS = 6;
+
+/** The literal colours an expression names, in order, as a CSS background:
+ *  flat for one, a gradient for several, the roof colour for none (it
+ *  computes every colour it paints). */
+function swatch(expression: unknown): string {
+  const colours: string[] = [];
+  const walk = (node: unknown): void => {
+    if (colours.length >= MAX_SWATCH_COLOURS) return;
+    if (typeof node === "string") {
+      if (COLOUR_LITERAL.test(node) && !colours.includes(node)) {
+        colours.push(node);
+      }
+    } else if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+    }
+  };
+  walk(expression);
+  if (colours.length === 0) return SURFACE_COLOR_HEX.RoofSurface;
+  if (colours.length === 1) return colours[0]!;
+  return `linear-gradient(90deg, ${colours.join(", ")})`;
 }
 
 /** A vector layer's rows: the category list when the layer colours by an

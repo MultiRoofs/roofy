@@ -1,6 +1,6 @@
 /**
  * The merge moved to `@cityjson/navara-flatcitybuf` in M7.5, and its memo
- * moved INTO `FcbStreamLayerHandle` in Task C9 — see that package's
+ * moved INTO `StreamLayerHandle` in Task C9 — see that package's
  * `tests/residentModel.test.ts` for the cell-merge, attr-key-union and
  * reference-equality cases. What is left here is the app's store binding:
  * resolving a layer id to its handle, and the unregistered-layer case.
@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getResidentModel } from "../../../../src/features/streaming/residentModel";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
-import type { ResidentModel } from "@cityjson/navara-flatcitybuf";
+import type { ResidentModel } from "@cityjson/navara-stream";
 
 function model(ids: string[]): ResidentModel {
   return {

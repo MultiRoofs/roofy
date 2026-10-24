@@ -1,11 +1,12 @@
 /**
  * Turning a CityParquet URL (or a picked folder) into a `CityModel`.
  *
- * This is the I/O half of the CityParquet path: `sourceClassify` decides what a
+ * This is the I/O half of the CityParquet path: `cityParquetUrl` decides what a
  * URL MEANS, `objectStorage` knows how to list and address a bucket, and
  * `@cityjson/navara-cityparquet` knows what the bytes ARE. Nothing here parses
  * parquet or interprets a manifest beyond "which files do I fetch"; the model
- * itself is always `assembleCityParquetModel`'s.
+ * itself is assembled by `assembleCityParquetModel`, then geographic PLATEAU
+ * coordinates are normalized into a metric frame for the viewer and analysis.
  *
  * ONE FAILED FILE FAILS THE LAYER (spec D6). A package is one model in one
  * frame — half of a city drawn with no indication that the other half is
@@ -24,27 +25,32 @@
 import {
   CITYPARQUET_SIDECAR_NAMES,
   sidecarKindOf,
+  type CityParquetSidecarHrefs,
+  type CityParquetSidecarKind,
   type CityParquetSidecars,
   CityParquetError,
   assembleCityParquetModel,
   parseCityParquetManifest,
 } from "@cityjson/navara-cityparquet";
-import type { CityModel } from "@cityjson/navara-core";
-import { detectEncoding } from "../../domain/citymodel/detectEncoding";
+import { parseEpsgCode, type CityModel } from "@cityjson/navara-core";
+import type { ParquetTableSource } from "../../insights/layerTables";
+import { normalizeCityParquetCrs } from "./normalizeCityParquetCrs";
+import { formatFromName } from "../../domain/citymodel/formats";
 import { browserPlatform } from "../../platform/browser";
 import type { HttpClient } from "../../platform/types";
 import {
   MAX_CITYPARQUET_FILES,
   globLiteralPrefix,
   globToRegExp,
-  listStorageObjects,
+  listStorageEntries,
   storageObjectUrl,
+  type StorageEntry,
 } from "./objectStorage";
 import {
   type CityParquetSource,
   type StorageRef,
   classifyCityParquetUrl,
-} from "./sourceClassify";
+} from "../../domain/citymodel/formats/cityParquetUrl";
 
 /** The package manifest filename, at the root of a CityParquet directory. */
 const MANIFEST_FILENAME = "metadata.json";
@@ -57,6 +63,32 @@ const MANIFEST_FILENAME = "metadata.json";
  * not the thing being tested.
  */
 const FETCH_CONCURRENCY = 6;
+
+/**
+ * A static load: the model the viewer draws, and the object tables the layer's
+ * DuckDB table is read from.
+ *
+ * `sourceCrs` is the CRS the FILES are in — what their `bbox` columns
+ * measure — which is not the model's after {@link normalizeCityParquetCrs}
+ * has moved a geographic package into metres.
+ */
+export interface LoadedCityParquet {
+  readonly model: CityModel;
+  readonly tables: ReadonlyArray<ParquetTableSource>;
+  readonly sourceCrs: string | null;
+}
+
+function loaded(
+  assembled: CityModel,
+  tables: ReadonlyArray<ParquetTableSource>,
+): LoadedCityParquet {
+  const epsg = parseEpsgCode(assembled.metadata.referenceSystem);
+  return {
+    model: normalizeCityParquetCrs(assembled),
+    tables,
+    sourceCrs: epsg === null ? null : `EPSG:${String(epsg)}`,
+  };
+}
 
 /** One fetched file, in the shape `assembleCityParquetModel` takes. */
 interface FetchedTable {
@@ -217,12 +249,16 @@ function dropSidecars(names: readonly string[]): string[] {
  * wildcard can act on; the count is always in it, since "too many" without a
  * number leaves the user guessing how much narrower to get.
  */
-/** The appearance sidecars among a listing, by kind (first of each wins). */
-function sidecarsAmong(names: readonly string[]): {
-  textures?: string;
-  materials?: string;
-} {
-  const out: { textures?: string; materials?: string } = {};
+/** Every sidecar kind a package can ship: appearance and implicit geometry. */
+const SIDECAR_KINDS: ReadonlyArray<CityParquetSidecarKind> = [
+  "textures",
+  "materials",
+  "implicitGeometries",
+];
+
+/** The sidecars among a listing, by kind (first of each wins). */
+function sidecarsAmong(names: readonly string[]): CityParquetSidecarHrefs {
+  const out: CityParquetSidecarHrefs = {};
   for (const name of names) {
     const kind = sidecarKindOf(name);
     if (kind !== null) out[kind] ??= name;
@@ -232,21 +268,41 @@ function sidecarsAmong(names: readonly string[]): {
 
 type Target = { url: string; name: string };
 
+/** An object table to load, with its byte size when the source declared one
+ *  (a manifest's `file:size`, a bucket listing's size) — `null` when it did
+ *  not, and the caller must learn it some other way if it needs it. */
+export type CityParquetTableTarget = Target & {
+  readonly size: number | null;
+  /**
+   * The OBJECT FAMILY key the manifest named this table with (ruling R-A′) —
+   * absent when nothing but the file name says what the table holds, and the
+   * caller derives the key from {@link Target.name} instead.
+   *
+   * Only a manifest can supply it: a STAC asset key (`building`,
+   * `water_body`) is a writer's statement about the table's contents, while a
+   * bucket listing and a lone URL give nothing but a path.
+   */
+  readonly family?: string;
+};
+
 /** Everything a source resolves to: the object tables to load, and the
- *  appearance sidecars found beside them (fetched too, when present). */
-interface Targets {
-  readonly tables: Target[];
-  readonly sidecars: { textures?: Target; materials?: Target };
+ *  sidecars found beside them (fetched too, when present). */
+export interface CityParquetTargets {
+  readonly tables: CityParquetTableTarget[];
+  readonly sidecars: Partial<Record<CityParquetSidecarKind, Target>>;
 }
+type Targets = CityParquetTargets;
 
 function sidecarTargets(
-  beside: { textures?: string; materials?: string },
+  beside: CityParquetSidecarHrefs,
   target: (name: string) => Target,
 ): Targets["sidecars"] {
-  return {
-    ...(beside.textures ? { textures: target(beside.textures) } : {}),
-    ...(beside.materials ? { materials: target(beside.materials) } : {}),
-  };
+  const out: Partial<Record<CityParquetSidecarKind, Target>> = {};
+  for (const kind of SIDECAR_KINDS) {
+    const name = beside[kind];
+    if (name) out[kind] = target(name);
+  }
+  return out;
 }
 
 function overCap(names: readonly string[]): boolean {
@@ -264,12 +320,13 @@ async function expandGlob(
   store: StorageRef,
   pattern: string,
   http: HttpClient,
-): Promise<{ tables: string[]; listed: string[] }> {
-  const listed = await listStorageObjects(
+): Promise<{ tables: string[]; listed: string[]; entries: StorageEntry[] }> {
+  const entries = await listStorageEntries(
     store,
     globLiteralPrefix(pattern),
     http,
   );
+  const listed = entries.map((e) => e.name);
   const matcher = globToRegExp(pattern);
   const matched = parquetObjects(listed.filter((n) => matcher.test(n)));
   const tables = dropSidecars(matched);
@@ -283,7 +340,7 @@ async function expandGlob(
       `The wildcard matches ${String(tables.length)} files; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once — narrow the pattern.`,
     );
   }
-  return { tables, listed };
+  return { tables, listed, entries };
 }
 
 /** `storage-dir` without a manifest: the `.parquet` files directly under it. */
@@ -333,7 +390,11 @@ function resolveHref(href: string, baseUrl: string): string {
  * them. The count is refused before the first byte is requested — there is no
  * "narrow the pattern" advice to give here, because there is no pattern.
  */
-function manifestTargets(manifest: unknown, baseUrl: string): Targets {
+function manifestTargets(
+  manifest: unknown,
+  baseUrl: string,
+  listedSize: (url: string) => number | null = () => null,
+): Targets {
   const parsed = parseCityParquetManifest(manifest);
   const hrefs = parsed.objectTables;
   if (overCap(hrefs)) {
@@ -344,7 +405,18 @@ function manifestTargets(manifest: unknown, baseUrl: string): Targets {
     name: href,
   });
   return {
-    tables: hrefs.map(target),
+    tables: hrefs.map((href, index) => {
+      const t = target(href);
+      // BY INDEX, never by href: `families` pairs one-to-one with
+      // `objectTables` in order, and two tables may share an href-derived key.
+      const family = parsed.families[index]?.key;
+      // The manifest's own figure first; a bucket listing fills the gaps.
+      return {
+        ...t,
+        size: parsed.sizes[href] ?? listedSize(t.url),
+        ...(family === undefined ? {} : { family }),
+      };
+    }),
     sidecars: sidecarTargets(parsed.sidecars, target),
   };
 }
@@ -358,17 +430,24 @@ function declaredOverCap(count: number): string {
 // Entry points
 // ---------------------------------------------------------------------------
 
-/** The fetch targets one classified source expands to. */
-async function targetsFor(
+/**
+ * The fetch targets one classified source expands to — object tables (with
+ * any size the source declared) and appearance sidecars.
+ *
+ * Exported so the static/stream decision (`streamDecision.ts`) sizes exactly
+ * the tables this loader would fetch. Throws the loader's own sentences (a
+ * 404 manifest, an empty listing, an expansion over the file cap).
+ */
+export async function cityParquetTargets(
   source: CityParquetSource,
   http: HttpClient,
-): Promise<Targets> {
+): Promise<CityParquetTargets> {
   switch (source.kind) {
     case "table":
       // A lone table: nothing lists its siblings, so no sidecars are looked
       // for — its appearance columns stay unresolved (documented v1 limit).
       return {
-        tables: [{ url: source.url, name: baseName(source.url) }],
+        tables: [{ url: source.url, name: baseName(source.url), size: null }],
         sidecars: {},
       };
 
@@ -384,17 +463,24 @@ async function targetsFor(
           {
             url: storageObjectUrl(source.store, source.objectName),
             name: baseName(source.objectName),
+            size: null,
           },
         ],
         sidecars: {},
       };
 
     case "storage-dir": {
-      const listed = await listStorageObjects(
+      const entries = await listStorageEntries(
         source.store,
         source.prefix,
         http,
       );
+      const listed = entries.map((e) => e.name);
+      const sizeByUrl = new Map(
+        entries.map((e) => [storageObjectUrl(source.store, e.name), e.size]),
+      );
+      const listedSize = (url: string): number | null =>
+        sizeByUrl.get(url) ?? null;
       // A manifest is authoritative when the package ships one: it names the
       // object tables the writer meant, which is not necessarily every parquet
       // file sitting next to them.
@@ -407,6 +493,7 @@ async function targetsFor(
         return manifestTargets(
           manifest,
           storageObjectUrl(source.store, source.prefix),
+          listedSize,
         );
       }
       const objectTarget = (name: string): Target => ({
@@ -415,7 +502,10 @@ async function targetsFor(
       });
       return {
         tables: directTables(listed, source.store, source.prefix).map(
-          objectTarget,
+          (name) => {
+            const t = objectTarget(name);
+            return { ...t, size: listedSize(t.url) };
+          },
         ),
         sidecars: sidecarTargets(
           sidecarsAmong(listed.filter((n) => n.startsWith(source.prefix))),
@@ -425,11 +515,12 @@ async function targetsFor(
     }
 
     case "storage-glob": {
-      const { tables, listed } = await expandGlob(
+      const { tables, listed, entries } = await expandGlob(
         source.store,
         source.pattern,
         http,
       );
+      const sizeByName = new Map(entries.map((e) => [e.name, e.size]));
       const objectTarget = (name: string): Target => ({
         url: storageObjectUrl(source.store, name),
         // The full object name, because a glob's files usually SHARE a base
@@ -438,7 +529,10 @@ async function targetsFor(
         name,
       });
       return {
-        tables: tables.map(objectTarget),
+        tables: tables.map((name) => ({
+          ...objectTarget(name),
+          size: sizeByName.get(name) ?? null,
+        })),
         sidecars: sidecarTargets(sidecarsAmong(listed), objectTarget),
       };
     }
@@ -450,17 +544,15 @@ async function fetchSidecars(
   targets: Targets["sidecars"],
   http: HttpClient,
 ): Promise<CityParquetSidecars> {
-  const out: { textures?: Uint8Array; materials?: Uint8Array } = {};
-  if (targets.textures) {
-    out.textures = (
-      await fetchTable(targets.textures.url, targets.textures.name, http)
-    ).bytes;
-  }
-  if (targets.materials) {
-    out.materials = (
-      await fetchTable(targets.materials.url, targets.materials.name, http)
-    ).bytes;
-  }
+  const out: { -readonly [K in keyof CityParquetSidecars]: Uint8Array } = {};
+  await Promise.all(
+    SIDECAR_KINDS.map(async (kind) => {
+      const sidecar = targets[kind];
+      if (sidecar) {
+        out[kind] = (await fetchTable(sidecar.url, sidecar.name, http)).bytes;
+      }
+    }),
+  );
   return out;
 }
 
@@ -475,10 +567,10 @@ async function fetchSidecars(
 export async function loadCityParquetFromUrl(
   rawUrl: string,
   http: HttpClient = browserPlatform.http,
-): Promise<CityModel> {
+): Promise<LoadedCityParquet> {
   const source = classifyCityParquetUrl(rawUrl);
   if (source === null) {
-    // `detectEncoding` matches on a name, `classifyCityParquetUrl` on a URL, so
+    // `formatFromName` matches on a name, `classifyCityParquetUrl` on a URL, so
     // a `.parquet` string that is not a parsable http(s)/gs/s3 URL at all (a
     // bare relative path, another scheme) is CityParquet to the router and
     // nothing to the classifier. Fetching it as a single table keeps the two in
@@ -486,21 +578,25 @@ export async function loadCityParquetFromUrl(
     // be read as Parquet" — instead of this function claiming the URL was never
     // CityParquet at all. (A `.parquet.gz` no longer lands here: the classifier
     // owns it as a table, for the same reason.)
-    if (detectEncoding(rawUrl) === "cityparquet") {
-      return assembleCityParquetModel([
-        await fetchTable(rawUrl, baseName(rawUrl), http),
+    if (formatFromName(rawUrl) === "cityparquet") {
+      const table = await fetchTable(rawUrl, baseName(rawUrl), http);
+      return loaded(await assembleCityParquetModel([table]), [
+        { bytes: table.bytes },
       ]);
     }
     throw new Error(
       `"${rawUrl}" is not a CityParquet source — expected a .parquet file, a package directory containing ${MANIFEST_FILENAME}, or a gs:// / s3:// pattern.`,
     );
   }
-  const targets = await targetsFor(source, http);
+  const targets = await cityParquetTargets(source, http);
   const [tables, sidecars] = await Promise.all([
     fetchAll(targets.tables, http),
     fetchSidecars(targets.sidecars, http),
   ]);
-  return assembleCityParquetModel(tables, { sidecars });
+  return loaded(
+    await assembleCityParquetModel(tables, { sidecars }),
+    tables.map(({ bytes }) => ({ bytes })),
+  );
 }
 
 /**
@@ -548,17 +644,33 @@ function fileForHref(
   return matches.length === 1 ? matches[0]?.[1] : undefined;
 }
 
+/** A picked selection resolved to its object tables and sidecars. */
+export interface CityParquetFileTargets {
+  /** Object tables in manifest (or selection) order, keyed by their path
+   *  within the picked folder. */
+  readonly tables: ReadonlyArray<{
+    readonly name: string;
+    readonly file: File;
+    /** The manifest's object-family key for this table (R-A′), absent when the
+     *  folder ships no manifest and the file name is all there is. */
+    readonly family?: string;
+  }>;
+  readonly sidecars: Partial<Record<CityParquetSidecarKind, File>>;
+}
+
 /**
- * Load a CityParquet package the user picked off disk.
+ * Resolve a picked selection to the files a load reads.
  *
  * Files are keyed by their path within the picked folder (see
  * {@link pickedPath}): a manifest picks the tables when there is one, and the
  * parquet files minus the known sidecars do when there is not — the same
- * two-step `parseCityParquetManifest` applies to a fetched package.
+ * two-step `parseCityParquetManifest` applies to a fetched package. Exported
+ * so the static/stream decision sizes exactly the tables a load would read.
+ * Reads the manifest, never a table.
  */
-export async function loadCityParquetFromFiles(
+export async function cityParquetFileTargets(
   files: ReadonlyArray<File>,
-): Promise<CityModel> {
+): Promise<CityParquetFileTargets> {
   const byPath = new Map<string, File>();
   for (const file of files) {
     const path = pickedPath(file);
@@ -575,7 +687,9 @@ export async function loadCityParquetFromFiles(
 
   const manifestFile = byPath.get(MANIFEST_FILENAME);
   let names: string[];
-  let sidecarNames: { textures?: string; materials?: string };
+  let sidecarNames: CityParquetSidecarHrefs;
+  /** The manifest's family key per table, by INDEX into `names`. */
+  let familyKeys: ReadonlyArray<string> = [];
   if (manifestFile === undefined) {
     const parquet = [...byPath.keys()].filter((path) =>
       path.endsWith(".parquet"),
@@ -595,6 +709,7 @@ export async function loadCityParquetFromFiles(
     const parsed = parseCityParquetManifest(manifest);
     names = parsed.objectTables;
     sidecarNames = parsed.sidecars;
+    familyKeys = parsed.families.map((f) => f.key);
   }
 
   if (names.length === 0) {
@@ -615,23 +730,48 @@ export async function loadCityParquetFromFiles(
     );
   }
 
-  const tables: FetchedTable[] = [];
-  for (const name of names) {
+  const tables = names.map((name, index) => {
     const file = fileForHref(name, byPath);
     if (file === undefined) {
       throw new Error(
         `The folder is missing "${name}", which its ${MANIFEST_FILENAME} declares as an object table.`,
       );
     }
-    tables.push({ name, bytes: new Uint8Array(await file.arrayBuffer()) });
-  }
-  const sidecars: { textures?: Uint8Array; materials?: Uint8Array } = {};
-  for (const kind of ["textures", "materials"] as const) {
+    // BY INDEX: `families` pairs one-to-one with `objectTables` in order.
+    const family = familyKeys[index];
+    return { name, file, ...(family === undefined ? {} : { family }) };
+  });
+  const sidecars: Partial<Record<CityParquetSidecarKind, File>> = {};
+  for (const kind of SIDECAR_KINDS) {
     const name = sidecarNames[kind];
     const file = name === undefined ? undefined : fileForHref(name, byPath);
+    if (file) sidecars[kind] = file;
+  }
+  return { tables, sidecars };
+}
+
+/**
+ * Load a CityParquet package the user picked off disk, as one `CityModel`
+ * (the files {@link cityParquetFileTargets} resolves, read whole).
+ */
+export async function loadCityParquetFromFiles(
+  files: ReadonlyArray<File>,
+): Promise<LoadedCityParquet> {
+  const targets = await cityParquetFileTargets(files);
+  const tables: FetchedTable[] = [];
+  for (const { name, file } of targets.tables) {
+    tables.push({ name, bytes: new Uint8Array(await file.arrayBuffer()) });
+  }
+  const sidecars: { -readonly [K in keyof CityParquetSidecars]: Uint8Array } =
+    {};
+  for (const kind of SIDECAR_KINDS) {
+    const file = targets.sidecars[kind];
     if (file) sidecars[kind] = new Uint8Array(await file.arrayBuffer());
   }
-  return assembleCityParquetModel(tables, { sidecars });
+  return loaded(
+    await assembleCityParquetModel(tables, { sidecars }),
+    targets.tables.map(({ file }) => ({ file })),
+  );
 }
 
 /**

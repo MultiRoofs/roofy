@@ -7,12 +7,12 @@
  *     of the loader hook's routing, so each has to be pinned separately — the
  *     fcb equivalents are in `appRestoreShare.test.tsx` for the same reason.
  *     Both use a `gs://` source on purpose: it carries no extension at all, so
- *     a site that classified with `detectEncoding` would read it as CityJSON
+ *     a site that classified by extension alone would read it as CityJSON
  *     and hand parquet bytes (or a bucket listing) to `JSON.parse`.
  *
  * The engine is never imported (`NavaraViewport` is mocked — jsdom has no
  * WebGL and `@navaramap/three` crashes at module scope under Node), and the
- * CityParquet READER is mocked while its ROUTING (`sourceClassify`) stays
+ * CityParquet READER is mocked while its ROUTING (`cityParquetUrl`) stays
  * real: which arm a URL takes is precisely what is under test.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,8 +47,8 @@ window.matchMedia ??= ((query: string) =>
     dispatchEvent: () => false,
   }) as unknown as MediaQueryList) as typeof window.matchMedia;
 
-/** A package directory in a bucket: no extension, so `detectEncoding` reads
- *  it as "cityjson" and only `isCityParquetUrl` gets it right. */
+/** A package directory in a bucket: no extension, so only
+ *  `isCityParquetUrl` (inside `formatFromName`) gets it right. */
 const PARQUET_URL = "gs://city3d/delft/";
 const JSON_URL = "https://example.test/delft.city.json";
 
@@ -200,6 +200,52 @@ vi.mock(
   }),
 );
 
+/** The SETTINGS every picked-files add was given, so a re-link can be asked
+ *  what it carried. Only the capture is added; the real loader still runs. */
+const fromFilesSettings: unknown[] = [];
+vi.mock(
+  "../../../src/features/cityparquet/addCityParquetLayer",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../src/features/cityparquet/addCityParquetLayer")
+      >();
+    return {
+      ...actual,
+      addCityParquetLayerFromFiles: (
+        files: ReadonlyArray<File>,
+        name: string,
+        settings: Parameters<typeof actual.addCityParquetLayerFromFiles>[2],
+        deps: Parameters<typeof actual.addCityParquetLayerFromFiles>[3],
+      ) => {
+        fromFilesSettings.push(settings);
+        return actual.addCityParquetLayerFromFiles(files, name, settings, deps);
+      },
+    };
+  },
+);
+
+/**
+ * The static-or-stream DECISION is faked, static and immediate: these cases
+ * pin the static rebuild, and the real decision would size a `gs://` source
+ * by LISTING the bucket (a real fetch under jsdom — slow, flaky, and network).
+ * Its own suite is `streamDecision.test.ts`.
+ */
+const decideCityParquetMode = vi.hoisted(() =>
+  vi.fn(async (_input: unknown) => ({ mode: "static" as const })),
+);
+vi.mock("../../../src/features/cityparquet/streamDecision", () => ({
+  CITYPARQUET_STREAM_THRESHOLD_BYTES: 128 * 1024 * 1024,
+  decideCityParquetMode,
+}));
+
+/** No path in this file may reach the network; a stray probe fails loudly. */
+const fetchSpy = vi.fn(async (input: unknown) => {
+  throw new Error(
+    `unexpected network request in a jsdom test: ${String(input)}`,
+  );
+});
+
 const { App } = await import("../../../src/app/App");
 const { useLayerStore } =
   await import("../../../src/features/layers/layerStore");
@@ -269,19 +315,32 @@ function shareHash(
 
 beforeEach(() => {
   extensionReady = false;
+  decideCityParquetMode.mockClear();
+  fetchSpy.mockClear();
+  vi.stubGlobal("fetch", fetchSpy);
   loadFromUrl.mockReset();
   loadFromUrl.mockResolvedValue(jsonLoaded);
   loadCityParquetFromUrl.mockReset();
-  loadCityParquetFromUrl.mockResolvedValue(parquetModel);
+  loadCityParquetFromUrl.mockResolvedValue({
+    model: parquetModel,
+    tables: [{ bytes: new Uint8Array([1]) }],
+    sourceCrs: null,
+  });
   loadCityParquetFromFiles.mockReset();
-  loadCityParquetFromFiles.mockResolvedValue(parquetModel);
+  loadCityParquetFromFiles.mockResolvedValue({
+    model: parquetModel,
+    tables: [{ bytes: new Uint8Array([1]) }],
+    sourceCrs: null,
+  });
   useLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
   enqueued.length = 0;
+  fromFilesSettings.length = 0;
   location.hash = "";
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   cleanup();
   location.hash = "";
 });
@@ -312,14 +371,59 @@ describe("App snapshot restore — CityParquet layers", () => {
     expect(loadCityParquetFromUrl).toHaveBeenCalledWith(PARQUET_URL);
     // The CityJSON path would have parsed a bucket listing as JSON.
     expect(loadFromUrl).not.toHaveBeenCalled();
+    // The restore re-ran the decision for the saved URL, and nothing probed
+    // the network on the way.
+    expect(decideCityParquetMode).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "url", url: PARQUET_URL }),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
 
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("cityparquet");
-    expect(layer.modelRef).toEqual({ type: "url", url: PARQUET_URL });
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url: PARQUET_URL,
+      encoding: "cityparquet",
+    });
     expect(layer.rules).toEqual([RULE]);
     expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
     expect(layer.hiddenTypes).toEqual(["Building"]);
+  });
+
+  it("carries the saved family choice onto a LOCAL package's re-link", async () => {
+    // A local source cannot be reopened from a snapshot — the browser gives no
+    // path — so the layer comes back as a placeholder the user re-links. That
+    // placeholder used to carry every saved setting but the families, so
+    // re-selecting the file reopened the package at the Building default and the
+    // saved choice was lost with no way to notice.
+    render(
+      <App
+        persistenceStore={storeWith(
+          snapshotWith([
+            {
+              name: "yokohama",
+              modelRef: { type: "file", fileName: "building.parquet" },
+              rules: [],
+              rulesEnabled: true,
+              visible: true,
+              families: { enabled: ["bridge"], active: "bridge" },
+            },
+          ] as never),
+        )}
+      />,
+    );
+    await clickRestore();
+
+    const input = await screen.findByTestId("relink-input");
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "building.parquet")] },
+    });
+
+    await waitFor(() => expect(fromFilesSettings).toHaveLength(1));
+    expect(fromFilesSettings[0]).toMatchObject({
+      families: { enabled: ["bridge"], active: "bridge" },
+    });
   });
 
   it("counts a failing CityParquet layer and still restores its siblings", async () => {
@@ -381,7 +485,11 @@ describe("App share-link restore — CityParquet layers", () => {
     expect(loadFromUrl).not.toHaveBeenCalled();
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("cityparquet");
-    expect(layer.modelRef).toEqual({ type: "url", url: PARQUET_URL });
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url: PARQUET_URL,
+      encoding: "cityparquet",
+    });
   });
 
   it("counts a failing shared CityParquet layer without dropping the rest of the link", async () => {
@@ -510,7 +618,7 @@ describe("App — a failed group add is reported", () => {
 });
 
 describe("DuckDB layer tables", () => {
-  it("builds a CityParquet layer's table from the parsed MODEL — there is no reader for it", async () => {
+  it("builds a CityParquet layer's table from its Parquet files, not from the model", async () => {
     location.hash = shareHash([
       {
         name: "pkg",
@@ -522,7 +630,7 @@ describe("DuckDB layer tables", () => {
     ]);
     render(<App persistenceStore={storeWith(null)} />);
     await waitFor(() => expect(enqueued).toHaveLength(1));
-    expect(enqueued[0]!.kind).toBe("model");
+    expect(enqueued[0]!.kind).toBe("parquet");
   });
 
   it("builds an ordinary CityJSON URL layer's table from the decoded BYTES", async () => {

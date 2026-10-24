@@ -5,8 +5,9 @@
  * `NODE_IMPORT_SAFE = false`, the engine crashes at module scope under Node),
  * so `fitAll` / `fitLayer` / `alignView` are unit-testable without WebGL. Task
  * B11a feeds the results to `view.setCamera()` (instant) or `view.flyTo()`
- * (animated); note that `flyTo` emits a full `movestart..moveend` burst that
- * Task C7's suppression bracket must swallow, while `setCamera` emits nothing.
+ * (animated); both emit camera events (`setCamera` a `move` and `moveend`
+ * since Navara 0.2, `flyTo` a full `movestart..moveend` burst) that Task C7's
+ * suppression bracket must swallow.
  *
  * Semantics: the returned `lng`/`lat`/`height` are the CAMERA's own geodetic
  * position (Navara's `setCamera(camPos)` with `distance` omitted), and

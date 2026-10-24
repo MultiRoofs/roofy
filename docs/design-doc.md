@@ -252,13 +252,24 @@ export interface ShareStateCodec {
 }
 ```
 
-Planned v1 implementations:
+Where the data lives is one seam, `StorageBackend` (`src/persistence/storage/`):
+four async calls (`get`, `put`, `delete`, `list`) over string documents in a
+namespace. Everything the app keeps sits on top of it:
 
-- `InMemoryProjectStateStore`
-- `LocalStorageProjectStateStore`
-- `UrlHashShareStateCodec`
+- `SnapshotRepository` implements `ProjectStateStore` for workspaces, in the
+  `snapshot` namespace, encoding each through a `SnapshotCodec` (JSON).
+- `createPreferenceStore` holds the small per-browser settings (theme, shadow
+  quality, the walkthrough's progress) in the `preference` namespace. The
+  stores read it synchronously, so `main.tsx` hydrates it before the app loads.
+- `appStorage.ts` wires both to one backend: `LocalStorageBackend` today
+  (keys `roofy:<namespace>:<key>`), `MemoryBackend` in tests.
 
-Future implementations can add server-backed persistence or Tauri-native storage without changing feature-level code.
+A server, IndexedDB or a desktop file is another `StorageBackend` in
+`appStorage.ts`; a store that needs more than documents (queries, sharing
+between users) is another `ProjectStateStore`. Feature code does not change
+either way, and lint forbids `localStorage` and `sessionStorage` outside
+`LocalStorageBackend`. Share links are a separate path:
+`urlShare.ts` encodes a view into the URL hash.
 
 ## 17. Shareability Constraints
 

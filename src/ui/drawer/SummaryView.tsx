@@ -65,12 +65,13 @@ export function SummaryView({
   const streamVersion = useStreamStore(
     (state) => state.streams[layer.id]?.version,
   );
-  const resident = layer.isStreaming
-    ? getResidentModel(layer.id, streamVersion ?? 0)
-    : null;
+  const resident =
+    layer.source.access === "stream"
+      ? getResidentModel(layer.id, streamVersion ?? 0)
+      : null;
   const allSummary = useMemo(
     () =>
-      layer.isStreaming
+      layer.source.access === "stream"
         ? summarizeResidentRecords(resident!.objects)
         : summarizeCityModel(layer.model.objects),
     [layer, resident],
@@ -137,12 +138,13 @@ export function SummaryView({
       ? allSummary
       : matchingIds === null
         ? null
-        : layer.isStreaming
+        : layer.source.access === "stream"
           ? summarizeResidentRecords(resident!.objects, matchingIds)
           : summarizeCityModel(layer.model.objects, matchingIds);
   const matchingAvailable =
     query?.applied !== null && query?.applied !== undefined;
-  const scopeLabel = layer.isStreaming ? "currently loaded" : "buildings";
+  const scopeLabel =
+    layer.source.coverage === "viewport" ? "currently loaded" : "buildings";
 
   return (
     <section className="data-drawer-summary" aria-label="Layer summary">
@@ -175,7 +177,9 @@ export function SummaryView({
             {formatCount(summary.buildings)}{" "}
             {scope === "matching" ? "matching " : ""}
             {scopeLabel}
-            {layer.isStreaming ? " buildings — not the whole dataset" : ""}
+            {layer.source.coverage === "viewport"
+              ? " buildings — not the whole dataset"
+              : ""}
           </p>
           <dl className="summary-definition-grid">
             <Definition

@@ -1,0 +1,157 @@
+{
+  "name": "yokohama",
+  "bytes": 334831616,
+  "rows": 884106,
+  "rowGroups": 14,
+  "uncompressedBytes": 1534203468,
+  "columns": {
+    "id": {
+      "compressed": 17158319,
+      "uncompressed": 32292997
+    },
+    "feature_id": {
+      "compressed": 17135652,
+      "uncompressed": 32254576
+    },
+    "object_type": {
+      "compressed": 2477,
+      "uncompressed": 1954
+    },
+    "parents": {
+      "compressed": 6143,
+      "uncompressed": 8913
+    },
+    "children": {
+      "compressed": 27113,
+      "uncompressed": 52555
+    },
+    "children_roles": {
+      "compressed": 2713,
+      "uncompressed": 2101
+    },
+    "address": {
+      "compressed": 24417,
+      "uncompressed": 18909
+    },
+    "bbox": {
+      "compressed": 23960795,
+      "uncompressed": 42446883
+    },
+    "geometry_lod0_0": {
+      "compressed": 74610682,
+      "uncompressed": 184660497
+    },
+    "geometry_properties_lod0_0": {
+      "compressed": 11287,
+      "uncompressed": 9171
+    },
+    "material_lod0_0": {
+      "compressed": 5426,
+      "uncompressed": 4202
+    },
+    "texture_lod0_0": {
+      "compressed": 8139,
+      "uncompressed": 6303
+    },
+    "geometry_lod1_0": {
+      "compressed": 178052581,
+      "uncompressed": 1136210896
+    },
+    "geometry_properties_lod1_0": {
+      "compressed": 533052,
+      "uncompressed": 5092955
+    },
+    "material_lod1_0": {
+      "compressed": 5426,
+      "uncompressed": 4202
+    },
+    "texture_lod1_0": {
+      "compressed": 8139,
+      "uncompressed": 6303
+    },
+    "geometry_lod2_0": {
+      "compressed": 6888452,
+      "uncompressed": 37930979
+    },
+    "geometry_properties_lod2_0": {
+      "compressed": 349382,
+      "uncompressed": 4673012
+    },
+    "material_lod2_0": {
+      "compressed": 5426,
+      "uncompressed": 4202
+    },
+    "texture_lod2_0": {
+      "compressed": 8558503,
+      "uncompressed": 16577136
+    },
+    "geometry_lod3_0": {
+      "compressed": 2789410,
+      "uncompressed": 27514573
+    },
+    "geometry_properties_lod3_0": {
+      "compressed": 75215,
+      "uncompressed": 586717
+    },
+    "material_lod3_0": {
+      "compressed": 7222,
+      "uncompressed": 8900
+    },
+    "texture_lod3_0": {
+      "compressed": 2776028,
+      "uncompressed": 9670429
+    },
+    "geometry_lod4_0": {
+      "compressed": 321504,
+      "uncompressed": 2700902
+    },
+    "geometry_properties_lod4_0": {
+      "compressed": 13563,
+      "uncompressed": 26374
+    },
+    "material_lod4_0": {
+      "compressed": 5809,
+      "uncompressed": 4789
+    },
+    "texture_lod4_0": {
+      "compressed": 250112,
+      "uncompressed": 422307
+    },
+    "template": {
+      "compressed": 7301,
+      "uncompressed": 5465
+    },
+    "other": {
+      "compressed": 2294,
+      "uncompressed": 1682
+    },
+    "measuredHeight": {
+      "compressed": 780300,
+      "uncompressed": 992492
+    },
+    "creationDate": {
+      "compressed": 2294,
+      "uncompressed": 1682
+    },
+    "class": {
+      "compressed": 2294,
+      "uncompressed": 1682
+    },
+    "function": {
+      "compressed": 2294,
+      "uncompressed": 1682
+    },
+    "yearOfConstruction": {
+      "compressed": 2294,
+      "uncompressed": 1682
+    },
+    "height": {
+      "compressed": 2294,
+      "uncompressed": 1682
+    },
+    "averageHeight": {
+      "compressed": 2294,
+      "uncompressed": 1682
+    }
+  }
+}

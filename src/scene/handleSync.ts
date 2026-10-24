@@ -19,6 +19,7 @@
 import {
   appearanceThemesEqual,
   compileRuleEvaluator,
+  compileStyleExpression,
   type AppearanceTheme,
   type CityModel,
 } from "@cityjson/navara-core";
@@ -32,11 +33,13 @@ import type {
   Selection,
   ThemeStyle,
 } from "@cityjson/navara-cityjson";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import type { Rule } from "../features/rules/types";
 import {
+  effectiveExpression,
   effectiveRules,
   effectiveRulesEnabled,
+  type LayerStyleExpression,
 } from "../features/rules/colorBy";
 import type { Layer } from "../features/layers/layerStore";
 
@@ -44,7 +47,7 @@ import type { Layer } from "../features/layers/layerStore";
  *  tell an actual change from a re-render. */
 export interface LiveLayer {
   readonly handle: CityModelHandle;
-  lod: string | null;
+  lod: string | readonly string[] | null;
   visible: boolean;
   /** The `hiddenTypes` array last pushed, by IDENTITY — `layerStore` replaces
    *  it on every edit. Recorded (not pushed) on the add path: `registry.add`
@@ -65,6 +68,9 @@ export interface LiveLayer {
   styledRules?: ReadonlyArray<Rule>;
   /** The `effectiveRulesEnabled` flag that went with {@link styledRules}. */
   styledRulesEnabled?: boolean;
+  /** The `effectiveExpression` that went with {@link styledRules}, by
+   *  IDENTITY: the store replaces it on every edit. */
+  styledExpression?: LayerStyleExpression | null;
   /** The scene theme's `ThemeStyle` last pushed, by IDENTITY —
    *  `sceneThemePolicy` hands out one frozen object per theme, so reference
    *  equality is an exact "did the theme change?" test. `undefined` means this
@@ -136,7 +142,9 @@ export function syncLayers(
   onError: (layerId: string, error: unknown) => void,
   themeStyle?: ThemeStyle,
 ): void {
-  const wanted = new Set(layers.filter((l) => !l.isStreaming).map((l) => l.id));
+  const wanted = new Set(
+    layers.filter((l) => l.source.access !== "stream").map((l) => l.id),
+  );
 
   for (const [id, entry] of live) {
     if (wanted.has(id)) continue;
@@ -145,7 +153,7 @@ export function syncLayers(
   }
 
   for (const layer of layers) {
-    if (layer.isStreaming) continue;
+    if (layer.source.access === "stream") continue;
 
     let entry = live.get(layer.id);
     if (!entry) {
@@ -153,7 +161,7 @@ export function syncLayers(
         const handle = registry.add(layer);
         entry = {
           handle,
-          lod: layer.selectedLod,
+          lod: layer.selectedLods ?? layer.selectedLod,
           visible: layer.visible,
           hiddenTypes: layer.hiddenTypes,
           // Seeded, not pushed: `registry.add` builds the handle already
@@ -169,9 +177,9 @@ export function syncLayers(
       }
     }
 
-    if (entry.lod !== layer.selectedLod) {
-      entry.lod = layer.selectedLod;
-      entry.handle.setLod(layer.selectedLod);
+    if (entry.lod !== (layer.selectedLods ?? layer.selectedLod)) {
+      entry.lod = layer.selectedLods ?? layer.selectedLod;
+      entry.handle.setLod(layer.selectedLods ?? layer.selectedLod);
     }
     if (entry.visible !== layer.visible) {
       entry.visible = layer.visible;
@@ -218,7 +226,7 @@ export function syncLayers(
  * which is the user's rules plus a trailing unmatched catch-all, one catch-all
  * for a single colour, or nothing at all for the semantic palette. Memoised on
  * that array's identity (so on all five of its inputs): `handle.setStyle`
- * repaints every vertex of the layer, so pushing on an unrelated store change
+ * re-evaluates every surface of the layer, so pushing on an unrelated store change
  * (another layer's visibility toggle, a selection) would be a full recolor per
  * keystroke.
  *
@@ -239,7 +247,7 @@ export function syncStyles(
   live: ReadonlyMap<string, LiveLayer>,
 ): void {
   for (const layer of layers) {
-    if (layer.isStreaming) continue;
+    if (layer.source.access === "stream") continue;
     const entry = live.get(layer.id);
     // No entry means the add was refused (CRS gate) or has not happened yet;
     // when it does, `styledRules` is undefined on the new entry and the style
@@ -252,18 +260,34 @@ export function syncStyles(
     // a changed unmatched or single colour, which no rule edit would.
     const rules = effectiveRules(layer);
     const enabled = effectiveRulesEnabled(layer);
-    if (entry.styledRules === rules && entry.styledRulesEnabled === enabled) {
+    const expression = effectiveExpression(layer);
+    if (
+      entry.styledRules === rules &&
+      entry.styledRulesEnabled === enabled &&
+      entry.styledExpression === expression
+    ) {
       continue;
     }
 
     const neverStyled = entry.styledRules === undefined;
     entry.styledRules = rules;
     entry.styledRulesEnabled = enabled;
+    entry.styledExpression = expression;
 
-    const evaluator = compileRuleEvaluator(rules, enabled);
+    // An expression that does not compile draws the layer unstyled; the
+    // style panel is where its errors are shown.
+    const evaluator =
+      expression === null
+        ? compileRuleEvaluator(rules, enabled)
+        : expressionEvaluator(expression);
     if (evaluator === null && neverStyled) continue;
     entry.handle.setStyle(evaluator);
   }
+}
+
+function expressionEvaluator(expression: LayerStyleExpression) {
+  const compiled = compileStyleExpression(expression);
+  return compiled.ok ? compiled.evaluator : null;
 }
 
 /** The interaction surface static and streaming layers share. Only *styling*
@@ -304,7 +328,13 @@ export interface InteractionHandle {
  * and its tests need no plugin.
  */
 export interface StreamInteractionHandle extends InteractionHandle {
-  setRules(rules: ReadonlyArray<Rule>, enabled: boolean): void;
+  /** `expression`, when not null, is baked in place of the rules (in the
+   *  worker, like them). */
+  setRules(
+    rules: ReadonlyArray<Rule>,
+    enabled: boolean,
+    expression: LayerStyleExpression | null,
+  ): void;
   setLod(mode: "auto" | "manual", lod: string | null): void;
   setVisible(visible: boolean): void;
   /** Whether the layer re-queries its source as the camera settles. See
@@ -314,8 +344,8 @@ export interface StreamInteractionHandle extends InteractionHandle {
    *  every resident cell AND to each cell installed later, which is what makes
    *  a stream that keeps arriving stay in the theme it was opened in. */
   setThemeStyle(style: ThemeStyle): void;
-  /** First-level object groups to stream without geometry. Forces a commit,
-   *  so every affected cell is refetched — the same cost as a LoD change. */
+  /** First-level object groups to hide. A flag write on every resident cell's
+   *  style texture; the cells keep their geometry, so nothing is refetched. */
   setHiddenTypes(types: ReadonlyArray<string>): void;
   /** Bakes the theme into every resident cell on the next commit (a swap,
    *  like a hidden-type change); `null` for plain colours. */
@@ -349,6 +379,7 @@ export interface StreamSyncMemo {
   readonly handle: StreamInteractionHandle;
   rules?: ReadonlyArray<Rule>;
   rulesEnabled?: boolean;
+  expression?: LayerStyleExpression | null;
   visible?: boolean;
   lodMode?: "auto" | "manual";
   selectedLod?: string | null;
@@ -367,9 +398,10 @@ export interface StreamSyncMemo {
  * `syncStyles`, which both skip these layers by design.
  *
  * Memoised on the values actually pushed, because none of them is free:
- * `setRules` re-bakes every resident cell in the worker, `setLod` and
- * `setHiddenTypes` force a commit (so either refetches even for a camera that
- * has not moved), and `setVisible` fans out to every resident cell mesh. The
+ * `setRules` re-bakes every resident cell in the worker, `setLod` forces a
+ * commit (so it refetches even for a camera that has not moved), and
+ * `setVisible` and `setHiddenTypes` touch every resident cell (a mesh's
+ * visibility, a style texture's flags). The
  * viewport's reconciliation effect re-runs on every `layers` change — a hover,
  * a rename, another layer's toggle — so without the memo each of those would
  * cost a full round trip per streaming layer.
@@ -403,10 +435,16 @@ export function syncStreamState(
   // memo has to notice a colour that is not in any user rule.
   const rules = effectiveRules(layer);
   const rulesEnabled = effectiveRulesEnabled(layer);
-  if (memo.rules !== rules || memo.rulesEnabled !== rulesEnabled) {
+  const expression = effectiveExpression(layer);
+  if (
+    memo.rules !== rules ||
+    memo.rulesEnabled !== rulesEnabled ||
+    memo.expression !== expression
+  ) {
     memo.rules = rules;
     memo.rulesEnabled = rulesEnabled;
-    handle.setRules(rules, rulesEnabled);
+    memo.expression = expression;
+    handle.setRules(rules, rulesEnabled, expression);
   }
   if (
     memo.lodMode !== layer.lodMode ||
@@ -609,11 +647,12 @@ function highlightKey(
  * to do. That is also why the caller must pass {@link allInteractionHandles}
  * and not {@link interactionHandles}: a hidden layer still has to be cleared.
  *
- * `memo` makes that cheap. `setHighlight` is not a cheap setter — it re-runs
- * `computeStyleColors` over the whole layer and repaints every vertex — so
- * hovering one building in layer A must not repaint layers B and C, whose own
- * filtered view of `(selections, hovered)` did not move. Without a memo every
- * hover step costs one full recolor PER LAYER, at pointer rate.
+ * `memo` makes that cheap. `setHighlight` is not a free setter — it rewrites
+ * the highlight flags of every surface in the layer and uploads its style
+ * texture — so hovering one building in layer A must not touch layers B and
+ * C, whose own filtered view of `(selections, hovered)` did not move. Without
+ * a memo every hover step costs one texture upload PER LAYER, at pointer
+ * rate.
  *
  * Omitting `memo` pushes unconditionally, which is what a caller that has no
  * state to keep (a one-shot resync) wants.

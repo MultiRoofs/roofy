@@ -13,7 +13,7 @@ import {
   computeObjectStats,
   computeObjectStatsFromRecord,
 } from "../../../src/insights/computeStats";
-import { toObjectRecords } from "@cityjson/navara-flatcitybuf";
+import { toObjectRecords } from "@cityjson/navara-stream";
 
 const fixturePath = path.resolve(
   import.meta.dirname!,
@@ -177,6 +177,102 @@ describe("computeModelStatsFromRecords / computeObjectStatsFromRecord", () => {
     // mean is exactly that azimuth regardless of the weights — a property
     // check, not a re-derivation of the atan2 formula under test.
     expect(stats.avgRoofAzimuth).toBeCloseTo(90, 10);
+  });
+
+  it("leaves a surface with no azimuth out of the object's mean", () => {
+    // A null azimuth read as 0 would drag the circular mean north; the 1-degree
+    // flat gate already excludes such a surface, so this pins that it stays
+    // excluded and never becomes a NaN either.
+    const stats = computeObjectStatsFromRecord({
+      id: "flat",
+      objectType: "Building",
+      attributes: {},
+      bbox: [0, 0, 0, 1, 1, 1],
+      lod: "2.2",
+      surfaceCount: 2,
+      roofMetrics: [
+        {
+          areaSqM: 900,
+          inclinationDeg: 0,
+          azimuthDeg: null,
+          elevationM: 0,
+          lod: "2.2",
+        },
+        {
+          areaSqM: 10,
+          inclinationDeg: 40,
+          azimuthDeg: 90,
+          elevationM: 0,
+          lod: "2.2",
+        },
+      ],
+      geometryLods: ["2.2"],
+      footprintAreaSqM: 900,
+      volumeCuM: null,
+      parents: [],
+      children: [],
+    });
+    expect(stats.avgRoofAzimuth).toBeCloseTo(90, 10);
+  });
+
+  /**
+   * The fix-round review's N3, at the source. `avgRoofAzimuth` used to be a
+   * non-nullable number that was 0 both for "nothing to average" and for "due
+   * north", which is the same collision the milestone just removed from
+   * `computeRoofMetrics`, `aggregate.ts` and `roofRollUp.ts` — and it made
+   * `StatsTab`'s `> 0` gate hide the row for a genuinely north-facing building.
+   */
+  it("gives a due-north roof a mean of 0, not an absent one", () => {
+    const stats = computeObjectStatsFromRecord({
+      id: "north",
+      objectType: "Building",
+      attributes: {},
+      bbox: [0, 0, 0, 1, 1, 1],
+      lod: "2.2",
+      surfaceCount: 1,
+      roofMetrics: [
+        {
+          areaSqM: 50,
+          inclinationDeg: 35,
+          azimuthDeg: 0,
+          elevationM: 0,
+          lod: "2.2",
+        },
+      ],
+      geometryLods: ["2.2"],
+      footprintAreaSqM: 50,
+      volumeCuM: null,
+      parents: [],
+      children: [],
+    });
+    expect(stats.avgRoofAzimuth).not.toBeNull();
+    expect(stats.avgRoofAzimuth).toBeCloseTo(0, 10);
+  });
+
+  it("has NO mean azimuth when every roof is flat", () => {
+    const stats = computeObjectStatsFromRecord({
+      id: "flat-only",
+      objectType: "Building",
+      attributes: {},
+      bbox: [0, 0, 0, 1, 1, 1],
+      lod: "2.2",
+      surfaceCount: 1,
+      roofMetrics: [
+        {
+          areaSqM: 400,
+          inclinationDeg: 0,
+          azimuthDeg: null,
+          elevationM: 0,
+          lod: "2.2",
+        },
+      ],
+      geometryLods: ["2.2"],
+      footprintAreaSqM: 400,
+      volumeCuM: null,
+      parents: [],
+      children: [],
+    });
+    expect(stats.avgRoofAzimuth).toBeNull();
   });
 
   it("uses r.roofMetrics directly (never recomputes from rings) for model-level aggregation", () => {

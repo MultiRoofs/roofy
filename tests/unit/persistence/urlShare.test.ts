@@ -327,3 +327,57 @@ describe("share timezone", () => {
     ).toBe("Europe/Amsterdam");
   });
 });
+
+it("round-trips multiple selected LoDs and an explicitly empty selection", () => {
+  for (const selectedLods of [["2", "1"], []]) {
+    const state = makeState();
+    const encoded = encodeShareState({
+      ...state,
+      layers: state.layers.map((l) => ({ ...l, selectedLods })),
+    });
+    expect(decodeShareState(encoded)?.layers[0]?.selectedLods).toEqual(
+      selectedLods,
+    );
+  }
+});
+
+/**
+ * Ruling S4: a shared link opens the same object families on the other side.
+ * Validated on the way in, like every other field the hash carries, because a
+ * hand-edited hash reaches an App effect unguarded.
+ */
+describe("share link object families", () => {
+  it("round-trips the enabled set and the family the table was on", () => {
+    const state = makeState();
+    const encoded = encodeShareState({
+      ...state,
+      layers: state.layers.map((l) => ({
+        ...l,
+        families: { enabled: ["building", "bridge"], active: "bridge" },
+      })),
+    });
+    expect(decodeShareState(encoded)?.layers[0]?.families).toEqual({
+      enabled: ["building", "bridge"],
+      active: "bridge",
+    });
+  });
+
+  it("drops a choice that is not two strings and a key", () => {
+    const state = makeState();
+    const encoded = encodeShareState({
+      ...state,
+      layers: state.layers.map((l) => ({
+        ...l,
+        families: { enabled: "building", active: 3 } as never,
+      })),
+    });
+    expect(decodeShareState(encoded)?.layers[0]?.families).toBeUndefined();
+  });
+
+  it("leaves a link minted before families existed alone", () => {
+    const state = makeState();
+    expect(
+      decodeShareState(encodeShareState(state))?.layers[0]?.families,
+    ).toBeUndefined();
+  });
+});

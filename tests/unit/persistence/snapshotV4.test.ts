@@ -30,7 +30,9 @@ const CAM: GeographicCamera = {
   roll: 0,
 };
 
-/** A complete, current-version document, written the way the app writes one. */
+/** A complete, current-version document, written the way the app writes one.
+ *  (v4's `activeLayer` is still the subject here; the version string has moved
+ *  on to v5, which added the per-layer family choice.) */
 function v4(activeLayer?: ProjectSnapshot["activeLayer"]): ProjectSnapshot {
   return captureSnapshot({
     label: "delft",
@@ -57,9 +59,10 @@ beforeEach(() => {
 });
 
 describe("SNAPSHOT_VERSION", () => {
-  it("is 4", () => {
-    expect(SNAPSHOT_VERSION).toBe("4");
-    expect(v4().version).toBe("4");
+  it("is the version this build writes", () => {
+    // Against the constant, not a literal: which version is current is
+    // `snapshotV5.test.ts`'s subject, and this file is about `activeLayer`.
+    expect(v4().version).toBe(SNAPSHOT_VERSION);
   });
 });
 
@@ -112,7 +115,7 @@ describe("migrateSnapshot", () => {
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.migratedFrom).toBe("3");
-    expect(outcome.snapshot.version).toBe("4");
+    expect(outcome.snapshot.version).toBe(SNAPSHOT_VERSION);
   });
 
   it("leaves `activeLayer` absent on a migrated v3 document — absent means the first layer", () => {

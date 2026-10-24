@@ -16,6 +16,7 @@
  * there is nothing to make active — and that is the one property most easily
  * lost in a refactor, so it is asserted rather than assumed.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { LayerRow, PlaceholderRow } from "../../../../src/ui/layers/LayerRow";
@@ -32,7 +33,7 @@ function cityItem(overrides: Partial<Layer> = {}): ActiveLayer {
       id: "l1",
       name: "Delft",
       visible: true,
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
       ...overrides,
     } as unknown as Layer,
   };

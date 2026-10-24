@@ -18,6 +18,7 @@
  * read are all seams, so what is asserted here is the tool's behaviour and
  * never a mock's.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -363,7 +364,7 @@ function layerWithObjects(
   return {
     id: "L1",
     name,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     selectedLod: "2.2",
     model: {
       sourceEncoding: "cityjson",

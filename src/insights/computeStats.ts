@@ -6,8 +6,9 @@
  */
 
 import type { CityModel, CityObject } from "../domain/citymodel/types";
+import { FLAT_THRESHOLD_DEG } from "../domain/roofMetrics/aggregate";
 import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import type { ModelStats, ObjectStats, OrientationCount } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -40,8 +41,12 @@ function countByOrientation(metrics: RoofMetrics[]): OrientationCount[] {
   }
 
   for (const m of metrics) {
-    // Skip flat roofs — their azimuth is meaningless
-    if (m.inclinationDeg < 1) continue;
+    // Skip flat roofs — their azimuth is meaningless, and core reports it as
+    // null rather than as due north. The gate is the app's own
+    // `FLAT_THRESHOLD_DEG`, not a second spelling of it: three thresholds in
+    // four spellings is how the next drift starts.
+    if (m.inclinationDeg < FLAT_THRESHOLD_DEG || m.azimuthDeg === null)
+      continue;
     const band = classifyOrientation(m.azimuthDeg);
     counts.set(band, (counts.get(band) ?? 0) + 1);
   }
@@ -172,7 +177,7 @@ function accumulateObjectStats(input: ObjectStatsInput): ObjectStats {
     slopeSum += m.inclinationDeg * m.areaSqM;
     slopeWeight += m.areaSqM;
 
-    if (m.inclinationDeg >= 1) {
+    if (m.inclinationDeg >= FLAT_THRESHOLD_DEG && m.azimuthDeg !== null) {
       const rad = (m.azimuthDeg * Math.PI) / 180;
       azimuthSinSum += m.areaSqM * Math.sin(rad);
       azimuthCosSum += m.areaSqM * Math.cos(rad);
@@ -180,7 +185,9 @@ function accumulateObjectStats(input: ObjectStatsInput): ObjectStats {
     }
   }
 
-  let avgAzimuth = 0;
+  // `null`, not 0, for "nothing to average": 0 is due north. See
+  // `ObjectStats.avgRoofAzimuth`.
+  let avgAzimuth: number | null = null;
   if (azimuthWeight > 0) {
     avgAzimuth = Math.atan2(azimuthSinSum, azimuthCosSum) * (180 / Math.PI);
     if (avgAzimuth < 0) avgAzimuth += 360;

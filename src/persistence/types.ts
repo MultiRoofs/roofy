@@ -1,3 +1,4 @@
+import { normalizeSelectedLods } from "../features/layers/selectedLods";
 import {
   normalizeTablePresentation,
   type TablePresentation,
@@ -14,9 +15,17 @@ import {
  * Tauri-native implementations without changing feature-level code.
  */
 
-import type { AppearanceTheme } from "@cityjson/navara-core";
+import {
+  isSupportedCityModelEncoding,
+  type AppearanceTheme,
+  type CityModelEncoding,
+} from "@cityjson/navara-core";
 import type { Rule } from "../features/rules/types";
-import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
+import {
+  normalizeColorBy,
+  type ColorBy,
+  type LayerStyleExpression,
+} from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
 import type { SceneTheme } from "../features/sceneTheme/sceneThemeStore";
@@ -37,14 +46,54 @@ import {
 export interface UrlModelRef {
   readonly type: "url";
   readonly url: string;
+  /**
+   * The format the layer was opened as — detected, or the user's correction.
+   *
+   * Restored as the format, so a CityJSONSeq served as `.json` that the user
+   * corrected once does not come back as a failed CityJSON parse. OPTIONAL,
+   * and the snapshot version stays: a reference saved without it restores by
+   * detection, which is what it was opened by. Validated by
+   * {@link normalizeModelRef}.
+   */
+  readonly encoding?: CityModelEncoding;
 }
 
 export interface FileModelRef {
   readonly type: "file";
   readonly fileName: string;
+  /** As {@link UrlModelRef.encoding}; carried into the re-link. */
+  readonly encoding?: CityModelEncoding;
 }
 
 export type CityModelReference = UrlModelRef | FileModelRef;
+
+/**
+ * A saved reference, validated: `null` when it is no reference at all, and
+ * without its `encoding` when that names no format this build knows (a
+ * hand-edited document, or one written by a build with a format this one
+ * lacks — the restore then detects, rather than refusing the layer).
+ */
+export function normalizeModelRef(value: unknown): CityModelReference | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as {
+    type?: unknown;
+    url?: unknown;
+    fileName?: unknown;
+    encoding?: unknown;
+  };
+  const encoding =
+    typeof raw.encoding === "string" &&
+    isSupportedCityModelEncoding(raw.encoding)
+      ? { encoding: raw.encoding }
+      : {};
+  if (raw.type === "url" && typeof raw.url === "string" && raw.url !== "") {
+    return { type: "url", url: raw.url, ...encoding };
+  }
+  if (raw.type === "file" && typeof raw.fileName === "string") {
+    return { type: "file", fileName: raw.fileName, ...encoding };
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Per-layer snapshot data
@@ -60,6 +109,47 @@ export type CityModelReference = UrlModelRef | FileModelRef;
 export type StreamSourceSnapshot =
   | { readonly kind: "url"; readonly url: string }
   | { readonly kind: "file"; readonly fileName: string };
+
+/**
+ * Which object families a streamed CityParquet layer had open, and which one its
+ * table panel was showing (ruling S4, snapshot v5).
+ *
+ * The KEYS the family store uses (`LayerFamily.key`, disambiguated), which are
+ * the manifest's own asset keys for every package seen so far. They are not
+ * trusted on the way back in: a repackaged source may no longer have them, so the
+ * restore validates them against the families it actually resolved and falls back
+ * to the R-D default rather than opening nothing.
+ */
+export interface LayerFamiliesSnapshot {
+  readonly enabled: ReadonlyArray<string>;
+  /** The family the table panel was on, or `null` for "whichever opens". */
+  readonly active: string | null;
+}
+
+/**
+ * A saved family choice, validated — or `undefined` when there is nothing
+ * usable in it.
+ *
+ * Validated rather than cast for the reason every other normaliser here is: this
+ * value comes from localStorage or a URL hash, so a hand-edited document must
+ * read as "no choice" (the default) and never as a set of keys that are not
+ * strings.
+ */
+export function normalizeFamiliesSnapshot(
+  value: unknown,
+): LayerFamiliesSnapshot | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const raw = value as { enabled?: unknown; active?: unknown };
+  if (!Array.isArray(raw.enabled)) return undefined;
+  const enabled = raw.enabled.filter(
+    (key): key is string => typeof key === "string" && key !== "",
+  );
+  if (enabled.length !== raw.enabled.length) return undefined;
+  if (enabled.length === 0) return undefined;
+  const active =
+    typeof raw.active === "string" && raw.active !== "" ? raw.active : null;
+  return { enabled, active };
+}
 
 export interface LayerSnapshot {
   readonly name: string;
@@ -92,8 +182,13 @@ export interface LayerSnapshot {
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
+  /** The colour expression "Color by expression" draws with. Written only
+   *  when the layer has one (in any mode: it is kept while another is
+   *  active); absent reads as none. Optional, so the version stays. */
+  readonly styleExpression?: LayerStyleExpression;
   readonly visible: boolean;
   readonly selectedLod?: string | null;
+  readonly selectedLods?: readonly string[];
   /** Defaults to "auto" on restore (via `normalizeLayers`) when absent from
    *  a saved snapshot. */
   readonly lodMode?: "auto" | "manual";
@@ -110,6 +205,14 @@ export interface LayerSnapshot {
   readonly appearance?: AppearanceTheme | null;
   /** Present only for a streaming layer. */
   readonly stream?: StreamSourceSnapshot;
+  /**
+   * v5: the object families this layer had open and the one its table showed.
+   *
+   * Present only for a streamed CityParquet package. Absent means the R-D
+   * default — Building alone, or every family when the package has no building
+   * table — which is what every build before v5 did.
+   */
+  readonly families?: LayerFamiliesSnapshot;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +234,7 @@ export interface RawLayerSnapshot {
   readonly attributeOrders?: AttributeOrders;
   readonly tablePresentation?: TablePresentation;
   readonly stream?: StreamSourceSnapshot;
+  readonly families?: LayerFamiliesSnapshot;
 }
 
 export interface RawLayersDocument {
@@ -139,6 +243,13 @@ export interface RawLayersDocument {
 }
 
 export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
+  /** Validated by `normalizeModelRef`; absent when the saved entry had none
+   *  usable, and such an entry is skipped by the restore. */
+  readonly modelRef?: CityModelReference;
+  readonly selectedLods?: readonly string[];
+  /** Validated by `normalizeLayers`; `undefined` when the document said nothing
+   *  usable, which restores at the R-D default. */
+  readonly families?: LayerFamiliesSnapshot;
   readonly lodMode: "auto" | "manual";
   readonly hiddenTypes: readonly string[];
   readonly attributeOrders?: AttributeOrders;
@@ -149,6 +260,7 @@ export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
   readonly colorBy: ColorBy;
   readonly singleColor: string;
   readonly unmatchedColor: string;
+  readonly styleExpression: LayerStyleExpression | null;
   /** True when this layer streamed from a local `File`/`Blob` — that byte
    *  source cannot survive a reload, so the layer must be presented as an
    *  explicit "needs re-selection" placeholder rather than silently
@@ -179,6 +291,8 @@ export function normalizeLayers(
     const hiddenTypes = l.hiddenTypes ?? [];
     const attributeOrders = normalizeAttributeOrders(l.attributeOrders);
     const tablePresentation = normalizeTablePresentation(l.tablePresentation);
+    const families = normalizeFamiliesSnapshot(l.families);
+    const modelRef = normalizeModelRef(l.modelRef) ?? undefined;
     // The same validator the share hash and the store use, so one document
     // cannot restore differently depending on which door it came through.
     const colorBy = normalizeColorBy({
@@ -187,23 +301,30 @@ export function normalizeLayers(
       unmatchedColor: l.unmatchedColor,
       rules: l.rules,
       rulesEnabled: l.rulesEnabled,
+      styleExpression: l.styleExpression,
     });
     return l.stream?.kind === "file"
       ? {
           ...l,
+          modelRef,
+          selectedLods: normalizeSelectedLods(l.selectedLods),
           lodMode,
           hiddenTypes,
           attributeOrders,
           tablePresentation,
+          families,
           ...colorBy,
           unavailable: true,
         }
       : {
           ...l,
+          modelRef,
+          selectedLods: normalizeSelectedLods(l.selectedLods),
           lodMode,
           hiddenTypes,
           attributeOrders,
           tablePresentation,
+          families,
           ...colorBy,
         };
   });
@@ -461,12 +582,17 @@ export function normalizeSceneTheme(theme: SceneTheme | undefined): SceneTheme {
  * document with that one field absent, which is why `migrateSnapshot` carries
  * v3 forward rather than rejecting it — and why v1/v2 still cannot be carried
  * forward at all: their cameras are unconvertible, not merely incomplete.
+ *
+ * v5 (additive): {@link LayerSnapshot.families} — the object families a streamed
+ * CityParquet layer had open, and the one its table showed. A v3 or v4 document
+ * is a v5 document with that field absent on every layer, and absent means the
+ * R-D default, which is the only thing those builds could do.
  */
-export const SNAPSHOT_VERSION = "4";
+export const SNAPSHOT_VERSION = "5";
 
 export interface ProjectSnapshot {
-  /** Always {@link SNAPSHOT_VERSION} when written. On restore, `"3"` is
-   *  carried forward by `migrateSnapshot`; anything else is rejected. */
+  /** Always {@link SNAPSHOT_VERSION} when written. On restore, `"3"` and `"4"`
+   *  are carried forward by `migrateSnapshot`; anything else is rejected. */
   readonly version: string;
   readonly savedAt: string; // ISO 8601
   readonly label: string;

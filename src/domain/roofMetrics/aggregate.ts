@@ -4,11 +4,20 @@
 
 import type { RoofMetrics } from "@cityjson/navara-core";
 
-/** Inclination threshold below which a surface is considered flat (degrees). */
-const FLAT_THRESHOLD_DEG = 1;
+/** Inclination threshold below which THE APP considers a surface flat
+ *  (degrees). Looser than core's own `FLAT_INCLINATION_DEG`, deliberately: core
+ *  withholds an azimuth only where the bearing would be the frame's tilt, while
+ *  this is a presentation gate on what counts as sloped at all.
+ *
+ *  Exported, and imported rather than respelled, because every caller that has
+ *  to tell "no aspect" from "due north" — `computeAverageAzimuth` answers 0 for
+ *  both — must mirror the SAME gate. */
+export const FLAT_THRESHOLD_DEG = 1;
 
 /** Compute the area-weighted circular mean of azimuth angles.
- *  Flat surfaces (inclination < 1°) are excluded since their azimuth is undefined. */
+ *  Flat surfaces (inclination < 1°, or with a null azimuth) are excluded since
+ *  their azimuth is undefined. Returns 0 when nothing is left to average — the
+ *  caller has to distinguish that from a real northerly mean itself. */
 export function computeAverageAzimuth(
   metrics: ReadonlyArray<RoofMetrics>,
 ): number {
@@ -20,6 +29,10 @@ export function computeAverageAzimuth(
 
   for (const m of metrics) {
     if (m.inclinationDeg < FLAT_THRESHOLD_DEG) continue;
+    // A surface with no aspect at all (core answers null below its own
+    // `FLAT_INCLINATION_DEG`)
+    // never contributes: read as 0 it would drag the mean due north.
+    if (m.azimuthDeg === null) continue;
     const rad = (m.azimuthDeg * Math.PI) / 180;
     const w = m.areaSqM;
     sinSum += w * Math.sin(rad);

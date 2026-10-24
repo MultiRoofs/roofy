@@ -108,6 +108,24 @@ describe("snapshotScopeInputs", () => {
     useQueryStore.getState().applyFilter("L1");
     expect(snapshotScopeInputs("L1").filter).toEqual(filter);
   });
+
+  it("takes the FROZEN family's filter, not the bare layer's (R-C′)", () => {
+    // A CityParquet layer's filter lives under `${layerId}::${family}`, and a run
+    // freezes the family it was submitted over. Reading the bare key would find
+    // no filter at all and refuse a "matching" scope the user had plainly set.
+    const filter = {
+      logic: "AND" as const,
+      conditions: [
+        { id: "c1", column: "status", op: "=" as const, value: "ok" },
+      ],
+    };
+    useQueryStore.getState().setFilter("L1::bridge", filter);
+    useQueryStore.getState().applyFilter("L1::bridge");
+    expect(snapshotScopeInputs("L1", "bridge").filter).toEqual(filter);
+    // …and the other family, and the layer itself, are untouched by it.
+    expect(snapshotScopeInputs("L1", "building").filter).toBeNull();
+    expect(snapshotScopeInputs("L1").filter).toBeNull();
+  });
 });
 
 describe("resolveScope", () => {

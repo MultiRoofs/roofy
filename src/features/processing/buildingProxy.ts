@@ -65,11 +65,10 @@ const NO_FOOTPRINT =
 /**
  * The LoD 0 rung's OWN label, or null.
  *
- * The label, never a re-spelled suffix: `"0"` and `"0.0"` are DIFFERENT columns
- * and only the file knows which it has (`columnKind.ts:104-120`) — and the
- * reader normalises, so a document saying `"lod": "0"` can still describe
- * `geometry_lod0_0`. The caller hands this to `readSource`, which looks the
- * suffix up in the same `lods` list.
+ * The label, never a re-spelled suffix: the reader spells a document's
+ * `"lod": "0"` as `geometry_lod0_0`, whose label is `0.0`, so only the ladder
+ * read off the columns (`lodsFromColumnNames`) knows it. The caller hands this
+ * to `readSource`, which looks the suffix up in the same `lods` list.
  */
 export function lodZeroLabel(table: LayerTable): string | null {
   return (

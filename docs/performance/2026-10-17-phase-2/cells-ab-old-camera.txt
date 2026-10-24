@@ -1,0 +1,19 @@
+164:export const STATIC_CELL_SIZE = 250;
+onecell25 load frames 35 draws/f 44 verts/f 506784 up 45177040 long 4723
+onecell25 still frames 13 draws/f 56 verts/f 705199 up 0 long 0
+onecell25 orbit frames 24 draws/f 83 verts/f 865095 up 4918424 long 0
+onecell25 zoom-in frames 26 draws/f 110 verts/f 1077086 up 1004137 long 0
+onecell25 pan frames 28 draws/f 115 verts/f 1149437 up 770576 long 2400
+onecell25 zoom-out frames 27 draws/f 118 verts/f 1175847 up 616700 long 0
+onecell25 hover frames 60 draws/f 192 verts/f 1185206 up 30837878 long 25838
+onecell25 still-after frames 0 draws/f 0 verts/f 0 up 0 long 0
+cells25 load frames 34 draws/f 58 verts/f 424441 up 46225616 long 2889
+cells25 still frames 13 draws/f 71 verts/f 623610 up 0 long 0
+cells25 orbit frames 24 draws/f 96 verts/f 773377 up 7539864 long 0
+cells25 zoom-in frames 26 draws/f 124 verts/f 990287 up 1528425 long 0
+cells25 pan frames 29 draws/f 127 verts/f 1049435 up 770576 long 2691
+cells25 zoom-out frames 26 draws/f 131 verts/f 1077703 up 616700 long 0
+cells25 hover frames 62 draws/f 196 verts/f 1095814 up 32148598 long 25568
+cells25 still-after frames 0 draws/f 0 verts/f 0 up 0 long 0
+
+[exited with code 0]

@@ -14,7 +14,7 @@ import type {
   ViewState,
 } from "./types";
 import { SNAPSHOT_VERSION } from "./types";
-import type { ColorBy } from "../features/rules/colorBy";
+import type { ColorBy, LayerStyleExpression } from "../features/rules/colorBy";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
 import type { SceneTheme } from "../features/sceneTheme/sceneThemeStore";
 
@@ -23,6 +23,7 @@ export interface ColorByLayerFields {
   readonly colorBy: ColorBy;
   readonly singleColor: string;
   readonly unmatchedColor: string;
+  readonly styleExpression?: LayerStyleExpression | null;
 }
 
 /**
@@ -44,6 +45,10 @@ export interface ColorByLayerFields {
  * saved today should come back in the colours it was saved in even if a later
  * build retunes `cityColors`, and two hex strings per layer cost nothing.
  *
+ * The expression is written whenever the layer has one, in any mode, for the
+ * reason the colours are kept: switching away and back must not lose it. It
+ * is omitted when there is none, the absent default.
+ *
  * Note what is NOT here: the synthetic catch-all rules. They are derived from
  * the mode by `effectiveRules`, and a serialised one would reach the editor,
  * the legend and the next capture as if the user had written it.
@@ -53,12 +58,16 @@ export function captureColorBy(layer: ColorByLayerFields): {
   readonly colorBy: ColorBy;
   readonly singleColor: string;
   readonly unmatchedColor: string;
+  readonly styleExpression?: LayerStyleExpression;
 } {
   return {
     rulesEnabled: layer.colorBy === "rules",
     colorBy: layer.colorBy,
     singleColor: layer.singleColor,
     unmatchedColor: layer.unmatchedColor,
+    ...(layer.styleExpression != null
+      ? { styleExpression: layer.styleExpression }
+      : {}),
   };
 }
 

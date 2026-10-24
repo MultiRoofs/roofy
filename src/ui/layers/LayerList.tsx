@@ -58,6 +58,7 @@ import type {
 } from "../../features/layers/useLayerFileLoader";
 import { LayerRow, PlaceholderRow } from "./LayerRow";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { openRunLog } from "../processing/revealTools";
 
@@ -196,10 +197,12 @@ function StoreLayerRow({
       ? false
       : s.runs.some((r) => r.id === derivedFrom.runId),
   );
+  // A city layer's filter lives under its ACTIVE family's key (R-C′).
+  const queryKey = useActiveTableKey(id) ?? id;
   const appliedFilter = useQueryStore((state) =>
     item.kind === "city" ||
     (item.kind === "geo" && item.layer.kind === "geojson")
-      ? layerQuery(state, id).applied
+      ? layerQuery(state, queryKey).applied
       : null,
   );
 
@@ -227,7 +230,9 @@ function StoreLayerRow({
   // residentModel.ts), so the walk would be wasted. Memoised on the model
   // reference for the static case, where the walk is real.
   const model =
-    item.kind === "city" && !item.layer.isStreaming ? item.layer.model : null;
+    item.kind === "city" && item.layer.source.access !== "stream"
+      ? item.layer.model
+      : null;
   const counts = useMemo(
     () => (model === null ? undefined : countRootObjects(model)),
     [model],
@@ -250,6 +255,7 @@ function StoreLayerRow({
       kind,
       counts,
       lod: item.kind === "city" ? item.layer.selectedLod : null,
+      lods: item.kind === "city" ? item.layer.selectedLods : undefined,
       derivedFrom: item.kind === "city" ? item.layer.derivedFrom : null,
     };
   } else if (kind === "vector") {

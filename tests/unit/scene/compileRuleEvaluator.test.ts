@@ -88,7 +88,7 @@ const object: CityObject = {
   lod: "2",
 };
 
-const objectInfo = { objectId: "B1", object };
+const objectInfo = { objectId: "B1", object, attributes: object.attributes };
 
 function rule(patch: Partial<Rule> & { id: string; color: string }): Rule {
   return {
@@ -219,5 +219,38 @@ describe("compileRuleEvaluator", () => {
     // Same triple instance: the conversion is cached per hex, not redone per
     // surface (this runs once per surface of every rule-colored layer).
     expect(a).toBe(b);
+  });
+
+  it("matches attributes the object inherits, not only its own", () => {
+    // The 3DBAG rule: `b3_dak_type` sits on the Building, the roof on its part.
+    const evaluate = compileRuleEvaluator(
+      [
+        rule({
+          id: "byParent",
+          color: "#123456",
+          conditions: [
+            { field: "b3_dak_type", operator: "=", value: "slanted" },
+          ],
+        }),
+      ],
+      true,
+    )!;
+    const part: CityObject = {
+      ...object,
+      id: "B1-0",
+      attributes: {},
+      parents: ["B1"],
+    };
+    expectLinear(
+      evaluate(
+        { surfaceIndex: 0, surface: flatRoof },
+        {
+          objectId: "B1-0",
+          object: part,
+          attributes: { b3_dak_type: "slanted" },
+        },
+      ),
+      "#123456",
+    );
   });
 });

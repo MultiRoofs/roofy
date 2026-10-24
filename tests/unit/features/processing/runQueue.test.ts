@@ -8,6 +8,10 @@
  * NOT: the statements a run sends are part of what is under test here, and they
  * reach the duckdb mock's log.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -32,6 +36,9 @@ let tableInfo: {
   sourceBytes: null;
   sourceFeatureIds: null;
   rowCount: number | null;
+  /** A CityParquet family's table is a VIEW over the file — what the head's
+   *  destination guard refuses to write columns into. */
+  fileBacked?: boolean;
 } = freshTable();
 
 function freshTable() {
@@ -52,6 +59,13 @@ function freshTable() {
   };
 }
 
+/**
+ * The family the mocked registry says is active for the layer under test.
+ *
+ * `null` is a single-table layer — the bare key — which is what every case but
+ * the family ones wants.
+ */
+let activeFamily: string | null = null;
 /** The layer's FEATURE count, as the mocked COUNT(DISTINCT …) answers it. */
 let featureTotal = 1;
 /** Rows the feature-expansion query returns for an id scope. */
@@ -192,7 +206,29 @@ vi.mock("../../../../src/insights/layerTables", async () => {
     adoptLayerTable: vi.fn((layerId: string, info: unknown) => {
       adopted.set(layerId, info);
     }),
-    getLayerTable: vi.fn(() => tableInfo),
+    // FAMILY-AWARE, because that is what the run queue's ownership rests on
+    // (R-C′): a run frozen on one family must keep resolving THAT one. The
+    // default `activeFamily` is null, so every existing case asks for the bare
+    // table and gets exactly what it always got.
+    getLayerTable: vi.fn((_layerId: string, family: string | null = null) =>
+      family === activeFamily ? tableInfo : null,
+    ),
+    resolveActiveTable: vi.fn((layerId: string) => ({
+      key: activeFamily === null ? layerId : `${layerId}::${activeFamily}`,
+      layerId,
+      familyKey: activeFamily,
+      info: tableInfo,
+    })),
+    layerTableKey: (layerId: string, family: string | null) =>
+      family === null ? layerId : `${layerId}::${family}`,
+    // Spelled out rather than imported: the real module reaches DuckDB at module
+    // scope. Its own round trip is pinned in `tests/unit/insights/layerTableKeys`.
+    parseTableKey: (key: string) => {
+      const at = key.indexOf("::");
+      return at === -1
+        ? { layerId: key, family: null }
+        : { layerId: key.slice(0, at), family: key.slice(at + 2) };
+    },
     runOnTableQueue: vi.fn(<T>(task: () => Promise<T>): Promise<T> => {
       const next = chain.then(task, task);
       chain = next.then(
@@ -290,7 +326,7 @@ function layer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     derivedFrom: null,
   };
 }
@@ -369,6 +405,7 @@ beforeEach(() => {
   statusListeners.clear();
   deathListeners.clear();
   tableInfo = freshTable();
+  activeFamily = null;
   useSelectionStore.getState().clear();
   useLayerStore.setState({ layers: [layer()] });
   useProcessingStore.getState().resetForTest();
@@ -454,7 +491,8 @@ describe("submitRun", () => {
     expect(write.slice(0, -1).map((l) => l.rows)).toEqual([null, null, null]);
     expect(write.at(-1)?.rows).toBe(1);
     // The registry's column list is re-read, so the next run sees the column.
-    expect(tables.refreshLayerTableColumns).toHaveBeenCalledWith("L1");
+    // With the FAMILY it froze — `null` for this single-table layer (R-C′).
+    expect(tables.refreshLayerTableColumns).toHaveBeenCalledWith("L1", null);
     expect(useProcessingStore.getState().notice).toBe(run.summary?.line);
   });
 
@@ -845,12 +883,34 @@ describe("submitRun", () => {
     // replaying one) — which is exactly what this guard is for. No staging:
     // `height-from-extent` offers `"new"` in the shipped registry, so the
     // refusal here is the streaming one and nothing else.
-    useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });
+    useLayerStore.setState({
+      layers: [{ ...layer(), source: STREAMED_SOURCE }],
+    });
     const id = submitRun(request({ destination: "new", newLayerName: "X" }));
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe(
       "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
     );
+  });
+
+  it("refuses to add columns to a table that is read from the FILE", async () => {
+    // A CityParquet family's table is a VIEW over its Parquet file, and the
+    // write reaches `ALTER TABLE` — which DuckDB refuses over a view, deep in the
+    // run where the message means nothing. The form disables the destination;
+    // this is the head's copy of the same refusal, for a draft frozen before a
+    // retarget and for `retryRun` replaying one.
+    activeFamily = "building";
+    tableInfo = { ...freshTable(), fileBacked: true };
+    useLayerStore.setState({
+      layers: [{ ...layer(), source: STREAMED_SOURCE }],
+    });
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe(
+      "This layer's table is read straight from the file, so columns cannot be added to it. A streamed layer cannot take a New layer either, so this tool has nowhere to write its results yet.",
+    );
+    // Nothing was attempted: no ALTER, no transaction to roll back.
+    expect(sql.some((s) => s.includes("ALTER TABLE"))).toBe(false);
   });
 });
 
@@ -1602,6 +1662,105 @@ describe("installTargetRemovalWatcher", () => {
     expect(runById(id)?.status).toBe("done");
     expect(runById(id)?.error).toBeNull();
     stop();
+  });
+});
+
+describe("a run over a layer with object FAMILIES (R-C′)", () => {
+  it("freezes the family it resolved, and reads THAT table at the head", async () => {
+    // Without the freeze the head re-resolves by layer id and gets the bare
+    // table — which for a streamed CityParquet layer is a different table, or
+    // none at all: the run would fail with "This layer's table could not be
+    // built" although its own table is sitting there.
+    activeFamily = "building";
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(vi.mocked(tables.getLayerTable)).toHaveBeenCalledWith(
+      "L1",
+      "building",
+    );
+    // And the post-write re-DESCRIBE is aimed at the same family, not at
+    // whatever is active by the time it lands.
+    expect(vi.mocked(tables.refreshLayerTableColumns)).toHaveBeenCalledWith(
+      "L1",
+      "building",
+    );
+  });
+
+  it("keeps its frozen table when the ACTIVE family changes under it", async () => {
+    activeFamily = "building";
+    registerExecutor("height-from-extent", async () => {
+      // The user switches family while the run is in flight.
+      activeFamily = "bridge";
+      return {
+        columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { extent_height_m: 4 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(vi.mocked(tables.refreshLayerTableColumns)).toHaveBeenCalledWith(
+      "L1",
+      "building",
+    );
+  });
+
+  it("is not staled by ANOTHER family's table being rebuilt", async () => {
+    activeFamily = "building";
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    tables.useLayerTableStore.setState({
+      tables: { "L1::building": { state: "ready", info: tableInfo } },
+    } as never);
+    const stop = installStaleWatcher();
+    try {
+      const id = submitRun(request());
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+
+      // The BRIDGE family's view is replaced. The run read the BUILDING one, so
+      // its result still describes a table that exists — and its computed
+      // columns must not be cleared either.
+      tables.useLayerTableStore.setState({
+        tables: {
+          "L1::building": { state: "ready", info: tableInfo },
+          "L1::bridge": {
+            state: "ready",
+            info: { ...tableInfo, table: "layer_77" },
+          },
+        },
+      } as never);
+      expect(runById(id)?.stale).toBe(false);
+
+      // Its OWN family being rebuilt does stale it.
+      tables.useLayerTableStore.setState({
+        tables: {
+          "L1::building": {
+            state: "ready",
+            info: { ...tableInfo, table: "layer_78" },
+          },
+          "L1::bridge": {
+            state: "ready",
+            info: { ...tableInfo, table: "layer_77" },
+          },
+        },
+      } as never);
+      expect(runById(id)?.stale).toBe(true);
+    } finally {
+      stop();
+    }
   });
 });
 

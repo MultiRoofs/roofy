@@ -30,6 +30,7 @@
  * WebGL, and `@navaramap/three` crashes at module scope under Node — Task B1's
  * NODE_IMPORT_SAFE = false). The real round trip is Task C20's browser smoke.
  */
+import { STREAMED_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -277,7 +278,7 @@ beforeEach(() => {
       modelRef: { type: "url", url: FCB_URL },
       visible: true,
       rules: [],
-      isStreaming: true,
+      source: STREAMED_SOURCE,
     });
     return "stream-1";
   };
@@ -457,6 +458,51 @@ describe("App restore against CitySceneHandle.ready", () => {
     await screen.findByTestId("navara-viewport");
     readyGate.resolve();
     await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  });
+
+  it("re-links a DIFFERENT file by what it is, not by the saved format", async () => {
+    // The saved format described the old file. A re-link to a file of another
+    // name (a converted tile, a renamed download) is detected afresh.
+    const snapshot = snapshotWithUrlLayer();
+    const localSnapshot: ProjectSnapshot = {
+      ...snapshot,
+      layers: snapshot.layers!.map((layer) => ({
+        ...layer,
+        modelRef: {
+          type: "file",
+          fileName: "delft.city.jsonl",
+          encoding: "cityjsonseq",
+        },
+      })),
+    };
+    render(<App persistenceStore={storeWith(localSnapshot)} />);
+    await clickRestore();
+    const input = await screen.findByTestId("relink-input");
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(
+            [
+              JSON.stringify({
+                type: "CityJSON",
+                version: "2.0",
+                CityObjects: {},
+                vertices: [],
+                metadata: { referenceSystem: "EPSG:7415" },
+              }),
+            ],
+            "delft.city.json",
+          ),
+        ],
+      },
+    });
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers[0]?.modelRef).toEqual({
+        type: "file",
+        fileName: "delft.city.json",
+        encoding: "cityjson",
+      }),
+    );
   });
 
   it("gives a file-backed layer a ROW in the viewer, not a banner over it", async () => {
@@ -722,6 +768,56 @@ async function mountShellWithLayer(): Promise<void> {
     expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
   );
 }
+
+describe("App restore keeps the format a layer was opened as", () => {
+  /** A FlatCityBuf behind a name that says CityJSON: only the saved format
+   *  can send it to the stream. */
+  const MISNAMED = "https://example.test/download.json";
+
+  it("reopens a saved layer as its saved format, not its name's", async () => {
+    const snapshot = snapshotWithUrlLayer();
+    render(
+      <App
+        persistenceStore={storeWith({
+          ...snapshot,
+          layers: [
+            {
+              ...snapshot.layers![0]!,
+              modelRef: { type: "url", url: MISNAMED, encoding: "flatcitybuf" },
+            },
+          ],
+        })}
+      />,
+    );
+    await clickRestore();
+    await waitFor(() => expect(openCalls).toHaveLength(1));
+    expect(loadFromUrl).not.toHaveBeenCalled();
+  });
+
+  it("reopens a shared layer as its shared format", async () => {
+    location.hash =
+      "#" +
+      encodeShareState({
+        v: 3,
+        layers: [
+          {
+            name: "download.json",
+            modelUrl: MISNAMED,
+            encoding: "flatcitybuf",
+            rules: [],
+            rulesEnabled: true,
+            visible: true,
+          },
+        ],
+        cam: CAM,
+        dt: "2025-06-21T12:00:00.000Z",
+        pm: "object",
+      });
+    render(<App persistenceStore={storeWith(null)} />);
+    await waitFor(() => expect(openCalls).toHaveLength(1));
+    expect(loadFromUrl).not.toHaveBeenCalled();
+  });
+});
 
 describe("App save with a camera that is not readable yet", () => {
   it("reports the transiently-null camera instead of silently saving nothing", async () => {

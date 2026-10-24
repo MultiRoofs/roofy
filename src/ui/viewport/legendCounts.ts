@@ -65,7 +65,7 @@ function cityCounts(
   resident: ResidentModel | undefined,
 ): ReadonlyArray<number | null> {
   const rows = cityRows(layer);
-  const streaming = layer.isStreaming;
+  const streaming = layer.source.access === "stream";
   const surfaceCounts = new Map<string, number>([
     ["RoofSurface", 0],
     ["WallSurface", 0],
@@ -227,7 +227,7 @@ export function countedLegendGroups(
             geoVisibleIds[geo.id] ?? undefined,
           )
         : group.rows.map(() => null);
-    const currentlyLoaded = city?.isStreaming === true;
+    const currentlyLoaded = city?.source.coverage === "viewport";
     return {
       ...group,
       rows: group.rows.map((row, index) => ({

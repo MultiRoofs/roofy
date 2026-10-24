@@ -1,27 +1,56 @@
+import { useReadoutStore } from "../features/readouts/readoutStore";
 import type { StreamStatus } from "../features/streaming/streamStore";
 
 interface StatusBarProps {
   readonly objectCount: number;
-  readonly fps?: number;
-  readonly cursorPosition?: readonly [number, number, number] | null;
+  /**
+   * The objects the layers' OPENED data holds in total, or `null` when unknown
+   * (any FlatCityBuf stream). Differs from `objectCount` only while a stream
+   * holds part of its dataset.
+   *
+   * For a CityParquet package that is the opened FAMILIES' rows, not the whole
+   * package (`useTotalObjectCount`): a viewer showing Building alone must not be
+   * measured against five families nobody asked for — it could never reach that
+   * total, and the bar would read as a stream stuck at 1%.
+   */
+  readonly totalObjectCount?: number | null;
   readonly streamStatus?: StreamStatus | null;
   readonly streamMessage?: string | null;
   readonly residentCellCount?: number;
 }
 export function StatusBar({
   objectCount,
-  fps,
-  cursorPosition,
+  totalObjectCount = null,
   streamStatus,
   streamMessage,
   residentCellCount,
 }: StatusBarProps) {
+  // Read here, not passed in: the cursor moves at pointer rate, and only this
+  // bar should re-render for it.
+  const cursorPosition = useReadoutStore((s) => s.cursor);
+  const frameMs = useReadoutStore((s) => s.frameMs);
   return (
     <footer className="statusbar statusbar--map">
       <div className="statusbar__left">
         <span>Navara</span>
-        {fps !== undefined && <span>· {fps} FPS</span>}
-        <span>· {formatCount(objectCount)} loaded objects</span>
+        {frameMs !== null && (
+          <span title="CPU time of the last frame drawn; the engine draws only when something changes">
+            · {formatFrameMs(frameMs)} ms/frame
+          </span>
+        )}
+        <span
+          title={
+            totalObjectCount !== null && totalObjectCount !== objectCount
+              ? "Objects near the camera, against the objects the opened data holds"
+              : undefined
+          }
+        >
+          ·{" "}
+          {totalObjectCount !== null && totalObjectCount !== objectCount
+            ? `${formatCount(objectCount)} of ${formatCount(totalObjectCount)}`
+            : formatCount(objectCount)}{" "}
+          loaded objects
+        </span>
       </div>
       <div className="statusbar__centre" title="WGS84 ellipsoidal height">
         {cursorPosition && formatCoordinate(cursorPosition)}
@@ -71,4 +100,9 @@ function streamDotClass(status: StreamStatus) {
 }
 function formatCount(n: number) {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+}
+
+/** One decimal under 10 ms, whole milliseconds above. */
+export function formatFrameMs(ms: number): string {
+  return ms < 10 ? ms.toFixed(1) : String(Math.round(ms));
 }

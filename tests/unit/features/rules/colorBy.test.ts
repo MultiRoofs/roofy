@@ -12,12 +12,14 @@
 import { describe, expect, it } from "vitest";
 import {
   CATCH_ALL_RULE_ID_PREFIX,
+  effectiveExpression,
   effectiveRules,
   effectiveRulesEnabled,
   firstMatchingRule,
   isColorBy,
   isSyntheticRule,
   normalizeColorBy,
+  seedStyleExpression,
   type ColorByInput,
 } from "../../../../src/features/rules/colorBy";
 import type { Rule } from "../../../../src/features/rules/types";
@@ -25,7 +27,11 @@ import {
   SINGLE_COLOR_HEX,
   UNMATCHED_COLOR_HEX,
 } from "../../../../src/scene/cityColors";
-import type { RoofMetrics } from "@cityjson/navara-core";
+import {
+  compileStyleExpression,
+  rulesToStyleExpression,
+  type RoofMetrics,
+} from "@cityjson/navara-core";
 
 const FLAT: Rule = {
   id: "r1",
@@ -197,11 +203,100 @@ describe("normalizeColorBy", () => {
     );
   });
 
-  it("accepts the three modes and nothing else", () => {
+  it("accepts the four modes and nothing else", () => {
     expect(isColorBy("surface")).toBe(true);
     expect(isColorBy("rules")).toBe(true);
     expect(isColorBy("single")).toBe(true);
+    expect(isColorBy("expression")).toBe(true);
     expect(isColorBy("Surface")).toBe(false);
     expect(isColorBy(undefined)).toBe(false);
+  });
+
+  it("keeps an expression whatever the mode, and reads it as an array or a string", () => {
+    const red = ["case", true, "#ff0000", ["get", "$base"]];
+    expect(normalizeColorBy({ styleExpression: red }).styleExpression).toEqual(
+      red,
+    );
+    expect(
+      normalizeColorBy({ styleExpression: "#ff0000" }).styleExpression,
+    ).toBe("#ff0000");
+    expect(normalizeColorBy({ styleExpression: 7 }).styleExpression).toBeNull();
+    expect(
+      normalizeColorBy({ styleExpression: { a: 1 } }).styleExpression,
+    ).toBeNull();
+    expect(normalizeColorBy({}).styleExpression).toBeNull();
+    expect(
+      normalizeColorBy({ colorBy: "single", styleExpression: red }),
+    ).toMatchObject({ colorBy: "single", styleExpression: red });
+  });
+
+  it('reads "expression" without an expression as an absent mode', () => {
+    expect(normalizeColorBy({ colorBy: "expression" }).colorBy).toBe("surface");
+    expect(
+      normalizeColorBy({ colorBy: "expression", rules: [FLAT] }).colorBy,
+    ).toBe("rules");
+    expect(
+      normalizeColorBy({ colorBy: "expression", styleExpression: "#ff0000" })
+        .colorBy,
+    ).toBe("expression");
+  });
+});
+
+describe("effectiveExpression", () => {
+  const red = ["case", true, "#ff0000", ["get", "$base"]];
+
+  it('is the layer\'s expression in "expression" mode only', () => {
+    expect(
+      effectiveExpression(
+        input({ colorBy: "expression", styleExpression: red }),
+      ),
+    ).toBe(red);
+    expect(
+      effectiveExpression(input({ colorBy: "rules", styleExpression: red })),
+    ).toBeNull();
+    expect(effectiveExpression(input({ colorBy: "expression" }))).toBeNull();
+  });
+
+  it("paints no rules beside it", () => {
+    const layer = input({
+      colorBy: "expression",
+      styleExpression: red,
+      rules: [FLAT],
+    });
+    expect(effectiveRules(layer)).toEqual([]);
+    expect(effectiveRulesEnabled(layer)).toBe(false);
+  });
+});
+
+describe("seedStyleExpression", () => {
+  it("carries the rendering the layer had into an expression that draws it", () => {
+    expect(
+      seedStyleExpression(input({ colorBy: "rules", rules: [FLAT, STEEP] })),
+    ).toEqual(
+      rulesToStyleExpression(
+        effectiveRules(input({ colorBy: "rules", rules: [FLAT, STEEP] })),
+      ),
+    );
+    expect(
+      seedStyleExpression(input({ colorBy: "single", singleColor: "#123456" })),
+    ).toEqual(
+      rulesToStyleExpression(
+        effectiveRules(input({ colorBy: "single", singleColor: "#123456" })),
+      ),
+    );
+  });
+
+  it("starts from the layer's rules when it was on surface type", () => {
+    expect(seedStyleExpression(input({ rules: [FLAT] }))).toEqual(
+      rulesToStyleExpression(
+        effectiveRules(input({ colorBy: "rules", rules: [FLAT] })),
+      ),
+    );
+  });
+
+  it("offers a starter that compiles when there is nothing to carry", () => {
+    const starter = seedStyleExpression(input());
+    expect(compileStyleExpression(starter).ok).toBe(true);
+    expect(JSON.stringify(starter)).toContain("RoofSurface");
   });
 });

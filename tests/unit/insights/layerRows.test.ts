@@ -6,7 +6,7 @@ import {
   flatRowsFromRecords,
 } from "../../../src/insights/layerRows";
 import type { CityModel } from "../../../src/domain/citymodel/types";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 
 function model(): CityModel {
   return {

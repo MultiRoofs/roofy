@@ -11,6 +11,10 @@
  * (the legend, "Edit in table") is CONSUMED here: opened, scrolled to, and
  * cleared, so the request cannot fire a second time on the next render.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
@@ -91,7 +95,7 @@ function cityLayer(overrides: Partial<Layer> = {}): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   } as Layer;
 }
@@ -131,7 +135,7 @@ describe("ActiveLayerPanel — which layer it describes", () => {
   it("names a streaming layer's kind differently", () => {
     activateCity({
       name: "Delft stream",
-      isStreaming: true,
+      source: STREAMED_SOURCE,
       model: { ...emptyModel(), sourceEncoding: "flatcitybuf" },
     });
     render(<ActiveLayerPanel onZoomToLayer={noZoom} />);

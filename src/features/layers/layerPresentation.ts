@@ -23,12 +23,13 @@ import type { ActiveLayer } from "../workspace/activeLayer";
 import type { StreamStatus } from "../streaming/streamStore";
 import { presentStreamStatus } from "../streaming/streamStatusPresentation";
 import { extractCrsCode } from "./crsCode";
+import { cityFormat } from "../../domain/citymodel/formats";
 
 export type LayerKind = "city" | "streaming" | "vector" | "raster" | "tiles";
 
 export function layerKindOf(item: ActiveLayer): LayerKind {
   if (item.kind === "city") {
-    return item.layer.isStreaming ? "streaming" : "city";
+    return item.layer.source.access === "stream" ? "streaming" : "city";
   }
   switch (item.layer.kind) {
     case "geojson":
@@ -50,6 +51,7 @@ export interface LayerStateInput {
   readonly counts?: { readonly buildings: number; readonly objects: number };
   /** Static city: `selectedLod`. */
   readonly lod?: string | null;
+  readonly lods?: readonly string[];
   /** Streaming: `getResidentModel().featureCount`. */
   readonly residentCount?: number;
   /** Streaming. */
@@ -150,7 +152,16 @@ function kindStateLine(input: LayerStateInput): string {
 }
 
 function cityStateLine(input: LayerStateInput): string {
-  const suffix = input.lod != null ? ` · LoD ${input.lod}` : "";
+  const suffix =
+    input.lods !== undefined
+      ? input.lods.length === 0
+        ? " · No LoDs selected"
+        : input.lods.length === 1
+          ? ` · LoD ${input.lods[0]}`
+          : ` · Best of LoDs ${input.lods.join(", ")}`
+      : input.lod != null
+        ? ` · LoD ${input.lod}`
+        : "";
   if (input.counts) {
     const { buildings, objects } = input.counts;
     const allBuildings = objects > 0 && buildings === objects;
@@ -193,16 +204,8 @@ function streamingStateLine(input: LayerStateInput): string {
  * `CityModelEncoding` upstream is a type error here rather than a silent
  * `undefined` in a panel.
  */
-const ENCODING_LABELS: Readonly<Record<CityModelEncoding, string>> = {
-  cityjson: "CityJSON",
-  cityjsonseq: "CityJSONSeq",
-  flatcitybuf: "FlatCityBuf",
-  citygml: "CityGML",
-  cityparquet: "CityParquet",
-};
-
 export function encodingLabel(encoding: CityModelEncoding): string {
-  return ENCODING_LABELS[encoding];
+  return cityFormat(encoding).label;
 }
 
 /**
@@ -211,8 +214,8 @@ export function encodingLabel(encoding: CityModelEncoding): string {
  *
  * The format comes from `model.sourceEncoding`, which every parser sets (and
  * `openStreamingLayer` sets on its stub), NOT from re-detecting the file
- * name: `detectEncoding` guesses from an extension and answers "cityjson" for
- * anything it does not recognise, so a signed or extensionless URL would wear
+ * name: a name is a guess from an extension, and says nothing at all for
+ * a signed or extensionless URL, so a signed or extensionless URL would wear
  * the wrong badge. A raster tile template and a 3D tileset name no encoding
  * at all, so their lines are one phrase.
  */

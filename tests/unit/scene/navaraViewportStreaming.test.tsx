@@ -22,7 +22,11 @@
  *    `suppressSettleThenCommit`, so it neither fetches along its flight path
  *    nor leaves its destination unfetched.
  */
-import { createRef } from "react";
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
+import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
@@ -125,6 +129,8 @@ vi.mock("@navaramap/three", () => ({
       screenSize: { x: 800, y: 600 },
       pixelRatio: 1,
       pickDepthPosition: vi.fn(() => null as unknown),
+      forceUpdate: vi.fn(),
+      animation: false,
       // The streaming fetch-box diagnostic draws through this. Every added
       // mesh records its config and its deletion, so a test can assert both
       // what was drawn and that it was taken away again.
@@ -177,7 +183,7 @@ const flatPluginInstance = {
 };
 /** Options the component constructed the plugin with (the viewport-size seam). */
 const flatPluginOptions: Array<Record<string, unknown>> = [];
-/** Set to make `new FlatCityBufPlugin()` throw — a build where streaming is
+/** Set to make `new CityStreamPlugin()` throw — a build where streaming is
  *  unavailable, which must still leave the static viewer fully usable. */
 let flatPluginThrows: string | null = null;
 const FlatCityBufPluginMock = vi.fn(function (
@@ -187,8 +193,8 @@ const FlatCityBufPluginMock = vi.fn(function (
   flatPluginOptions.push(options);
   return flatPluginInstance;
 });
-vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
-  FlatCityBufPlugin: FlatCityBufPluginMock,
+vi.mock("@cityjson/navara-stream/plugin", () => ({
+  CityStreamPlugin: FlatCityBufPluginMock,
 }));
 
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
@@ -205,17 +211,31 @@ import {
 import { getStreamPlugin } from "../../../src/features/streaming/streamPlugin";
 import { useQueryRegionStore } from "../../../src/features/streaming/queryRegionStore";
 import { useRenderDebugStore } from "../../../src/features/debug/renderDebugStore";
-import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
+import type { QueryRegion } from "@cityjson/navara-stream";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Selection } from "../../../src/domain/selection/types";
+import { cameraForBounds } from "../../../src/scene/geographicCamera";
+import type { GeodeticBounds } from "@cityjson/navara-cityjson";
+
+/** What the fake handle answers `geodeticBoundsOf` with: a small box over
+ *  Yokohama, heights ALREADY raised by the layer's offset — which is what the
+ *  real method returns. */
+const STUB_BOUNDS: GeodeticBounds = {
+  west: 139.6,
+  south: 35.46,
+  east: 139.601,
+  north: 35.461,
+  minHeight: 12,
+  maxHeight: 24,
+};
 import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
 import { normalizeColorBy } from "../../../src/features/rules/colorBy";
 
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
-/** A query region as `FcbStreamLayerHandle.onQueryRegion` publishes it: the
+/** A query region as `StreamLayerHandle.onQueryRegion` publishes it: the
  *  source-CRS bbox its `fetch` carried, plus the same rectangle as a lng/lat
  *  ring for the renderer. Four corners is enough here — the densification is
  *  the plugin's `queryRegion.ts` and is tested there. */
@@ -223,6 +243,7 @@ const REGION: QueryRegion = {
   layerId: "S1",
   bbox: [85000, 445000, 87000, 446500],
   epsg: 7415,
+  frame: null,
   span: 2000,
   heightM: 43.2,
   ring: [
@@ -262,7 +283,7 @@ function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...patch,
   } as Layer;
 }
@@ -298,7 +319,7 @@ function makeStaticHandle(id: string, triangles = 10) {
 }
 
 /**
- * An `FcbStreamLayerHandle` stub: the `InteractionHandle` members plus the
+ * An `StreamLayerHandle` stub: the `InteractionHandle` members plus the
  * event subscriptions and the per-layer setters the viewport drives.
  * `triangles` is mutable so a test can simulate cells arriving.
  */
@@ -308,6 +329,12 @@ function makeFakeStreamHandle(
     triangles?: number;
     pick?: Selection | null;
     queryRegion?: QueryRegion | null;
+    resident?: {
+      objects: Record<
+        string,
+        { id: string; bbox: number[]; children: string[] }
+      >;
+    };
   } = {},
 ) {
   const commitListeners = new Set<(version: number) => void>();
@@ -338,6 +365,13 @@ function makeFakeStreamHandle(
       minHeight: 0,
       maxHeight: 30,
     })),
+    /** The real handle's index-space -> geodetic converter, which is the ONLY
+     *  thing that knows what a streamed bbox means (a metric EPSG for a
+     *  projected source, bucket metres for a geographic one). */
+    geodeticBoundsOf: vi.fn((_bbox: readonly number[]) => STUB_BOUNDS),
+    /** What is resident right now. Zoom-to-selection reads the records' bboxes
+     *  from here, because a stream's `layer.model` is a stub. */
+    getResidentModel: vi.fn(() => options.resident ?? { objects: {} }),
     triangleCount: vi.fn(() => handle.triangles),
     /** The vertical-datum offset its cells were placed with — what the cursor
      *  readout subtracts to report the source file's own z. */
@@ -345,7 +379,11 @@ function makeFakeStreamHandle(
     setRules: vi.fn(),
     setLod: vi.fn(),
     setVisible: vi.fn(),
-    // The real `FcbStreamLayerHandle` gained this with the scene themes: the
+    setCameraSync: vi.fn(),
+    // Pushed by `syncStreamState` whenever the row's list differs from what the
+    // memo last saw — including on a REPLACEMENT handle, whose memo is empty.
+    setHiddenTypes: vi.fn(),
+    // The real `StreamLayerHandle` gained this with the scene themes: the
     // viewport pushes the active theme's mesh style on the same beat as rules.
     setThemeStyle: vi.fn(),
     setAppearance: vi.fn(),
@@ -403,7 +441,7 @@ function registerStreamingLayer(
   useLayerStore.setState((s) => ({
     layers: [
       ...s.layers,
-      makeLayer({ id: layerId, isStreaming: true, ...patch }),
+      makeLayer({ id: layerId, source: STREAMED_SOURCE, ...patch }),
     ],
   }));
   useStreamStore.getState().register(layerId, {
@@ -492,7 +530,7 @@ describe("NavaraViewport streaming wiring", () => {
     expect(pluginCallOrder).toBeLessThan(init.mock.invocationCallOrder[0]!);
   });
 
-  it("passes [DefaultPlugin, CityJSONPlugin, FlatCityBufPlugin] to the session, ALL before init", async () => {
+  it("passes [DefaultPlugin, CityJSONPlugin, CityStreamPlugin] to the session, ALL before init", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(init).toHaveBeenCalled());
     expect(addPlugin).toHaveBeenCalledTimes(3);
@@ -580,6 +618,44 @@ describe("NavaraViewport streaming wiring", () => {
       await Promise.resolve();
     });
     await expect(pending).resolves.toBe(flatPluginInstance);
+  });
+
+  it("answers a getStreamingPlugin() call made before StrictMode's remount", async () => {
+    // The share link's path in a dev build: the handle is attached before the
+    // engine effect runs, the call queues behind that mount's gate, and
+    // StrictMode's simulated unmount rejects the gate and re-arms it. The call
+    // must follow the live gate, not fail with "unmounted".
+    let pending: Promise<unknown> | null = null;
+    const capture = (handle: CitySceneHandle | null) => {
+      if (handle && !pending) pending = handle.getStreamingPlugin();
+    };
+    render(
+      <StrictMode>
+        <NavaraViewport ref={capture} onTriangleCount={() => {}} />
+      </StrictMode>,
+    );
+    expect(pending).not.toBeNull();
+    await expect(pending).resolves.toBe(flatPluginInstance);
+  });
+
+  it("still rejects getStreamingPlugin() when the viewport really unmounts", async () => {
+    let release!: () => void;
+    init.mockImplementationOnce(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+          pendingInitRelease = r;
+        }),
+    );
+    const ref = createRef<CitySceneHandle>();
+    const { unmount } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    const pending = ref.current!.getStreamingPlugin();
+    unmount();
+    await expect(pending).rejects.toThrow(/unmounted before the 3D engine/);
+    release();
   });
 
   it("rejects getStreamingPlugin() if the engine never comes up, instead of hanging", async () => {
@@ -761,6 +837,77 @@ describe("NavaraViewport streaming wiring", () => {
     expect(streamHandle.commitListenerCount()).toBe(1);
   });
 
+  // -------------------------------------------------------------------------
+  // A REPLACEMENT handle (ruling R-E′): a family toggle reopens the stream under
+  // the same layer id, so the reconciler sees a new handle where an old one was.
+  // -------------------------------------------------------------------------
+
+  /** Re-register `layerId` with a fresh handle, exactly as
+   *  `reopenStreamingLayer` does: same row, new handle, higher generation. */
+  function replaceStreamHandle(
+    layerId: string,
+    handle: FakeStreamHandle,
+    generation: number,
+  ): void {
+    useStreamStore.getState().unregister(layerId);
+    useStreamStore.getState().register(layerId, {
+      handle,
+      disposers: [],
+      grid: { originX: 0, originY: 0, rootCell: 1000, maxLevel: 4 },
+      header: { version: "1.0", featuresCount: 1, extent: [0, 0, 0, 1, 1, 1] },
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      types: [],
+      typesVersion: 0,
+      status: "idle",
+      message: null,
+      version: 0,
+      generation,
+    } as unknown as StreamState);
+  }
+
+  it("re-seeds rules, LoD, visibility and hidden types on a REPLACEMENT handle", async () => {
+    const first = makeFakeStreamHandle({ triangles: 10 });
+    registerStreamingLayer("S1", first, { hiddenTypes: ["Bridge"] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(first.setRules).toHaveBeenCalled());
+
+    const second = makeFakeStreamHandle({ triangles: 20 });
+    act(() => replaceStreamHandle("S1", second, 1));
+
+    // The memo is keyed on the HANDLE, so a replacement is seeded from scratch:
+    // a reopened stream that inherited nothing would bake its first cells
+    // unstyled and render the types the user had hidden.
+    await waitFor(() => expect(second.setRules).toHaveBeenCalled());
+    expect(second.setLod).toHaveBeenCalled();
+    expect(second.setVisible).toHaveBeenCalled();
+    expect(second.setHiddenTypes).toHaveBeenCalledWith(["Bridge"]);
+    // And the new handle drives the readout, with exactly one subscription.
+    expect(second.commitListenerCount()).toBe(1);
+    second.triangles = 55;
+    second.emitCommit(1);
+  });
+
+  it("does NOT fit the camera when the sole layer's handle is replaced", async () => {
+    const first = makeFakeStreamHandle({ triangles: 10 });
+    registerStreamingLayer("S1", first);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    // The first open of an empty workspace earns its one fit.
+    await waitFor(() => expect(first.onCommit).toHaveBeenCalled());
+    const fitsAfterOpen = flyTo.mock.calls.length + setCamera.mock.calls.length;
+    expect(fitsAfterOpen).toBeGreaterThan(0);
+
+    const second = makeFakeStreamHandle({ triangles: 20 });
+    act(() => replaceStreamHandle("S1", second, 1));
+    await waitFor(() => expect(second.onCommit).toHaveBeenCalled());
+
+    // A reopen must leave the camera exactly where the user put it.
+    expect(flyTo.mock.calls.length + setCamera.mock.calls.length).toBe(
+      fitsAfterOpen,
+    );
+  });
+
   it("routes a pick to the streaming handle, not only to static layers", async () => {
     const streamHandle = makeFakeStreamHandle({
       pick: {
@@ -811,6 +958,75 @@ describe("NavaraViewport streaming wiring", () => {
     act(() => ref.current!.fitAll());
     expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
     expect(flyTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("frames a selected object of a streaming layer through the HANDLE, not the layer's CRS", async () => {
+    // A resident record's bbox is in the layer's INDEX space, which for a
+    // geographic (EPSG:6697) stream is bucket metres — not degrees, and not the
+    // CRS `layer.model.metadata.referenceSystem` names. Reprojecting it through
+    // that CRS read metres as degrees; worse, proj4 has no definition for 6697,
+    // so zoom-to-selection was a SILENT no-op for exactly the layers this
+    // milestone is about. The handle owns the transform, so it answers.
+    const streamHandle = makeFakeStreamHandle({
+      triangles: 10,
+      resident: {
+        objects: {
+          b1: { id: "b1", bbox: [120, -80, 0, 160, -40, 18], children: [] },
+        },
+      },
+    });
+    registerStreamingLayer("S1", streamHandle, {
+      // A geographic source's provenance CRS, as `openStreamingLayer` copies it
+      // out of the stream header.
+      model: {
+        ...makeModel(),
+        metadata: {
+          referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/6697",
+        },
+      } as unknown as CityModel,
+    });
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+    flyTo.mockClear();
+
+    act(() => ref.current!.fitObjects("S1", ["b1"]));
+
+    expect(streamHandle.geodeticBoundsOf).toHaveBeenCalledWith([
+      120, -80, 0, 160, -40, 18,
+    ]);
+    // Framed off exactly the bounds the handle reported — Yokohama, not a
+    // point 120 m east of the null island a 6697 reprojection would have found.
+    expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(flyTo).toHaveBeenCalledWith(cameraForBounds(STUB_BOUNDS));
+  });
+
+  it("does not double-count the geoid offset when framing a selected object", async () => {
+    // `geodeticBoundsOf` already raises its heights by the layer's offset — the
+    // bounds it returns are where the geometry is DRAWN. Adding the offset
+    // again on top put the camera a geoid undulation too high (43 m over Delft,
+    // 37 m over Yokohama) for every zoom-to-selection.
+    const expected = cameraForBounds(STUB_BOUNDS);
+    const streamHandle = makeFakeStreamHandle({
+      triangles: 10,
+      resident: {
+        objects: {
+          b1: { id: "b1", bbox: [120, -80, 0, 160, -40, 18], children: [] },
+        },
+      },
+    });
+    registerStreamingLayer("S1", streamHandle);
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+    flyTo.mockClear();
+
+    act(() => ref.current!.fitObjects("S1", ["b1"]));
+
+    // Exactly the framing of the bounds the handle reported — the stub's
+    // `heightOffset()` of 43.2 is nowhere in it.
+    const target = flyTo.mock.calls[0]![0] as { height: number };
+    expect(target.height).toBeCloseTo(expected.height, 9);
   });
 
   it("fits a newly opened streaming layer once, and does not re-fit on an unrelated change", async () => {
@@ -983,6 +1199,7 @@ describe("NavaraViewport streaming wiring", () => {
       expect(streamHandle.setRules).toHaveBeenLastCalledWith(
         expect.anything(),
         true,
+        null,
       ),
     );
     const calls = streamHandle.setRules.mock.calls;
@@ -1104,7 +1321,7 @@ describe("NavaraViewport streaming wiring", () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(addedMeshes).toHaveLength(1));
 
-    // What `FcbStreamLayerHandle.delete()` announces.
+    // What `StreamLayerHandle.delete()` announces.
     streamHandle.emitQueryRegion(null);
 
     await waitFor(() => expect(addedMeshes[0]!.deleted).toBe(true));

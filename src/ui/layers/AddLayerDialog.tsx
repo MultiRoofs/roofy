@@ -14,8 +14,9 @@ import { useDrawStore } from "../../features/drawing/drawStore";
  * The two-beat rhythm is the point. A pick or a paste stages the source and
  * names it ("Detected: CityJSON [Change…]"); the filled "Add layer" button is
  * the second beat, so a wrong guess costs a click rather than a failed load.
- * Detection is a pure function of the name ({@link detectSourceFromName}),
- * shared with the landing page.
+ * Detection is the name's at once ({@link detectSourceFromName}, shared with
+ * the landing page), then a file's first bytes ({@link detectSourceFromFile}),
+ * which correct a name that lies.
  *
  * Routing, once the user confirms:
  *  - a CITY format goes out through `onAddFile` / `onAddFiles` / `onAddUrl`
@@ -52,6 +53,7 @@ import { StacBrowser, type AddUrlResult } from "../stac/StacBrowser";
 import {
   SOURCE_OVERRIDES,
   UNKNOWN_SOURCE,
+  detectSourceFromFile,
   detectSourceFromName,
   type DetectedSource,
 } from "../../features/layers/detectSource";
@@ -62,8 +64,9 @@ import {
 
 interface AddLayerDialogProps {
   readonly onClose: () => void;
-  /** The file, and what the user confirmed it is — the loader's encoding
-   *  override. */
+  /** The file, and the format the user picked by hand — the loader's
+   *  encoding override. Absent when the user kept the dialog's guess, so the
+   *  loader detects from the bytes itself. */
   readonly onAddFile: (file: File, override?: DetectedSource) => void;
   /** Several files as ONE layer — a CityParquet package folder, or a
    *  multi-file drop. Closes the dialog exactly like `onAddFile`. */
@@ -95,6 +98,25 @@ export type SourceTab = "file" | "url" | "catalog" | "draw";
 interface StagedFiles {
   readonly files: ReadonlyArray<File>;
   readonly detected: DetectedSource;
+  /** True once the user has chosen in the select: the bytes, read a moment
+   *  after the pick, then no longer replace what is shown. */
+  readonly corrected?: boolean;
+}
+
+/**
+ * A file pick's detection, as this tab can honour it.
+ *
+ * A dropped `tileset.json` really does name 3D Tiles — but a tileset is a URL
+ * the engine walks, not a file it reads, so this tab cannot honour it and the
+ * select does not offer it. Saying "3D Tiles" beside a disabled button, with
+ * the select showing something else, would be three controls telling three
+ * stories; "Unknown format" is the honest one here, and the URL tab still
+ * gives the name its real answer.
+ */
+function forFileTab(detected: DetectedSource): DetectedSource {
+  return detected.kind === "geo" && detected.geoKind !== "geojson"
+    ? UNKNOWN_SOURCE
+    : detected;
 }
 
 /** What a FILE can be corrected to. GeoJSON is the only geospatial format a
@@ -161,19 +183,22 @@ export function AddLayerDialog({
    *  thinks the file is yet. */
   const stageFile = useCallback((file: File) => {
     setError(null);
-    const detected = detectSourceFromName(file.name);
+    // The name answers at once; the first bytes a moment later, and they win
+    // where they are definite (a FlatCityBuf saved as `.json`). Only while
+    // this file is still the one staged, and the user has not chosen.
     setStaged({
       files: [file],
-      // A dropped `tileset.json` really does name 3D Tiles — but a tileset is
-      // a URL the engine walks, not a file it reads, so this tab cannot honour
-      // it and the select does not offer it. Saying "3D Tiles" beside a
-      // disabled button, with the select showing something else, would be
-      // three controls telling three stories; "Unknown format" is the honest
-      // one here, and the URL tab still gives the name its real answer.
-      detected:
-        detected.kind === "geo" && detected.geoKind !== "geojson"
-          ? UNKNOWN_SOURCE
-          : detected,
+      detected: forFileTab(detectSourceFromName(file.name)),
+    });
+    void detectSourceFromFile(file).then((detected) => {
+      setStaged((current) =>
+        current === null ||
+        current.corrected === true ||
+        current.files.length !== 1 ||
+        current.files[0] !== file
+          ? current
+          : { ...current, detected: forFileTab(detected) },
+      );
     });
   }, []);
 
@@ -187,6 +212,10 @@ export function AddLayerDialog({
   const addStaged = useCallback(() => {
     if (staged === null || staged.detected.kind === "unknown") return;
     const { files, detected } = staged;
+    // Only a hand-made correction is the user's word. The dialog's own guess
+    // (from the name, or the bytes it read) goes out as no override, so the
+    // loader detects again and the bytes keep the last say.
+    const override = staged.corrected === true ? detected : undefined;
     if (detected.kind === "geo") {
       // Unreachable through the select (see FILE_SOURCE_OVERRIDES), and stated
       // anyway: reading a tile template out of a local file is not a thing
@@ -204,8 +233,8 @@ export function AddLayerDialog({
       });
       return;
     }
-    if (files.length > 1) onAddFiles([...files], detected);
-    else onAddFile(files[0]!, detected);
+    if (files.length > 1) onAddFiles([...files], override);
+    else onAddFile(files[0]!, override);
     onClose();
   }, [onAddFile, onAddFiles, onClose, staged]);
 
@@ -218,7 +247,12 @@ export function AddLayerDialog({
    * is added here and reports its refusal in place.
    */
   const submitUrl = useCallback(
-    (url: string, detected: DetectedSource, name?: string): string | null => {
+    (
+      url: string,
+      detected: DetectedSource,
+      name: string | undefined,
+      corrected: boolean,
+    ): string | null => {
       if (detected.kind === "unknown") return null;
       if (detected.kind === "geo") {
         const result = addGeoSourceFromUrl(url, detected.geoKind, name);
@@ -226,7 +260,7 @@ export function AddLayerDialog({
         onClose();
         return null;
       }
-      void onAddUrl(url, detected);
+      void onAddUrl(url, corrected ? detected : undefined);
       onClose();
       return null;
     },
@@ -374,7 +408,9 @@ export function AddLayerDialog({
                     // is a new one.
                     setError(null);
                     setStaged((current) =>
-                      current === null ? current : { ...current, detected },
+                      current === null
+                        ? current
+                        : { ...current, detected, corrected: true },
                     );
                   }}
                 />

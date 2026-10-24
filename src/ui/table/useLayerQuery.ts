@@ -24,9 +24,14 @@ import {
 import { runQuery } from "../../insights/duckdb";
 import type { ColumnInfo } from "../../insights/columnKind";
 import {
+  layerTableKey,
   useLayerTableStore,
   type LayerTable,
 } from "../../insights/layerTables";
+import {
+  useActiveFamily,
+  useFamilyTableState,
+} from "../../features/layers/familyStore";
 import {
   buildCountSql,
   buildFeatureScopeWhere,
@@ -42,13 +47,27 @@ import {
   parentsIndexOf,
   rootFeatureId,
 } from "../../domain/citymodel/featureId";
-import { getResidentModel } from "../../features/streaming/residentModel";
+import { layerObjects } from "../../features/layers/cityLayerSource";
 import { useStreamStore } from "../../features/streaming/streamStore";
 
 export interface LayerQueryView {
-  /** `"no-layer"` means NOTHING is selected. A selected layer whose registry
-   *  entry has not been written yet is `"queued"`, never `"no-layer"`. */
-  readonly status: "no-layer" | "queued" | "building" | "failed" | "ready";
+  /**
+   * `"no-layer"` means NOTHING is selected. A selected layer whose registry
+   * entry has not been written yet is `"queued"`, never `"no-layer"`.
+   *
+   * `"absent"` is a CityParquet family whose view has never been created (or
+   * whose creation failed): nothing is building, so a spinner would never
+   * resolve, and nothing is wrong with the data either — the panel offers to
+   * load it. Every other layer's table is enqueued the moment the layer lands,
+   * so it can never be absent.
+   */
+  readonly status:
+    | "no-layer"
+    | "queued"
+    | "absent"
+    | "building"
+    | "failed"
+    | "ready";
   /** A build failure, a compile refusal, or DuckDB's own message — from the
    *  page query OR from a COUNT that failed on its own. */
   readonly message: string | null;
@@ -85,11 +104,22 @@ function countOf(rows: ReadonlyArray<Record<string, unknown>>): number {
 }
 
 export function useLayerQuery(layerId: string | null): LayerQueryView {
+  // Ruling S3: a CityParquet layer's rows live in its ACTIVE family's view, under
+  // the composite key. `null` — every other layer — is the bare key this hook has
+  // always read.
+  const family = useActiveFamily(layerId);
+  // The FAMILY's own table state, which is the only thing that can tell an
+  // uncreated view (`absent`) from a table the lifecycle has queued.
+  const familyTable = useFamilyTableState(layerId, family);
+  // ONE key for the table and its query state (R-C′): two families are two
+  // tables with two column lists, so a sort or a predicate belongs to the family
+  // it was written against, not to the layer.
+  const queryKey = layerId === null ? null : layerTableKey(layerId, family);
   const tableState = useLayerTableStore((s) =>
-    layerId === null ? undefined : s.tables[layerId],
+    queryKey === null ? undefined : s.tables[queryKey],
   );
   const query = useQueryStore((s) =>
-    layerId === null ? null : layerQuery(s, layerId),
+    queryKey === null ? null : layerQuery(s, queryKey),
   );
   const selections = useSelectionStore((s) => s.selections);
   const layer = useLayerStore((s) =>
@@ -109,7 +139,9 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
   const [loading, setLoading] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const generation = useRef(0);
-  /** Which LAYER the rows on screen came from — see the reset in the effect. */
+  /** Which TABLE the rows on screen came from — the layer AND its family (see
+   *  the reset in the effect): switching family changes the columns under the
+   *  rows exactly as switching layer does. */
   const shownLayer = useRef<string | null>(null);
 
   const reload = useCallback(() => setReloadToken((t) => t + 1), []);
@@ -127,9 +159,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     .map((selection) => selection.objectId);
   const selectedFeatureIds = useMemo(() => {
     if (viewMode !== "buildings" || layer === null) return selectedIds;
-    const objects = layer.isStreaming
-      ? getResidentModel(layer.id, streamVersion ?? 0).objects
-      : layer.model.objects;
+    const objects = layerObjects(layer, streamVersion ?? 0);
     const parents = parentsIndexOf(objects);
     return selectedIds.map((id) => rootFeatureId(id, parents));
   }, [layer, selectedIds.join("\u0000"), streamVersion, viewMode]);
@@ -241,8 +271,8 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     // truthful answer to the same question, and it is replaced when the new
     // one lands rather than being withdrawn while nothing is ready to take
     // its place. A page step and a sort keep it for the same reason.
-    if (shownLayer.current !== layerId) {
-      shownLayer.current = layerId;
+    if (shownLayer.current !== queryKey) {
+      shownLayer.current = queryKey;
       setRows(NO_ROWS);
       setTotalRows(null);
       setUnfilteredRows(null);
@@ -306,10 +336,10 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       // page first would flash "no rows" on the way there, so `loading` is left
       // raised and the rows are left alone until the real page lands. An
       // UNKNOWN total clamps nothing: there is no last page to clamp to.
-      if (filtered !== null && layerId !== null) {
+      if (filtered !== null && queryKey !== null) {
         const lastPage = Math.max(0, Math.ceil(filtered / pageSize) - 1);
         if (page > lastPage) {
-          useQueryStore.getState().setPage(layerId, lastPage);
+          useQueryStore.getState().setPage(queryKey, lastPage);
           return;
         }
       }
@@ -333,7 +363,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       setLoading(false);
     })();
   }, [
-    layerId,
+    queryKey,
     table,
     applied,
     sort,
@@ -359,6 +389,27 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       loading: false,
       reload,
     };
+  }
+  if (tableState === undefined && familyTable !== null) {
+    // A FAMILY with no view. Nothing is in flight unless the family says so, and
+    // `absent`/`failed` is a state only the user can move — by asking for the
+    // table (the panel's "Load table"), or by the family's own Retry.
+    if (familyTable === "absent" || familyTable === "failed") {
+      return {
+        status: "absent",
+        message:
+          familyTable === "failed"
+            ? "This family's table could not be created."
+            : null,
+        table: null,
+        columns: NO_COLUMNS,
+        rows: NO_ROWS,
+        totalRows: null,
+        unfilteredRows: null,
+        loading: false,
+        reload,
+      };
+    }
   }
   if (tableState === undefined) {
     // A layer IS selected; its registry entry has simply not been written yet.

@@ -150,7 +150,7 @@ export type ThemeBloom = NonNullable<ThemeEnvironment["bloom"]>;
 
 export interface SceneThemePolicy {
   /** Pushed to every static and streaming layer handle
-   *  (`CityModelHandle.setThemeStyle` / `FcbStreamLayerHandle.setThemeStyle`).
+   *  (`CityModelHandle.setThemeStyle` / `StreamLayerHandle.setThemeStyle`).
    *  ONE frozen object per theme — see this module's header. */
   readonly meshStyle: ThemeStyle;
   /** Which basemap the theme demands, or `null` for the user's own choice.

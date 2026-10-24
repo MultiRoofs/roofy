@@ -1,6 +1,6 @@
 import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
 import type { CityObject } from "../../domain/citymodel/types";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 
 export interface DerivedBuildingValues {
   readonly roofArea: number | null;

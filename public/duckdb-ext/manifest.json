@@ -1,0 +1,32 @@
+{
+  "duckdb": "v1.5.5",
+  "platform": "wasm_eh",
+  "duckdbWasm": "1.33.1-dev64.0",
+  "extensions": {
+    "cityjson": {
+      "source": "CI artefact cityjson-v1.5.5-extension-wasm_eh of cityjson/duckdb-cityjson develop 294a595 (Actions run 38545349235). Unsigned.",
+      "sha256": "415a0c69dec9b77564515dc0369eeca02745ce1c3520cc179a4c65c5ac9c719e",
+      "footer": ["CPP", "294a595", "v1.5.5", "wasm_eh", "4"]
+    },
+    "three_d": {
+      "source": "CI artefact three_d-v1.5.5-extension-wasm_eh of cityjson/duckdb-3d develop 0d85321 (Actions run 38264025449). Unsigned.",
+      "sha256": "031cd2b2d10dafcc97c980eb35e7bc93d4c16b1e5adc518c1a8f343a0fabe452",
+      "footer": ["CPP", "0d85321", "v1.5.5", "wasm_eh", "4"]
+    },
+    "spatial": {
+      "source": "https://extensions.duckdb.org/v1.5.5/wasm_eh/spatial.duckdb_extension.wasm",
+      "sha256": "9f313e5294a272b67ddfe56b387cd75fb10492f87e6a707f30c4be56e47c02b3",
+      "footer": ["CPP", "eb1e57c", "v1.5.5", "wasm_eh", "4"]
+    },
+    "parquet": {
+      "source": "https://extensions.duckdb.org/v1.5.5/wasm_eh/parquet.duckdb_extension.wasm",
+      "sha256": "31b294da2ef96f61e87246a0b1aa7580d20ad7ae37aa1e912fa0c7488192c5c6",
+      "footer": ["CPP", "v1.5.5", "v1.5.5", "wasm_eh", "4"]
+    },
+    "json": {
+      "source": "https://extensions.duckdb.org/v1.5.5/wasm_eh/json.duckdb_extension.wasm",
+      "sha256": "74813e84d41c7b33402f24f466e1793ad48bd00259d089c516af85ce2ecc8223",
+      "footer": ["CPP", "v1.5.5", "v1.5.5", "wasm_eh", "4"]
+    }
+  }
+}

@@ -152,6 +152,42 @@ export default defineConfig({
           browser: true,
         },
       },
+      {
+        // Where data is kept is the storage layer's business: everything else
+        // goes through a StorageBackend (src/persistence/storage), so the
+        // backend can change without touching the features.
+        files: ["src/**/*.{ts,tsx}"],
+        rules: {
+          "no-restricted-globals": [
+            "error",
+            {
+              name: "localStorage",
+              message: "Use a StorageBackend from src/persistence/storage.",
+            },
+            {
+              name: "sessionStorage",
+              message: "Use a StorageBackend from src/persistence/storage.",
+            },
+          ],
+          "no-restricted-properties": [
+            "error",
+            ...["window", "globalThis", "self"].flatMap((object) =>
+              ["localStorage", "sessionStorage"].map((property) => ({
+                object,
+                property,
+                message: "Use a StorageBackend from src/persistence/storage.",
+              })),
+            ),
+          ],
+        },
+      },
+      {
+        files: ["src/persistence/storage/localStorageBackend.ts"],
+        rules: {
+          "no-restricted-globals": "off",
+          "no-restricted-properties": "off",
+        },
+      },
     ],
     options: {
       typeAware: true,
@@ -239,12 +275,20 @@ export default defineConfig({
         import.meta.dirname,
         "packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts",
       ),
-      // Same ordering rule as the CityJSON pair above: the subpath entry must
-      // precede the bare key. This one carries `FlatCityBufPlugin` and the
-      // `getPickRay` binding (Task C11).
-      "@cityjson/navara-flatcitybuf/plugin": resolve(
+      // Same ordering rule as the CityJSON pair above: the subpath entries
+      // must precede the bare key. `/plugin` carries `CityStreamPlugin` and
+      // the `getPickRay` binding; `/worker` is what a format's worker imports.
+      "@cityjson/navara-stream/plugin": resolve(
         import.meta.dirname,
-        "packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/plugin.ts",
+        "packages/cityjson-navara-plugins/packages/navara-stream/src/plugin.ts",
+      ),
+      "@cityjson/navara-stream/worker": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-stream/src/worker.ts",
+      ),
+      "@cityjson/navara-stream": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-stream/src/index.ts",
       ),
       "@cityjson/navara-flatcitybuf": resolve(
         import.meta.dirname,

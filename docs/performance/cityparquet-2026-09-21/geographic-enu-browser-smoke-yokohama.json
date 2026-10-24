@@ -1,0 +1,44 @@
+{
+  "what": "Browser smoke after the geographic-to-ENU milestone (performance task 6): Yokohama building.parquet streamed via share link, EPSG:6697 read straight into per-cell ENU",
+  "date": "2026-09-23",
+  "browser": "Chrome 147 headless, SwiftShader (software GL), Linux host, load average ~30 (a foreign 3dbag-pipeline job)",
+  "build": "Vite dev server (npm run dev --port 5188), develop 4b79580, submodule 21f2755",
+  "camera": {
+    "lng": 139.622,
+    "lat": 35.4625,
+    "height": 900,
+    "heading": 0,
+    "pitch": -65
+  },
+  "source": "https://cityparquet.open3d.city/data/plateau/yokohama-shi/building.parquet",
+  "finalStatus": "Navara· 2 FPS· 4.5K of 884.1K loaded objects\n35.4690° N, 139.6248° E · 39 m\n21 resident cells · Settled",
+  "heapMB": 189,
+  "residentCells": 21,
+  "firstCommitMs": 28940,
+  "consoleLogs": [
+    "warning: THREE.WARNING: Multiple instances of Three.js being imported.",
+    "warning: [googleTiles] VITE_GOOGLE_MAPS_API_KEY not set. Tiles disabled."
+  ],
+  "longtasksOver500": [
+    [3057, 707],
+    [12471, 672],
+    [38448, 758],
+    [65126, 1985],
+    [73220, 1921],
+    [75315, 2017]
+  ],
+  "queryBoxReadout": "Streaming fetch bbox | Nishitokyo | Local metric frame · 139.5947°E, 35.4529°N | 2,292 m × 1,029 m | X | 1335.3 → 3627.8 | Y | 1064.8 → 2093.6",
+  "pick": {
+    "pixel": [900, 200],
+    "triesBeforeHit": 1,
+    "inspector": "Nishitokyo | Building …1daa0 | bldg_d0db9be5-ce95-4427-bc3d-33061881daa0 | Copy | Summary | Roof area | 3689.7 m² | Mean roof slope | 0.0° | Main orientation | N (0°) | Height | 36.7 m | Attributes | measuredHeight | 36.7 | Geometry | LoD | 2 | Object type | Building | Roof surfaces | 0 | Wall surfaces | 0 | Ground surfaces | 0 | Vertices | 0 | Bounding box | 2675.7, 1744.4, 0.0, 2752.1, 1833.6, 38.5 | Raw object"
+  },
+  "comparisonWithPreTask6": {
+    "reference": "stream-browser-smoke-yokohama.{json,png} (2026-09-22, develop 145d19a, UTM normalisation)",
+    "referenceStatus": "Navara· 1 FPS· 4.5K of 884.1K loaded objects / 21 resident cells · Settled",
+    "verdict": "SAME PLACE. Full-width unselected frame (…-unselected.png) against the reference: identical street grid, the same diagonal railway corridor, the same circular building at lower right, the same water bodies at the right edge and the same roof footprints. 21 resident cells in both.",
+    "objectCounts": "4,508 objects / 12,568 roof surfaces now, 4,450 / 12,756 before — a 1.3% difference, which is the plan's 'coverage, not equality' constraint showing: the bucket index and the UTM index need not select identical rows for the same axis-aligned view box.",
+    "geoid": "APPLIES. Roof polygons coincide with their aerial-imagery footprints to a pixel or two. At this camera a 37 m vertical error (Yokohama's EGM2008 undulation) would displace a roof about 37·cos(65°) ≈ 16 m ≈ 9 px against its own footprint; nothing of the sort is visible, and the inspector's picked building reads height 36.7 m with a cell-frame z range 0.0–38.5 m."
+  },
+  "note": "firstCommitMs = ms from dismissing the walkthrough to the status bar reporting resident cells; 28.9 s here, just inside the plugin's 30 s COMMIT_FETCH_TIMEOUT_MS liveness bound. See the report for runs at lower altitudes (350–600 m, higher LoD) where that bound expires on this loaded host."
+}

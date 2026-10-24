@@ -7,6 +7,10 @@
  * used to say it (`OP_LABELS`, `valueText`), and offers the two things a
  * summary owes its reader — a way back to the bar, and a way out.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
@@ -42,7 +46,11 @@ afterEach(() => {
 function city(isStreaming = false): ActiveLayer {
   return {
     kind: "city",
-    layer: { id: "L", name: "Delft", isStreaming } as unknown as Layer,
+    layer: {
+      id: "L",
+      name: "Delft",
+      source: isStreaming ? STREAMED_SOURCE : RESIDENT_SOURCE,
+    } as unknown as Layer,
   };
 }
 

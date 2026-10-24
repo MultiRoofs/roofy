@@ -15,6 +15,7 @@
  * scoped rows, then §6.1's id-only identity read over the WHOLE scope, then the
  * guarded report over the contributors alone.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { LayerTable } from "../../../../src/insights/layerTables";
@@ -145,7 +146,7 @@ function layerWith(
   return {
     id: "L1",
     name: "Delft",
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     selectedLod: "2.2",
     model: {
       sourceEncoding: "cityjson",

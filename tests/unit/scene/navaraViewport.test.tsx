@@ -6,6 +6,10 @@
  * jsdom has no WebGL anyway. The real engine is exercised by browser smokes,
  * not here.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
 import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -239,6 +243,8 @@ const RAY = { origin: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 0, z: 1 } };
 const getPickRay = vi.fn(() => RAY as unknown);
 const viewInstances: unknown[] = [];
 const viewOptions: unknown[] = [];
+/** `view.forceUpdate`: the one way the app asks the on-demand engine for a frame. */
+const viewForceUpdate = vi.fn();
 /** Reproduces the engine's real pre-first-frame behaviour (see the test). */
 let cameraThrows = false;
 /** Set to make `new DefaultPlugin()` throw, i.e. an unsupported browser. */
@@ -314,6 +320,8 @@ vi.mock("@navaramap/three", () => ({
       screenSize: { x: 800, y: 600 },
       pixelRatio: 2,
       pickDepthPosition,
+      forceUpdate: viewForceUpdate,
+      animation: (options as { animation?: boolean }).animation ?? false,
     };
     viewInstances.push(view);
     return view;
@@ -369,8 +377,8 @@ function settleWrappedMove(): unknown {
   const move = calls.at(-1)![0] as () => unknown;
   return move();
 }
-vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
-  FlatCityBufPlugin: vi.fn(function () {
+vi.mock("@cityjson/navara-stream/plugin", () => ({
+  CityStreamPlugin: vi.fn(function () {
     return flatPluginInstance;
   }),
 }));
@@ -400,6 +408,7 @@ import {
   useRenderDebugStore,
 } from "../../../src/features/debug/renderDebugStore";
 import { useAtmosphereStore } from "../../../src/features/atmosphere/atmosphereStore";
+import { useSolarStore } from "../../../src/features/solar/solarStore";
 import { BASEMAPS } from "../../../src/scene/basemaps";
 import { GEO_HIGHLIGHT_COLOR_HEX } from "../../../src/scene/geoLayerSync";
 import { TERRAIN_ATTRIBUTION } from "../../../src/scene/terrain";
@@ -448,13 +457,24 @@ globalThis.ResizeObserver =
  * default moves again. The suites that DO test them opt back in.
  */
 beforeEach(() => {
+  // The hover raycast runs on the next animation frame; run frames at once so
+  // a move's hover is visible to the assertion right after it.
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
   useBasemapStore.setState({ basemapId: "none" });
   useRenderDebugStore.setState({
     ...DEFAULT_RENDER_DEBUG_STATE,
     cloudsEnabled: false,
     postProcessingEnabled: true,
   });
-  useAtmosphereStore.setState({ cloudCoverage: 0.3, lensFlareEnabled: true });
+  useAtmosphereStore.setState({
+    cloudCoverage: 0.3,
+    lensFlareEnabled: true,
+    precipitation: "none",
+  });
+  useSolarStore.setState({ latLon: null });
   addEffect.mockClear();
   updateEffect.mockClear();
   deleteEffect.mockClear();
@@ -464,6 +484,9 @@ beforeEach(() => {
   resetPhotorealHandles();
   resize.mockClear();
   resizeObservers.length = 0;
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 // ---------------------------------------------------------------------------
@@ -505,7 +528,7 @@ function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...patch,
   } as Layer;
 }
@@ -576,6 +599,7 @@ describe("NavaraViewport lifecycle", () => {
     defaultPluginInstance.addDefaultPhotorealScene.mockClear();
     viewInstances.length = 0;
     viewOptions.length = 0;
+    useSolarStore.setState({ timeAnimating: false });
     cameraThrows = false;
     defaultPluginThrows = null;
     cityPluginInstance.getHandle.mockReset();
@@ -640,6 +664,68 @@ describe("NavaraViewport lifecycle", () => {
     expect(options.shadow).toBe(true);
     // Task B1 finding 3: `Options` has no `useNormal` field.
     expect("useNormal" in options).toBe(false);
+  });
+
+  it("renders on demand, not every frame", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect((viewOptions[0] as Record<string, unknown>).animation).toBe(false);
+  });
+
+  it("renders continuously only while the sun animates", async () => {
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    const view = viewInstances[0] as { animation: boolean };
+    expect(view.animation).toBe(false);
+    act(() => useSolarStore.getState().setTimeAnimating(true));
+    expect(view.animation).toBe(true);
+    act(() => useSolarStore.getState().setTimeAnimating(false));
+    expect(view.animation).toBe(false);
+  });
+
+  it("renders continuously while rain falls over a site", async () => {
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    const view = viewInstances[0] as { animation: boolean };
+    act(() => useAtmosphereStore.getState().setPrecipitation("rain"));
+    // No site, no rain mesh: nothing falls, so nothing needs a frame.
+    expect(view.animation).toBe(false);
+    act(() => useSolarStore.getState().setLatLon({ lat: 52, lon: 4.36 }));
+    expect(view.animation).toBe(true);
+    act(() => useAtmosphereStore.getState().setPrecipitation("none"));
+    expect(view.animation).toBe(false);
+  });
+
+  it("asks for a frame after every commit, for the writes the engine cannot see", async () => {
+    const ref = createRef<CitySceneHandle>();
+    const { rerender } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    viewForceUpdate.mockClear();
+    // Any re-render: the catch-all does not care which prop changed.
+    rerender(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    expect(viewForceUpdate).toHaveBeenCalled();
+  });
+
+  it("does not re-render for a parent render that passes the same props", async () => {
+    const ref = createRef<CitySceneHandle>();
+    const onTriangleCount = () => {};
+    const { rerender } = render(
+      <NavaraViewport ref={ref} onTriangleCount={onTriangleCount} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    // Let the boot's own state updates land first: they are commits too.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    viewForceUpdate.mockClear();
+    rerender(<NavaraViewport ref={ref} onTriangleCount={onTriangleCount} />);
+    expect(viewForceUpdate).not.toHaveBeenCalled();
   });
 
   it("REJECTS `ready` and shows an error panel when view.init() fails", async () => {
@@ -886,9 +972,9 @@ describe("NavaraViewport lifecycle", () => {
     expect(ref.current!.getCameraState()).not.toBeNull();
   });
 
-  it("subscribes to postRender only when an FPS callback is given", async () => {
+  it("subscribes to postRender only when a frame-time callback is given", async () => {
     const { unmount } = render(
-      <NavaraViewport onTriangleCount={() => {}} onFps={() => {}} />,
+      <NavaraViewport onTriangleCount={() => {}} onFrameTime={() => {}} />,
     );
     await waitFor(() =>
       expect(on.mock.calls.some((c) => c[0] === "postRender")).toBe(true),
@@ -943,7 +1029,7 @@ describe("NavaraViewport lifecycle", () => {
     useLayerStore.setState({
       layers: [
         makeLayer({ id: "static" }),
-        makeLayer({ id: "streamed", isStreaming: true }),
+        makeLayer({ id: "streamed", source: STREAMED_SOURCE }),
       ],
     });
     render(<NavaraViewport onTriangleCount={() => {}} />);
@@ -1035,7 +1121,7 @@ describe("NavaraViewport lifecycle", () => {
     // workspace is NOT empty, and the .fcb the user is looking at must not be
     // left behind when a CityJSON file lands beside it.
     useLayerStore.setState({
-      layers: [makeLayer({ id: "streamed", isStreaming: true })],
+      layers: [makeLayer({ id: "streamed", source: STREAMED_SOURCE })],
     });
     // `onTriangleCount` is the sync effect's own footprint — it is called at
     // the end of every pass, and only past the `engineReady` gate. Waiting on
@@ -1049,7 +1135,7 @@ describe("NavaraViewport lifecycle", () => {
 
     useLayerStore.setState({
       layers: [
-        makeLayer({ id: "streamed", isStreaming: true }),
+        makeLayer({ id: "streamed", source: STREAMED_SOURCE }),
         makeLayer({ id: "a" }),
       ],
     });
@@ -1335,6 +1421,14 @@ describe("NavaraViewport lifecycle", () => {
       layerId: "b",
       objectId: "b-obj",
     });
+  });
+
+  it("raycasts nothing and reads no depth while a button is held (a drag)", async () => {
+    const { handles } = await mountTwoLayers({ a: 900, b: 12 });
+    act(() => fire("pointermove", mouse(10, 20, { buttons: 1 })));
+    expect(handles.a.resolveRaycast).not.toHaveBeenCalled();
+    expect(handles.b.resolveRaycast).not.toHaveBeenCalled();
+    expect(useSelectionStore.getState().hovered).toBeNull();
   });
 
   it("raycasts from CANVAS-relative pixels, not viewport clientX/clientY", async () => {

@@ -23,10 +23,15 @@ import { useState } from "react";
  * a control that cannot do anything is worse than its absence.
  */
 import { useLayerStore } from "../../features/layers/layerStore";
-import { COLOR_BY_MODES, type ColorBy } from "../../features/rules/colorBy";
+import {
+  COLOR_BY_MODES,
+  seedStyleExpression,
+  type ColorBy,
+} from "../../features/rules/colorBy";
 import { SINGLE_COLOR_HEX } from "../../scene/cityColors";
 import type { ActiveLayer } from "../../features/workspace/activeLayer";
 import { RulesEditor } from "./RulesEditor";
+import { StyleExpressionEditor } from "./StyleExpressionEditor";
 import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
 import { SurfaceTypePalette } from "./SurfaceTypePalette";
 import { GeoOpacityControl, GeoVectorStyleFields } from "./GeoStyleControls";
@@ -37,6 +42,7 @@ const MODE_LABELS: Readonly<Record<ColorBy, string>> = {
   surface: "Surface type",
   rules: "Rules",
   single: "Single colour",
+  expression: "Expression",
 };
 
 /**
@@ -50,6 +56,7 @@ const MODE_PHRASES: Readonly<Record<ColorBy, string>> = {
   surface: "Color roof surfaces by surface type",
   rules: "Color roof surfaces by rules",
   single: "Color roof surfaces with one colour",
+  expression: "Color surfaces by an expression",
 };
 
 export function StyleSection({ item }: { readonly item: ActiveLayer }) {
@@ -165,9 +172,17 @@ function CityStyleFields({ layerId }: { readonly layerId: string }) {
         <select
           className="rule-select"
           value={colorBy}
-          onChange={(e) =>
-            updateLayer(layerId, { colorBy: e.target.value as ColorBy })
-          }
+          onChange={(e) => {
+            const next = e.target.value as ColorBy;
+            // An expression mode with nothing to draw is no mode: the first
+            // switch to it carries the layer's current colouring across.
+            updateLayer(
+              layerId,
+              next === "expression" && layer.styleExpression == null
+                ? { colorBy: next, styleExpression: seedStyleExpression(layer) }
+                : { colorBy: next },
+            );
+          }}
         >
           {COLOR_BY_MODES.map((mode) => (
             <option key={mode} value={mode}>
@@ -183,7 +198,7 @@ function CityStyleFields({ layerId }: { readonly layerId: string }) {
 
       {colorBy === "surface" && <SurfaceTypePalette />}
 
-      {/* The editor branches on `isStreaming` internally and reads a streaming
+      {/* The editor branches on the source's `access` internally and reads a streaming
           layer's attribute keys from the resident model, because a streaming
           layer's `model` is a stub (see residentModel.ts).
 
@@ -195,6 +210,13 @@ function CityStyleFields({ layerId }: { readonly layerId: string }) {
           clears the draft — closes it again. */}
       {(colorBy === "rules" || draftOpen) && (
         <RulesEditor model={layer.model} layerId={layerId} />
+      )}
+
+      {colorBy === "expression" && (
+        <StyleExpressionEditor
+          layerId={layerId}
+          expression={layer.styleExpression ?? null}
+        />
       )}
 
       {colorBy === "single" && (

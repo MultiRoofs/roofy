@@ -27,13 +27,17 @@ import { DetectionLine } from "./DetectionLine";
 export interface UrlSourceFormProps {
   /**
    * Add the source. `name` is the optional label for a geospatial layer (the
-   * city path names a layer after its file). Returns an error sentence to
-   * render under the field, or `null` when the add was taken.
+   * city path names a layer after its file). `corrected` says the user chose
+   * the format by hand rather than accepting the guess from the name, so a
+   * caller can tell the user's word from a guess the bytes may still
+   * overrule. Returns an error sentence to render under the field, or `null`
+   * when the add was taken.
    */
   readonly onSubmit: (
     url: string,
     detected: DetectedSource,
-    name?: string,
+    name: string | undefined,
+    corrected: boolean,
   ) => string | null;
   /** A load is in flight: nothing here may start a second one. */
   readonly loading?: boolean;
@@ -52,6 +56,8 @@ export function UrlSourceForm({
    *  half-typed URL classifies as something else every keystroke, and a line
    *  that flickers through three formats is noise, not information. */
   const [detected, setDetected] = useState<DetectedSource | null>(null);
+  /** The user picked the format by hand for THIS url. */
+  const [corrected, setCorrected] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const urlFieldId = useId();
@@ -77,8 +83,8 @@ export function UrlSourceForm({
     if (trimmed === "" || detected === null || detected.kind === "unknown") {
       return;
     }
-    setError(onSubmit(trimmed, detected, name.trim() || undefined));
-  }, [detected, name, onSubmit, url]);
+    setError(onSubmit(trimmed, detected, name.trim() || undefined, corrected));
+  }, [corrected, detected, name, onSubmit, url]);
 
   return (
     <form
@@ -105,8 +111,9 @@ export function UrlSourceForm({
           disabled={loading}
           onChange={(e) => {
             setUrl(e.target.value);
-            // The old answer described the old URL.
+            // The old answer, and any correction of it, described the old URL.
             setDetected(null);
+            setCorrected(false);
             setError(null);
           }}
           // `detect` is a no-op while an answer stands, so clicking back into
@@ -127,7 +134,13 @@ export function UrlSourceForm({
 
       {detected !== null && (
         <>
-          <DetectionLine detected={detected} onChange={setDetected} />
+          <DetectionLine
+            detected={detected}
+            onChange={(next) => {
+              setDetected(next);
+              setCorrected(true);
+            }}
+          />
           {/* Only for a geospatial layer: a city model is named after its
               file, and a second name for it would be a second source of
               truth the layer list has to reconcile. */}

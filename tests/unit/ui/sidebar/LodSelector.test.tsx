@@ -12,6 +12,10 @@
  * layers today. The first describe block below proves that does NOT
  * happen.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { LodSelector } from "../../../../src/ui/sidebar/LodSelector";
@@ -66,7 +70,7 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   };
 }
@@ -94,41 +98,45 @@ function baseStream(overrides: Partial<StreamState> = {}): StreamState {
   };
 }
 
-describe("LodSelector — static layer (isStreaming: false)", () => {
-  it("renders an interactive dropdown even though lodMode defaults to 'auto'", () => {
+describe("LodSelector — static layer (source: RESIDENT_SOURCE)", () => {
+  it("shows checked LoDs and explains highest-per-object selection", () => {
     render(
       <LodSelector
         layerId="L"
-        availableLods={["1.2", "2.2"]}
+        availableLods={["2.2", "1.2"]}
         selectedLod="2.2"
-        isStreaming={false}
+        selectedLods={["2.2", "1.2"]}
+        access="resident"
         lodMode="auto"
       />,
     );
-    const select = screen.getByTitle("Level of Detail") as HTMLSelectElement;
-    expect(select.tagName).toBe("SELECT");
-    expect(select.value).toBe("2.2");
-    expect(select).not.toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "LoD 2.2" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "LoD 1.2" })).toBeChecked();
+    expect(
+      screen.getByText(/highest selected LoD available/i),
+    ).toBeInTheDocument();
   });
-
-  it("changing the selection calls setLayerLod, same as before streaming existed", () => {
+  it("toggles a LoD without deselecting the other choices", () => {
     useLayerStore.setState({
-      layers: [baseLayer({ availableLods: ["1.2", "2.2"] })],
+      layers: [
+        baseLayer({
+          availableLods: ["2.2", "1.2"],
+          selectedLods: ["2.2", "1.2"],
+        }),
+      ],
     });
-    useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
       <LodSelector
         layerId="L"
-        availableLods={["1.2", "2.2"]}
-        selectedLod="1.2"
-        isStreaming={false}
+        availableLods={["2.2", "1.2"]}
+        selectedLod="2.2"
+        selectedLods={["2.2", "1.2"]}
+        access="resident"
         lodMode="auto"
       />,
     );
-    fireEvent.change(screen.getByTitle("Level of Detail"), {
-      target: { value: "2.2" },
-    });
-    expect(useLayerStore.getState().layers[0]?.selectedLod).toBe("2.2");
+    fireEvent.click(screen.getByRole("checkbox", { name: "LoD 2.2" }));
+    expect(useLayerStore.getState().layers[0]?.selectedLods).toEqual(["1.2"]);
   });
 
   it("renders nothing when there are no available LoDs", () => {
@@ -137,7 +145,7 @@ describe("LodSelector — static layer (isStreaming: false)", () => {
         layerId="L"
         availableLods={[]}
         selectedLod={null}
-        isStreaming={false}
+        access="resident"
         lodMode="auto"
       />,
     );
@@ -153,7 +161,7 @@ describe("LodSelector — streaming layer, auto mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="auto"
       />,
     );
@@ -169,7 +177,7 @@ describe("LodSelector — streaming layer, auto mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="auto"
       />,
     );
@@ -180,7 +188,7 @@ describe("LodSelector — streaming layer, auto mode", () => {
   it("clicking 'Manual' switches the layer's lodMode to manual", () => {
     useStreamStore.setState({ streams: { L: baseStream() } });
     useLayerStore.setState({
-      layers: [baseLayer({ isStreaming: true, lodMode: "auto" })],
+      layers: [baseLayer({ source: STREAMED_SOURCE, lodMode: "auto" })],
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
@@ -188,7 +196,7 @@ describe("LodSelector — streaming layer, auto mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="auto"
       />,
     );
@@ -205,7 +213,7 @@ describe("LodSelector — streaming layer, manual mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod="1.2"
-        isStreaming
+        access="stream"
         lodMode="manual"
       />,
     );
@@ -219,7 +227,7 @@ describe("LodSelector — streaming layer, manual mode", () => {
   it("clicking 'Auto' switches the layer's lodMode back to auto", () => {
     useStreamStore.setState({ streams: { L: baseStream() } });
     useLayerStore.setState({
-      layers: [baseLayer({ isStreaming: true, lodMode: "manual" })],
+      layers: [baseLayer({ source: STREAMED_SOURCE, lodMode: "manual" })],
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
@@ -227,7 +235,7 @@ describe("LodSelector — streaming layer, manual mode", () => {
         layerId="L"
         availableLods={["1.2", "2.2"]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="manual"
       />,
     );
@@ -249,7 +257,7 @@ describe("LodSelector — streaming layer, manual mode", () => {
         layerId="L"
         availableLods={[]}
         selectedLod={null}
-        isStreaming
+        access="stream"
         lodMode="manual"
       />,
     );

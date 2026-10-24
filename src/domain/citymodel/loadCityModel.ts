@@ -2,7 +2,8 @@
  * Unified city model loading from text content or remote URLs.
  *
  * Keeps domain-level loading logic out of the app shell, making it
- * independently testable. Format detection delegates to detectEncoding.
+ * independently testable. Format detection is the format registry's
+ * (`formats/detectFormat.ts`).
  */
 
 import type { CityModel } from "./types";
@@ -15,7 +16,7 @@ import {
 } from "@cityjson/navara-core";
 import { parseCityGML } from "./citygml/parseCityGML";
 import { isZipBytes, parseCityGmlArchive } from "./cityGmlArchive";
-import { detectEncoding } from "./detectEncoding";
+import { SNIFF_BYTES, cityFormat, detectFormat } from "./formats";
 
 /**
  * Parse city model text content. Format is detected from the name/URL.
@@ -30,7 +31,10 @@ export function parseText(
   text: string,
   encodingOverride?: CityModelEncoding,
 ): CityModel {
-  const encoding = encodingOverride ?? detectEncoding(nameOrUrl);
+  const encoding = detectFormat({
+    name: nameOrUrl,
+    override: encodingOverride,
+  });
 
   if (encoding === "cityjsonseq") {
     return parseCityJSONSeq(text);
@@ -199,37 +203,58 @@ async function decodeOrExplain(
 }
 
 /**
- * Load a city model from a remote URL.
- *  - .fcb → NOT loaded here. FlatCityBuf files are streamed by viewport
- *    rather than loaded whole; this function throws a clear error instead
- *    of attempting a whole-file read. (The whole-file WASM reader this
- *    branch used to call has been removed; viewport streaming is not yet
- *    wired up to this entry point.)
- *  - .city.jsonl / .jsonl → CityJSONSeq (fetch + parse)
- *  - a body with ZIP magic → unzipped and parsed as CityGML, whatever the
- *    extension said (see cityGmlArchive.ts)
- *  - everything else → CityJSON (fetch + parse)
+ * A source that is not read whole: its bytes (or its name, before any were
+ * fetched) say it is FlatCityBuf or CityParquet, which open by viewport or by
+ * size. The opener catches this and re-routes to {@link actual}.
+ */
+export class FormatMismatchError extends Error {
+  constructor(
+    readonly actual: CityModelEncoding,
+    sourceName: string,
+  ) {
+    super(
+      `"${sourceName}" is ${cityFormat(actual).label}, which is not read as a single file.`,
+    );
+    this.name = "FormatMismatchError";
+  }
+}
+
+/**
+ * Load a city model from a remote URL, whole.
+ *
+ * For the formats that ARE read whole: CityJSON, CityJSONSeq and CityGML (a
+ * body with ZIP magic is unzipped and parsed as CityGML, whatever the
+ * extension said; see cityGmlArchive.ts). The name routes the request, and
+ * the fetched bytes have the last word (`detectFormat`): a CityJSONSeq served
+ * as `.json` parses as a sequence. A source that turns out to be FlatCityBuf
+ * or CityParquet throws {@link FormatMismatchError}.
  *
  * The body is fetched as bytes and gunzipped when it carries gzip magic
  * bytes, so `*.city.json.gz` assets work whether the server hands back the
  * compressed file verbatim or already decompressed it via Content-Encoding.
  *
  * Accepts an optional HttpClient for platform abstraction (Tauri, testing),
- * and an optional `encodingOverride` — the dialog's correction control, for a
- * URL whose path does not say what the server really serves.
+ * and an optional `encodingOverride` — the user's word, which no byte
+ * overrules: for a URL whose path does not say what the server really serves.
  */
 export async function loadFromUrl(
   url: string,
   http: HttpClient = defaultHttp,
   encodingOverride?: CityModelEncoding,
 ): Promise<LoadedModel> {
-  const encoding = encodingOverride ?? detectEncoding(url);
-
-  if (encoding === "flatcitybuf") {
-    throw new Error(
-      `FlatCityBuf (.fcb) files are loaded by viewport streaming, not as a single whole-file read, and that path is not wired up yet. Could not load "${fileNameFromUrl(url)}".`,
-    );
-  }
+  /** The format these bytes are, refused unless it is read whole. */
+  const wholeFormat = (head: Uint8Array | null): CityModelEncoding => {
+    const encoding = detectFormat({
+      name: url,
+      head: head?.subarray(0, SNIFF_BYTES),
+      override: encodingOverride,
+    });
+    if (cityFormat(encoding).access !== "whole") {
+      throw new FormatMismatchError(encoding, fileNameFromUrl(url));
+    }
+    return encoding;
+  };
+  wholeFormat(null);
 
   const raw = await fetchRawBody(url, http);
 
@@ -237,7 +262,7 @@ export async function loadFromUrl(
   // CONTAINER, and only its bytes say so. Its magic is not gzip's, so
   // `decodeModelBytes` would TextDecode the archive into mojibake and hand
   // that to whichever parser the extension guessed — for `.zip` that is the
-  // `detectEncoding` default, JSON. Everything above this point (the CORS
+  // CityJSON fallback, JSON. Everything above this point (the CORS
   // sentence, the 404 branch) is inherited unchanged.
   if (isZipBytes(raw)) {
     return {
@@ -248,11 +273,15 @@ export async function loadFromUrl(
   }
 
   const gzipped = isGzipBytes(raw);
+  // A plain body is sniffed BEFORE the text decode: a FlatCityBuf served as
+  // `.json` must be refused before it is decoded into a string.
+  if (!gzipped) wholeFormat(raw);
   const text = await decodeOrExplain(url, raw);
   // The FETCHED array when nothing was gunzipped — re-encoding the text would
   // allocate a second copy of the whole file for no gain. Safe to hand on:
   // `registerBuffer` consumes it, and nothing below reads `raw` again.
   const decodedBytes = gzipped ? new TextEncoder().encode(text) : raw;
+  const encoding = wholeFormat(decodedBytes);
 
   if (encoding === "cityjsonseq") {
     return {

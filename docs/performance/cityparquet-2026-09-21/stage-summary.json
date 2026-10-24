@@ -1,0 +1,442 @@
+[
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "baseline",
+    "runs": 3,
+    "medianMs": 0.016250000000013642,
+    "minMs": 0.015666000000010172,
+    "maxMs": 0.01716700000002902,
+    "maxProcessRSSGiB": 0.0947113037109375
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "file-read",
+    "runs": 3,
+    "medianMs": 3.8162080000000174,
+    "minMs": 3.439624999999978,
+    "maxMs": 9.78729199999998,
+    "maxProcessRSSGiB": 0.1233978271484375
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "parquet-read",
+    "runs": 3,
+    "medianMs": 1118.1944999999998,
+    "minMs": 1092.340916,
+    "maxMs": 1140.5475,
+    "maxProcessRSSGiB": 1.1194610595703125
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "wkb-decode",
+    "runs": 3,
+    "medianMs": 450.31658300000004,
+    "minMs": 434.2856670000001,
+    "maxMs": 475.64937499999996,
+    "maxProcessRSSGiB": 2.005462646484375
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "assemble-count",
+    "runs": 3,
+    "medianMs": 65.31212499999992,
+    "minMs": 65.24212499999999,
+    "maxMs": 68.62320799999998,
+    "maxProcessRSSGiB": 2.015289306640625
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "geographic-to-utm",
+    "runs": 3,
+    "medianMs": 2396.998375,
+    "minMs": 2283.154125,
+    "maxMs": 3014.9613329999997,
+    "maxProcessRSSGiB": 2.228424072265625
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "triangulate",
+    "runs": 3,
+    "medianMs": 1478.6314160000002,
+    "minMs": 1400.9840830000003,
+    "maxMs": 2350.0375000000004,
+    "maxProcessRSSGiB": 2.490020751953125
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "utm-to-enu",
+    "runs": 3,
+    "medianMs": 2240.0782090000002,
+    "minMs": 2111.9779579999995,
+    "maxMs": 2660.0064999999995,
+    "maxProcessRSSGiB": 2.490020751953125
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "geometry-wrap-and-bounds",
+    "runs": 3,
+    "medianMs": 57.062542000001486,
+    "minMs": 56.48649999999998,
+    "maxMs": 67.99908299999879,
+    "maxProcessRSSGiB": 2.490020751953125
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "attribute-rows",
+    "runs": 3,
+    "medianMs": 216.0482919999995,
+    "minMs": 212.93854099999953,
+    "maxMs": 367.00995899999907,
+    "maxProcessRSSGiB": 2.490020751953125
+  },
+  {
+    "dataset": "nishitokyo",
+    "rowLimit": 0,
+    "stage": "attribute-json",
+    "runs": 3,
+    "medianMs": 253.71487499999967,
+    "minMs": 227.73049999999967,
+    "maxMs": 364.0025829999995,
+    "maxProcessRSSGiB": 2.6020050048828125
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "baseline",
+    "runs": 1,
+    "medianMs": 0.01608299999998053,
+    "minMs": 0.01608299999998053,
+    "maxMs": 0.01608299999998053,
+    "maxProcessRSSGiB": 0.094390869140625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "file-read",
+    "runs": 1,
+    "medianMs": 51.13575000000003,
+    "minMs": 51.13575000000003,
+    "maxMs": 51.13575000000003,
+    "maxProcessRSSGiB": 0.4063262939453125
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "parquet-read",
+    "runs": 1,
+    "medianMs": 1387.629083,
+    "minMs": 1387.629083,
+    "maxMs": 1387.629083,
+    "maxProcessRSSGiB": 1.7139739990234375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "wkb-decode",
+    "runs": 1,
+    "medianMs": 1076.3071669999997,
+    "minMs": 1076.3071669999997,
+    "maxMs": 1076.3071669999997,
+    "maxProcessRSSGiB": 2.558013916015625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "assemble-count",
+    "runs": 1,
+    "medianMs": 127.38675000000012,
+    "minMs": 127.38675000000012,
+    "maxMs": 127.38675000000012,
+    "maxProcessRSSGiB": 2.558013916015625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "geographic-to-utm",
+    "runs": 1,
+    "medianMs": 3202.5967499999997,
+    "minMs": 3202.5967499999997,
+    "maxMs": 3202.5967499999997,
+    "maxProcessRSSGiB": 2.801361083984375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "triangulate",
+    "runs": 1,
+    "medianMs": 3240.708834,
+    "minMs": 3240.708834,
+    "maxMs": 3240.708834,
+    "maxProcessRSSGiB": 3.3906402587890625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "utm-to-enu",
+    "runs": 1,
+    "medianMs": 3083.7859580000004,
+    "minMs": 3083.7859580000004,
+    "maxMs": 3083.7859580000004,
+    "maxProcessRSSGiB": 3.390716552734375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "geometry-wrap-and-bounds",
+    "runs": 1,
+    "medianMs": 83.74524999999994,
+    "minMs": 83.74524999999994,
+    "maxMs": 83.74524999999994,
+    "maxProcessRSSGiB": 3.390716552734375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "attribute-rows",
+    "runs": 1,
+    "medianMs": 292.3230829999993,
+    "minMs": 292.3230829999993,
+    "maxMs": 292.3230829999993,
+    "maxProcessRSSGiB": 3.390716552734375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 131072,
+    "stage": "attribute-json",
+    "runs": 1,
+    "medianMs": 184.4102090000015,
+    "minMs": 184.4102090000015,
+    "maxMs": 184.4102090000015,
+    "maxProcessRSSGiB": 3.390716552734375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "baseline",
+    "runs": 1,
+    "medianMs": 0.015917000000001735,
+    "minMs": 0.015917000000001735,
+    "maxMs": 0.015917000000001735,
+    "maxProcessRSSGiB": 0.0948944091796875
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "file-read",
+    "runs": 1,
+    "medianMs": 156.31499999999994,
+    "minMs": 156.31499999999994,
+    "maxMs": 156.31499999999994,
+    "maxProcessRSSGiB": 0.406829833984375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "parquet-read",
+    "runs": 1,
+    "medianMs": 453.649458,
+    "minMs": 453.649458,
+    "maxMs": 453.649458,
+    "maxProcessRSSGiB": 0.9746856689453125
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "wkb-decode",
+    "runs": 1,
+    "medianMs": 45.96924999999999,
+    "minMs": 45.96924999999999,
+    "maxMs": 45.96924999999999,
+    "maxProcessRSSGiB": 1.053375244140625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "assemble-count",
+    "runs": 1,
+    "medianMs": 9.349875000000111,
+    "minMs": 9.349875000000111,
+    "maxMs": 9.349875000000111,
+    "maxProcessRSSGiB": 1.0540771484375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "geographic-to-utm",
+    "runs": 1,
+    "medianMs": 234.64762500000006,
+    "minMs": 234.64762500000006,
+    "maxMs": 234.64762500000006,
+    "maxProcessRSSGiB": 1.1530609130859375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "triangulate",
+    "runs": 1,
+    "medianMs": 114.33566699999983,
+    "minMs": 114.33566699999983,
+    "maxMs": 114.33566699999983,
+    "maxProcessRSSGiB": 1.235443115234375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "utm-to-enu",
+    "runs": 1,
+    "medianMs": 226.78041699999994,
+    "minMs": 226.78041699999994,
+    "maxMs": 226.78041699999994,
+    "maxProcessRSSGiB": 1.237701416015625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "geometry-wrap-and-bounds",
+    "runs": 1,
+    "medianMs": 9.35329200000001,
+    "minMs": 9.35329200000001,
+    "maxMs": 9.35329200000001,
+    "maxProcessRSSGiB": 1.237823486328125
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "attribute-rows",
+    "runs": 1,
+    "medianMs": 11.327457999999979,
+    "minMs": 11.327457999999979,
+    "maxMs": 11.327457999999979,
+    "maxProcessRSSGiB": 1.2396087646484375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 10000,
+    "stage": "attribute-json",
+    "runs": 1,
+    "medianMs": 11.4368750000001,
+    "minMs": 11.4368750000001,
+    "maxMs": 11.4368750000001,
+    "maxProcessRSSGiB": 1.248809814453125
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "baseline",
+    "runs": 1,
+    "medianMs": 0.014000000000010004,
+    "minMs": 0.014000000000010004,
+    "maxMs": 0.014000000000010004,
+    "maxProcessRSSGiB": 0.0941009521484375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "file-read",
+    "runs": 1,
+    "medianMs": 36.84499999999997,
+    "minMs": 36.84499999999997,
+    "maxMs": 36.84499999999997,
+    "maxProcessRSSGiB": 0.4060821533203125
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "parquet-read",
+    "runs": 1,
+    "medianMs": 733.992209,
+    "minMs": 733.992209,
+    "maxMs": 733.992209,
+    "maxProcessRSSGiB": 1.1526947021484375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "wkb-decode",
+    "runs": 1,
+    "medianMs": 315.5151250000001,
+    "minMs": 315.5151250000001,
+    "maxMs": 315.5151250000001,
+    "maxProcessRSSGiB": 1.4994049072265625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "assemble-count",
+    "runs": 1,
+    "medianMs": 50.76483299999995,
+    "minMs": 50.76483299999995,
+    "maxMs": 50.76483299999995,
+    "maxProcessRSSGiB": 1.5056304931640625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "geographic-to-utm",
+    "runs": 1,
+    "medianMs": 1399.871333,
+    "minMs": 1399.871333,
+    "maxMs": 1399.871333,
+    "maxProcessRSSGiB": 1.89239501953125
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "triangulate",
+    "runs": 1,
+    "medianMs": 924.5237080000002,
+    "minMs": 924.5237080000002,
+    "maxMs": 924.5237080000002,
+    "maxProcessRSSGiB": 2.3557586669921875
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "utm-to-enu",
+    "runs": 1,
+    "medianMs": 1359.2576249999997,
+    "minMs": 1359.2576249999997,
+    "maxMs": 1359.2576249999997,
+    "maxProcessRSSGiB": 2.355804443359375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "geometry-wrap-and-bounds",
+    "runs": 1,
+    "medianMs": 38.08629099999962,
+    "minMs": 38.08629099999962,
+    "maxMs": 38.08629099999962,
+    "maxProcessRSSGiB": 2.355804443359375
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "attribute-rows",
+    "runs": 1,
+    "medianMs": 82.85091699999975,
+    "minMs": 82.85091699999975,
+    "maxMs": 82.85091699999975,
+    "maxProcessRSSGiB": 2.36578369140625
+  },
+  {
+    "dataset": "yokohama",
+    "rowLimit": 65536,
+    "stage": "attribute-json",
+    "runs": 1,
+    "medianMs": 76.00874999999996,
+    "minMs": 76.00874999999996,
+    "maxMs": 76.00874999999996,
+    "maxProcessRSSGiB": 2.4142608642578125
+  }
+]

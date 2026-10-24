@@ -14,6 +14,18 @@ describe("computeAverageAzimuth", () => {
     expect(computeAverageAzimuth([])).toBe(0);
   });
 
+  it("ignores a surface that has no azimuth at all", () => {
+    // navara-core answers `null` below 0.1 degrees of inclination. This
+    // module's own 1-degree gate already excludes such a surface, so the null
+    // is belt and braces — but a null read as 0 would drag the mean north, the
+    // exact bug the `azimuthDeg: 0` convention used to cause.
+    const metrics: RoofMetrics[] = [
+      { areaSqM: 1000, inclinationDeg: 0, azimuthDeg: null, elevationM: 0 },
+      { areaSqM: 50, inclinationDeg: 30, azimuthDeg: 180, elevationM: 0 },
+    ];
+    expect(computeAverageAzimuth(metrics)).toBeCloseTo(180, 6);
+  });
+
   it("returns the single azimuth for one surface", () => {
     const metrics: RoofMetrics[] = [
       { areaSqM: 50, inclinationDeg: 30, azimuthDeg: 180, elevationM: 0 },

@@ -6,7 +6,7 @@
  * tested at a higher level.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
   fileNameFromUrl,
   loadFromUrl,
   fetchModelBytes,
+  FormatMismatchError,
 } from "../../../../src/domain/citymodel/loadCityModel";
 
 // ---------------------------------------------------------------------------
@@ -102,12 +103,68 @@ describe("parseText", () => {
 // ---------------------------------------------------------------------------
 
 describe("loadFromUrl", () => {
-  it("throws a clear, honest error for .fcb instead of attempting a whole-file read", async () => {
+  it("refuses a .fcb before fetching anything: it is not read whole", async () => {
     // Checked before any fetch, so no HttpClient/network mocking is needed
-    // here — the rejection happens purely from encoding detection.
-    await expect(loadFromUrl("https://example.com/delft.fcb")).rejects.toThrow(
-      /viewport streaming/,
+    // here — the rejection happens purely from the name.
+    const error = await loadFromUrl("https://example.com/delft.fcb").catch(
+      (e: unknown) => e,
     );
+    expect(error).toBeInstanceOf(FormatMismatchError);
+    expect((error as FormatMismatchError).actual).toBe("flatcitybuf");
+  });
+
+  it("reads the bytes over the name: a sequence served as .json parses as one", async () => {
+    const seq = new TextEncoder().encode(
+      '{"type":"CityJSON","version":"2.0","transform":{"scale":[1,1,1],"translate":[0,0,0]},"CityObjects":{},"vertices":[]}\n' +
+        '{"type":"CityJSONFeature","id":"a","CityObjects":{"a":{"type":"Building"}},"vertices":[]}\n',
+    );
+    const http = {
+      fetchText: vi.fn(),
+      fetchBytes: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        bytes: seq,
+      })),
+    };
+    const loaded = await loadFromUrl("https://example.com/tile.json", http);
+    expect(loaded.encoding).toBe("cityjsonseq");
+    expect(Object.keys(loaded.model.objects)).toEqual(["a"]);
+  });
+
+  it("refuses FlatCityBuf bytes behind a .json name, naming what they are", async () => {
+    const http = {
+      fetchText: vi.fn(),
+      fetchBytes: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        bytes: new Uint8Array([0x66, 0x63, 0x62, 0x01, 0x66, 0x63, 0x62, 0x00]),
+      })),
+    };
+    const error = await loadFromUrl(
+      "https://example.com/tile.json",
+      http,
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(FormatMismatchError);
+    expect((error as Error).message).toBe(
+      '"tile.json" is FlatCityBuf, which is not read as a single file.',
+    );
+  });
+
+  it("keeps the user's word over the bytes", async () => {
+    const http = {
+      fetchText: vi.fn(),
+      fetchBytes: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        bytes: new Uint8Array([0x66, 0x63, 0x62, 0x01, 0x66, 0x63, 0x62, 0x00]),
+      })),
+    };
+    await expect(
+      loadFromUrl("https://example.com/tile.json", http, "cityjson"),
+    ).rejects.toThrow(/Invalid JSON/);
   });
 
   it("keeps the friendly 404 message on the bytes path", async () => {

@@ -1,3 +1,4 @@
+import { normalizeSelectedLods } from "./selectedLods";
 import { useQueryStore } from "../query/queryStore";
 import { type TablePresentation } from "../query/tablePresentation";
 import {
@@ -23,7 +24,12 @@ import type {
 } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
-import { normalizeColorBy, type ColorBy } from "../rules/colorBy";
+import {
+  normalizeColorBy,
+  type ColorBy,
+  type LayerStyleExpression,
+} from "../rules/colorBy";
+import { RESIDENT_SOURCE, type SourceCapabilities } from "./cityLayerSource";
 
 /**
  * Where a DERIVED layer came from (spec §6, "What a derived layer is").
@@ -63,7 +69,13 @@ export interface Layer {
   /** The colour a roof no rule matches wears in "Color by rules". Kept for the
    *  same reason as {@link singleColor}. */
   readonly unmatchedColor: string;
+  /** The colour expression "Color by expression" draws with (MapLibre style
+   *  spec, see `compileStyleExpression`). Kept while another mode is active,
+   *  like {@link singleColor}; absent reads as none. */
+  readonly styleExpression?: LayerStyleExpression | null;
   readonly selectedLod: string | null;
+  /** Static layers: highest available selected LoD per object. Absent is legacy single-LoD. */
+  readonly selectedLods?: readonly string[];
   readonly availableLods: ReadonlyArray<string>;
   /** "auto": the viewport-streaming driver (Task 14) picks the LoD ladder
    *  rung from zoom level. "manual": the user's `selectedLod` choice pins
@@ -81,7 +93,7 @@ export interface Layer {
    * the only value a static layer ever has) is the behaviour every streaming
    * layer has always had: each camera settle re-queries the source for the
    * new viewport. `false` freezes the resident set where it is — the plugin
-   * handle stops committing entirely (`FcbStreamLayerHandle.setCameraSync`).
+   * handle stops committing entirely (`StreamLayerHandle.setCameraSync`).
    *
    * Per-layer rather than global, unlike the LoD choice above, because the
    * two answer different questions: "which detail level" is a property of how
@@ -90,11 +102,10 @@ export interface Layer {
    * they keep panning is the whole point of having it.
    */
   readonly cameraSync: boolean;
-  /** True once a layer's stream has been opened and admitted (Task 8's
-   *  `checkAdmission`) for viewport streaming, i.e. it has per-cell state
-   *  in `useStreamStore` rather than one resident `model`. Defaults to
-   *  false: every layer starts as a plain, fully-resident layer. */
-  readonly isStreaming: boolean;
+  /** What the layer's source can do: where its objects live, what they cover
+   *  and when its LoDs and types are known (`cityLayerSource.ts`). A streamed
+   *  layer's `model` is a stub, and its objects are its resident cells. */
+  readonly source: SourceCapabilities;
   /**
    * First-level object groups whose geometry this layer leaves out — hiding
    * "Building" hides its BuildingParts too, because in real data the
@@ -167,7 +178,7 @@ export interface LayerStoreActions {
       | "selectedLod"
       | "availableLods"
       | "lodMode"
-      | "isStreaming"
+      | "source"
       | "derivedFrom"
       | "cameraSync"
       | "hiddenTypes"
@@ -184,10 +195,10 @@ export interface LayerStoreActions {
        *  minted first — the layer and the handle must share one id or every
        *  `plugin.getHandle(layer.id)` lookup misses. */
       readonly id?: string;
-      /** Defaults to false. Set true for a layer opened via viewport
-       *  streaming (Task 17's `openStreamingLayer`) — its `model` is a stub
-       *  (bbox only, empty objects) rather than a fully-parsed model. */
-      readonly isStreaming?: boolean;
+      /** Defaults to {@link RESIDENT_SOURCE}. `openStreamingLayer` passes
+       *  {@link STREAMED_SOURCE}: its `model` is a stub (bbox only, empty
+       *  objects) rather than a fully-parsed model. */
+      readonly source?: SourceCapabilities;
       /** Defaults to null. Supplied only by a New-layer run's publication
        *  (Tasks 21 and 23). */
       readonly derivedFrom?: DerivedFrom | null;
@@ -218,6 +229,7 @@ export interface LayerStoreActions {
       readonly colorBy?: ColorBy;
       readonly singleColor?: string;
       readonly unmatchedColor?: string;
+      readonly styleExpression?: LayerStyleExpression | null;
     },
   ) => string;
   removeLayer: (id: string) => void;
@@ -226,7 +238,12 @@ export interface LayerStoreActions {
     patch: Partial<
       Pick<
         Layer,
-        "name" | "visible" | "colorBy" | "singleColor" | "unmatchedColor"
+        | "name"
+        | "visible"
+        | "colorBy"
+        | "singleColor"
+        | "unmatchedColor"
+        | "styleExpression"
       >
     >,
   ) => void;
@@ -252,6 +269,7 @@ export interface LayerStoreActions {
   ) => void;
   removeAllLayers: () => void;
   setLayerLod: (layerId: string, lod: string | null) => void;
+  setLayerLods: (layerId: string, lods: readonly string[]) => void;
   setLodMode: (layerId: string, mode: "auto" | "manual") => void;
   /** Draw `theme` (one of {@link Layer.appearanceThemes}) or `null` for
    *  plain colours. */
@@ -360,9 +378,18 @@ export const useLayerStore = create<LayerStore>((set) => ({
 
   addLayer: (input) => {
     const id = input.id ?? crypto.randomUUID();
+    const source = input.source ?? RESIDENT_SOURCE;
+    // A source discovered cell by cell has a stub model: nothing to fold.
+    const discovered = source.discovery === "progressive";
     const availableLods = computeAvailableLods(input.model);
-    const selectedLod = availableLods[0] ?? null;
-    const appearanceThemes = input.isStreaming
+    const selectedLods =
+      discovered || availableLods.length === 0
+        ? undefined
+        : (normalizeSelectedLods(input.selectedLods) ?? availableLods).filter(
+            (lod) => availableLods.includes(lod),
+          );
+    const selectedLod = (selectedLods ?? availableLods)[0] ?? null;
+    const appearanceThemes = discovered
       ? []
       : computeAppearanceThemes(input.model);
     // A restored choice survives only if this model has that theme — a
@@ -392,12 +419,13 @@ export const useLayerStore = create<LayerStore>((set) => ({
         ...rest,
         id,
         selectedLod,
+        selectedLods,
         availableLods,
         lodMode: "auto",
         // Every layer starts following the camera: that is what streaming
         // has always done, and freezing an extract is a deliberate act.
         cameraSync: true,
-        isStreaming: input.isStreaming ?? false,
+        source,
         derivedFrom: input.derivedFrom ?? null,
         hiddenTypes: input.hiddenTypes ?? [],
         attributeOrders: normalizeAttributeOrders(input.attributeOrders),
@@ -407,7 +435,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
         // A streaming layer's `model` is a stub (bbox only), so there is
         // nothing to fold here; `useStreamStore`'s `types` carries its
         // groups instead.
-        availableObjectTypes: input.isStreaming
+        availableObjectTypes: discovered
           ? []
           : computeAvailableObjectTypes(input.model),
         appearanceThemes,
@@ -486,8 +514,21 @@ export const useLayerStore = create<LayerStore>((set) => ({
   setLayerLod: (layerId, lod) =>
     set((state) => ({
       layers: state.layers.map((l) =>
-        l.id === layerId ? { ...l, selectedLod: lod } : l,
+        l.id === layerId
+          ? { ...l, selectedLod: lod, selectedLods: undefined }
+          : l,
       ),
+    })),
+
+  setLayerLods: (layerId, lods) =>
+    set((state) => ({
+      layers: state.layers.map((l) => {
+        if (l.id !== layerId || l.source.discovery === "progressive") return l;
+        const selectedLods = l.availableLods.filter((lod) =>
+          lods.includes(lod),
+        );
+        return { ...l, selectedLods, selectedLod: selectedLods[0] ?? null };
+      }),
     })),
 
   setLayerAppearance: (layerId, theme) =>
@@ -562,6 +603,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
                 colorBy: source.colorBy,
                 singleColor: source.singleColor,
                 unmatchedColor: source.unmatchedColor,
+                styleExpression: source.styleExpression ?? null,
                 rules: structuredClone(source.rules).map((rule) => ({
                   ...rule,
                   id: crypto.randomUUID(),

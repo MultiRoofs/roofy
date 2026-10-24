@@ -2,9 +2,9 @@
  * Asset classification for the catalog browser.
  *
  * The load-bearing invariant is that `loadable` agrees with what
- * `addLayerFromUrl` will ACTUALLY do with the href. That routing is decided by
- * extension alone (`detectEncoding`, which defaults anything unrecognised to
- * `"cityjson"` and would then `JSON.parse` a GML body), so a promising media
+ * `addLayerFromUrl` will ACTUALLY do with the href. That routing starts from
+ * the name (`formatFromName`; a URL whose name says nothing falls back to
+ * CityJSON and would then `JSON.parse` a GML body), so a promising media
  * type on an extensionless URL must NOT earn an Add button — it becomes a
  * plain download link instead.
  */
@@ -72,8 +72,8 @@ describe("classifyStacAsset", () => {
     ).toBe("cityjson"));
 
   // The extension is the ONLY thing that decides loadability: an extensionless
-  // download endpoint would be routed to the CityJSON parser by
-  // `detectEncoding`'s default, which would fail on a GML body.
+  // download endpoint would be routed to the CityJSON parser by the
+  // registry's fallback, which would fail on a GML body.
   it("a promising media type on an extensionless URL is NOT loadable", () =>
     expect(
       classifyStacAsset("https://x/download?id=3", "application/gml+xml"),

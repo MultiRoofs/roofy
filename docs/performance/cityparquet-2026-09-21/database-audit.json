@@ -1,0 +1,34 @@
+[
+  {
+    "name": "attribute-rows",
+    "ms": 153.5
+  },
+  {
+    "name": "json",
+    "ms": 174.7000000011176,
+    "bytes": 45847426
+  },
+  {
+    "name": "register-worker",
+    "ms": 15.400000000372529,
+    "ok": true
+  },
+  {
+    "name": "read-json-and-create-table",
+    "ms": 762.2999999988824,
+    "ok": true
+  },
+  {
+    "name": "count",
+    "ms": 2.5,
+    "result": {
+      "ok": true,
+      "columns": ["n"],
+      "rows": [
+        {
+          "n": 84862
+        }
+      ]
+    }
+  }
+]

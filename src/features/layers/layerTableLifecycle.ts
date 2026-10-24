@@ -23,12 +23,20 @@ import { clearMapFilter, forgetMapFilter } from "../query/mapFilterSync";
 import { useQueryStore } from "../query/queryStore";
 import { useProcessingStore } from "../processing/processingStore";
 import {
-  dropLayerTable,
   enqueueLayerTable,
+  hasFileBackedTable,
+  onEngineRetry,
   useLayerTableStore,
   type LayerTableOutcome,
   type LayerTableSource,
 } from "../../insights/layerTables";
+import { dropFamilyViews } from "../../insights/familyViews";
+import {
+  ensureActiveFamilyView,
+  getActiveFamily,
+  hasFamilies,
+  useFamilyStore,
+} from "./familyStore";
 import { useLayerStore } from "./layerStore";
 
 /**
@@ -77,6 +85,22 @@ export function residentTableSource(layerId: string): LayerTableSource {
 export async function refreshStreamingTable(
   layerId: string,
 ): Promise<LayerTableOutcome> {
+  // A FILE-BACKED table is already as fresh as the file it reads (R-B′): it
+  // answers for every object in the family, resident or not, so there is
+  // nothing to refresh and a rebuild from the resident set would REPLACE
+  // whole-file answers with "whatever the camera has delivered" — which is
+  // exactly what Export would then write out.
+  //
+  // Reported as SUCCESS, and it is one: the caller asked for a table that is
+  // current, and it is. THE choke point for this rule, so the Export dialog's
+  // forced rebuild — on open and on every commit while it is up — is correct by
+  // construction rather than by remembering to check.
+  //
+  // `hasFamilies` as well, and not only as belt and braces: between the layer's
+  // row landing and its first view there is a window in which a family layer has
+  // NO file-backed table yet, and this is the one remaining door that could build
+  // it the bare resident table ruling S3 forbids.
+  if (hasFileBackedTable(layerId) || hasFamilies(layerId)) return { ok: true };
   return await enqueueLayerTable(layerId, residentTableSource(layerId));
 }
 
@@ -121,6 +145,18 @@ export function installLayerTableLifecycle(): () => void {
 
   /** Enqueue a rebuild and remember the version it was built at. */
   const enqueueAt = (layerId: string): void => {
+    // THE choke point, so no caller here can rebuild over a file-backed table
+    // by forgetting the test (Codex Critical). `rebuildWanted` refuses one too,
+    // which is what disarms a debounce timer that was already pending when the
+    // family's view landed.
+    if (hasFileBackedTable(layerId)) return;
+    // Ruling S3: a layer with object FAMILIES gets no bare resident table in the
+    // first place. Building one and then freezing it (which is what the guard
+    // above does the moment the first view lands) would leave a stale, usually
+    // EMPTY snapshot under the bare key for any reader still looking a table up
+    // by layer id. `addCityParquetLayer` publishes the families before the row,
+    // so this is answered on the very first pass.
+    if (hasFamilies(layerId)) return;
     const version = versionOf(layerId);
     pendingVersions.set(layerId, version);
     const settle = (built: boolean): void => {
@@ -172,9 +208,11 @@ export function installLayerTableLifecycle(): () => void {
   // An EXPORT still does not widen this: it forces one rebuild when its dialog
   // opens (`refreshStreamingTable`) and then wants the table to hold still.
   const rebuildWanted = (layerId: string): boolean =>
-    useLayerTableStore.getState().tablePanelOpen ||
-    useProcessingStore.getState().open ||
-    runInFlightFor(layerId);
+    !hasFileBackedTable(layerId) &&
+    !hasFamilies(layerId) &&
+    (useLayerTableStore.getState().tablePanelOpen ||
+      useProcessingStore.getState().open ||
+      runInFlightFor(layerId));
 
   /** Cancel `layerId`'s armed rebuild, if it has one. */
   const cancelRebuild = (layerId: string): void => {
@@ -226,7 +264,15 @@ export function installLayerTableLifecycle(): () => void {
       // per-layer generation would outlive it, and a re-add under the same id
       // would inherit the number.
       forgetMapFilter(id);
-      void dropLayerTable(id);
+      // `dropFamilyViews`, not `dropLayerTable`: a CityParquet layer owns a
+      // table per family AND a file registration behind each one, and dropping
+      // the bare key alone would leave both behind for the life of the page.
+      // For every other layer it is `dropLayerTables` with nothing to forget.
+      void dropFamilyViews(id);
+      // And the family record itself, which also BUMPS the layer's reopen
+      // generation — a family toggle whose `openStream` is still booting a
+      // worker reads that and disposes its handle instead of registering it.
+      useFamilyStore.getState().forgetLayer(id);
     }
 
     for (const layer of state.layers) {
@@ -241,7 +287,7 @@ export function installLayerTableLifecycle(): () => void {
       // and in `sweepStreamingLayers` below by the same test.
       if (
         !knownLayerIds.has(layer.id) &&
-        layer.isStreaming &&
+        layer.source.access === "stream" &&
         layer.derivedFrom === null
       ) {
         enqueueAt(layer.id);
@@ -276,12 +322,18 @@ export function installLayerTableLifecycle(): () => void {
    */
   const sweepStreamingLayers = (): void => {
     for (const layer of useLayerStore.getState().layers) {
-      if (!layer.isStreaming || layer.derivedFrom !== null) continue;
+      if (layer.source.access !== "stream" || layer.derivedFrom !== null)
+        continue;
       // Design decision (j): the sweep's job is "a consumer opened and this
       // layer's table is behind". The VERSION is exactly that question, and
       // rebuilding a table that is already current costs a rebuild AND retires
       // a finished run's card as stale.
       if (tableIsCurrent(layer.id)) continue;
+      // A file-backed table is never behind, and a family layer has no bare
+      // table to be behind (ruling S3). Tested BEFORE the two side effects below
+      // rather than left to `enqueueAt`: clearing a drawn set the view still
+      // answers for would blank the map for no reason.
+      if (hasFileBackedTable(layer.id) || hasFamilies(layer.id)) continue;
       // Disarm first: a commit that landed while a consumer was open, before it
       // was shut, can still have a timer pending. Its fire-time gate would find
       // a consumer open AGAIN and rebuild a second time, moments after this one.
@@ -305,6 +357,26 @@ export function installLayerTableLifecycle(): () => void {
   // not `activeTab`/`panelCollapsed`: a run's scope is frozen from the stores
   // whatever tab is showing, and the drafts a collapsed toolbox holds are still
   // read against these tables.
+  /**
+   * The engine came back: rebuild every family layer's ACTIVE view.
+   *
+   * `retryEngine` replays the SOURCES it parked, and a family's table is not one
+   * of them — DuckDB reads the Parquet itself, so there are no bytes to park.
+   * Since ruling S3 these layers also have no bare resident table to fall back
+   * on, so without this an engine death would leave a streamed CityParquet layer
+   * with no table at all, through the Retry and everything after it.
+   *
+   * Only the ACTIVE family, deliberately: the others are `absent` until something
+   * asks for them, which is the same contract a fresh layer opens under.
+   */
+  const unsubscribeEngineRetry = onEngineRetry(() => {
+    for (const layer of useLayerStore.getState().layers) {
+      const family = getActiveFamily(layer.id);
+      if (family === null) continue;
+      void ensureActiveFamilyView(layer.id, family);
+    }
+  });
+
   let toolboxWasOpen = useProcessingStore.getState().open;
   const unsubscribeProcessing = useProcessingStore.subscribe((state) => {
     if (state.open === toolboxWasOpen) return;
@@ -320,5 +392,6 @@ export function installLayerTableLifecycle(): () => void {
     unsubscribeStreams();
     unsubscribePanel();
     unsubscribeProcessing();
+    unsubscribeEngineRetry();
   };
 }

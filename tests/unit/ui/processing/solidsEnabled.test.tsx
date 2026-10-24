@@ -11,6 +11,10 @@
  * and an available SOURCE (`eligibility.ts`) and surfaces tagged with their
  * geometry TYPE, none of which the roof fixture has.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -155,7 +159,7 @@ function addSolidLayer(options: LayerOptions = {}): string {
     visible: true,
     rules: [],
     colorBy: "surface",
-    isStreaming: options.isStreaming ?? false,
+    source: options.isStreaming ? STREAMED_SOURCE : RESIDENT_SOURCE,
   };
   const id = useLayerStore.getState().addLayer(input);
   if (options.selectedLod !== undefined) {

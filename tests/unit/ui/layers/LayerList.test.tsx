@@ -14,6 +14,10 @@
  * flight, an add that failed — are the list's other half: a failure must
  * always leave a visible row, never a silence.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -109,7 +113,7 @@ function layer(
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     // REQUIRED on the real record (Task 21). The cast compiles without it,
     // but the row reads `derivedFrom !== null` — an `undefined` here would
     // make every seeded layer look derived and then dereference a null run.
@@ -286,7 +290,7 @@ describe("LayerList — the rows", () => {
   });
 
   it("gives a streaming row its resident count, from the stream store", () => {
-    seedCity(layer({ id: "s1", name: "delft.fcb", isStreaming: true }));
+    seedCity(layer({ id: "s1", name: "delft.fcb", source: STREAMED_SOURCE }));
     seedStream("s1", 1240);
     renderList();
 
@@ -294,7 +298,7 @@ describe("LayerList — the rows", () => {
   });
 
   it("copies a stream's own error message into the row's state line", () => {
-    seedCity(layer({ id: "s1", name: "delft.fcb", isStreaming: true }));
+    seedCity(layer({ id: "s1", name: "delft.fcb", source: STREAMED_SOURCE }));
     seedStream("s1", 0, "error", "the tile server refused the range request");
     renderList();
 
@@ -522,7 +526,7 @@ describe("LayerList — what a row does", () => {
   });
 
   it("closes the stream BEFORE dropping a streaming layer from the store", () => {
-    seedCity(layer({ id: "s1", name: "delft.fcb", isStreaming: true }));
+    seedCity(layer({ id: "s1", name: "delft.fcb", source: STREAMED_SOURCE }));
     seedStream("s1", 10);
     const removeLayer = vi.spyOn(useLayerStore.getState(), "removeLayer");
     renderList();

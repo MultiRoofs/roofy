@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
@@ -36,6 +40,15 @@ vi.mock("../../../../src/insights/duckdb", () => ({
 }));
 
 const runExport = vi.fn();
+vi.mock("../../../../src/insights/familyViews", () => ({
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyView: vi.fn(async () => {}),
+  dropFamilyViews: vi.fn(async () => {}),
+}));
+vi.mock("../../../../src/features/cityparquet/familySourceCrs", () => ({
+  familySourceCrs: vi.fn(async () => "EPSG:6697"),
+}));
+
 vi.mock("../../../../src/insights/export", () => ({
   runExport: (request: unknown) => runExport(request),
 }));
@@ -76,6 +89,8 @@ const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
+const { useFamilyStore, buildLayerFamilies, resetFamilyStoreForTest } =
+  await import("../../../../src/features/layers/familyStore");
 const { useSelectionStore } =
   await import("../../../../src/features/selection/selectionStore");
 
@@ -111,24 +126,35 @@ const FALLBACK_TABLE = {
   lods: [],
 };
 
+/** A CityParquet family's table: a VIEW over the file (R-B′), which answers for
+ *  objects the camera never delivered. */
+const FAMILY_TABLE = {
+  ...FALLBACK_TABLE,
+  sourceName: "family_1.parquet",
+  fileBacked: true,
+  familyKey: "building",
+  sourceCrs: "EPSG:6697",
+};
+
 function open(over: Record<string, unknown> = {}) {
   const onClose = vi.fn();
-  render(
+  const { unmount } = render(
     <ExportDialog
       layerId="L"
       layerName="delft"
       table={READER_TABLE}
       epsg={7415}
       selectedLod="2.2"
-      isStreaming={false}
+      source={RESIDENT_SOURCE}
       onClose={onClose}
       {...over}
     />,
   );
-  return { onClose };
+  return { onClose, unmount };
 }
 
 beforeEach(() => {
+  resetFamilyStoreForTest();
   deathListeners.clear();
   runQuery.mockReset();
   runQuery.mockResolvedValue({
@@ -265,16 +291,79 @@ describe("ExportDialog", () => {
     ).toBeTruthy();
   });
 
-  it("offers CityJSON, CityJSONSeq and FlatCityBuf DISABLED, with the reason", async () => {
-    open();
+  it("exports CityJSON, CityJSONSeq and FlatCityBuf with the LoD and the chosen types", async () => {
+    const cases = [
+      ["CityJSON", "cityjson", "delft.city.json"],
+      ["CityJSONSeq", "cityjsonseq", "delft.city.jsonl"],
+      ["FlatCityBuf", "flatcitybuf", "delft.fcb"],
+    ] as const;
+    for (const [label, format, fileName] of cases) {
+      runExport.mockClear();
+      const view = open();
+      await waitFor(() =>
+        expect(screen.getByLabelText("Building")).toBeTruthy(),
+      );
+      fireEvent.click(screen.getByLabelText("SolitaryVegetationObject"));
+      fireEvent.click(screen.getByLabelText(label));
+      fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+      await waitFor(() => expect(runExport).toHaveBeenCalled());
+      const request = runExport.mock.calls[0]![0] as {
+        kind: string;
+        format: string;
+        lodSuffix: string;
+        rootTypes: string[];
+        allRootTypes: string[];
+        attributes: string[];
+        reader: string;
+        fileName: string;
+      };
+      expect(request.kind).toBe("geometry");
+      expect(request.format).toBe(format);
+      expect(request.lodSuffix).toBe("2_2");
+      expect(request.rootTypes).toEqual(["Building"]);
+      expect(request.allRootTypes).toEqual([
+        "Building",
+        "SolitaryVegetationObject",
+      ]);
+      expect(request.attributes).toEqual(["b3_h_dak_max"]);
+      expect(request.reader).toBe("read_cityjson");
+      expect(request.fileName).toBe(fileName);
+      view.unmount();
+    }
+  });
+
+  it("offers the geometry formats without an EPSG code: the source carries its own CRS", async () => {
+    open({ epsg: null });
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     for (const label of ["CityJSON", "CityJSONSeq", "FlatCityBuf"]) {
-      const radio = screen.getByLabelText(label) as HTMLInputElement;
-      expect(radio.disabled).toBe(true);
-      expect(radio.closest("label")!.title).toBe(
-        "Not available in the browser build of the cityjson extension (writes an empty file)",
+      expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(
+        false,
       );
     }
+  });
+
+  it("writes a layer drawn only through implicit geometries, with no LoD to choose", async () => {
+    open({ table: { ...READER_TABLE, lods: [] } });
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByLabelText("Level of detail")).toBeNull();
+    // A package needs an LoD's geometry; the CityJSON family does not.
+    expect(screen.queryByLabelText("CityParquet package (.zip)")).toBeNull();
+    fireEvent.click(screen.getByLabelText("CityJSON"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect(
+      (runExport.mock.calls[0]![0] as { lodSuffix: string | null }).lodSuffix,
+    ).toBeNull();
+  });
+
+  it("offers no LoD picker over a table with a ladder but no reader", async () => {
+    // A CityParquet package's table: read from its Parquet, with nothing to
+    // re-read its geometry through.
+    open({ table: { ...READER_TABLE, reader: null, source: null } });
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByLabelText("Level of detail")).toBeNull();
+    expect(screen.queryByLabelText("CityJSON")).toBeNull();
   });
 
   it("still exports ATTRIBUTES when the layer's bytes cannot be re-obtained", async () => {
@@ -448,7 +537,7 @@ describe("ExportDialog", () => {
   });
 
   it("warns that streaming exports include only currently loaded records", async () => {
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
     expect(
       await screen.findByText(
         "Exports include currently loaded records only, not the whole dataset.",
@@ -456,8 +545,28 @@ describe("ExportDialog", () => {
     ).toBeTruthy();
   });
 
+  it("does NOT warn for a family's table, which is read from the file", async () => {
+    // A CityParquet family's rows come from the FILE (R-B′), so an export of one
+    // is not limited to what the camera delivered.
+    useFamilyStore.getState().setFamilies(
+      "L",
+      buildLayerFamilies([
+        {
+          key: "building",
+          href: "building.parquet",
+          size: null,
+          source: { url: "https://x/building.parquet" },
+        },
+      ]),
+    );
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
+    await waitFor(() =>
+      expect(screen.queryByText(/currently loaded records only/)).toBeNull(),
+    );
+  });
+
   it("forces one table rebuild when it opens on a streaming layer", async () => {
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
     await waitFor(() =>
       expect(refreshStreamingTable).toHaveBeenCalledWith("L"),
     );
@@ -478,7 +587,7 @@ describe("ExportDialog", () => {
       ok: false,
       message: "IO Error: boom",
     });
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("could not be rebuilt");
@@ -490,8 +599,122 @@ describe("ExportDialog", () => {
     expect(runExport).not.toHaveBeenCalled();
   });
 
+  it("REFUSES to export a resident table the FILE has superseded", async () => {
+    // R-B′/R-C′ interim hazard: once a family's view exists, the layer's old
+    // resident table is frozen at whatever was loaded when it was last built —
+    // and `refreshStreamingTable` rightly refuses to rebuild it. Exporting it
+    // would hand back that snapshot as if it were the layer, with nothing on
+    // screen to say so, so the dialog refuses until a family's own table is
+    // the one it was handed.
+    useLayerTableStore.setState({
+      tables: {
+        L: { state: "ready", info: FALLBACK_TABLE },
+        "L::building": {
+          state: "ready",
+          info: {
+            ...FALLBACK_TABLE,
+            table: "layer_9",
+            fileBacked: true,
+            familyKey: "building",
+          },
+        },
+      },
+    } as never);
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("object family");
+    expect(
+      (screen.getByRole("button", { name: "Export" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(runExport).not.toHaveBeenCalled();
+  });
+
+  it("exports one family's view while ANOTHER family's view exists", async () => {
+    // The refusal is about a RESIDENT table the file has superseded, never about
+    // a sibling family: refusing here would tell the user to "export the
+    // family's own table" — which is exactly what they are doing.
+    const buildingTable = {
+      ...FALLBACK_TABLE,
+      table: "layer_9",
+      fileBacked: true,
+      familyKey: "building",
+    };
+    useLayerTableStore.setState({
+      tables: {
+        "L::building": { state: "ready", info: buildingTable },
+        "L::bridge": {
+          state: "ready",
+          info: {
+            ...FALLBACK_TABLE,
+            table: "layer_10",
+            fileBacked: true,
+            familyKey: "bridge",
+          },
+        },
+      },
+    } as never);
+    open({ table: buildingTable, source: STREAMED_SOURCE });
+
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Export" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("exports a FAMILY's own file-backed table without complaint", async () => {
+    const familyTable = {
+      ...FALLBACK_TABLE,
+      table: "layer_9",
+      fileBacked: true,
+      familyKey: "building",
+    };
+    useLayerTableStore.setState({
+      tables: { "L::building": { state: "ready", info: familyTable } },
+    } as never);
+    open({ table: familyTable, source: STREAMED_SOURCE });
+
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Export" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("waits while the table it was HANDED is rebuilding, by its own key", async () => {
+    // The `rebuilding` flag has to be read from the entry that holds THIS
+    // table: a family's view lives under `${layerId}::${family}`, so a lookup
+    // by the bare layer id would watch a table this dialog is not exporting.
+    const familyTable = {
+      ...FALLBACK_TABLE,
+      table: "layer_9",
+      fileBacked: true,
+      familyKey: "building",
+    };
+    useLayerTableStore.setState({
+      tables: {
+        "L::building": {
+          state: "ready",
+          info: familyTable,
+          rebuilding: true,
+        },
+      },
+    } as never);
+    open({ table: familyTable, source: STREAMED_SOURCE });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Refreshing table…" }),
+      ).toBeTruthy(),
+    );
+  });
+
   it("exports normally when the refresh succeeded", async () => {
-    open({ table: FALLBACK_TABLE, isStreaming: true });
+    open({ table: FALLBACK_TABLE, source: STREAMED_SOURCE });
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
     expect(
@@ -538,7 +761,7 @@ describe("ExportDialog", () => {
         {
           id: "L",
           name: "delft",
-          isStreaming: false,
+          source: RESIDENT_SOURCE,
           model: {
             objects: {
               B1: { id: "B1", parents: [], children: ["P1"] },
@@ -564,6 +787,89 @@ describe("ExportDialog", () => {
     expect((runExport.mock.calls[0]![0] as { where: string }).where).toBe(
       'COALESCE("feature_id", "id") IN (\'B1\')',
     );
+  });
+
+  it("resolves a selected id the residents never held through the family's VIEW", async () => {
+    // A streamed CityParquet family: the table reads the whole file, so a
+    // BuildingPart the camera never delivered can be selected in the grid and is
+    // nowhere in the resident model. Resolving its root through the residents
+    // found nothing, so the export compared the PART's id against `feature_id`
+    // and wrote a file with no features in it at all.
+    useLayerStore.setState({
+      layers: [
+        {
+          id: "L",
+          name: "yokohama",
+          source: STREAMED_SOURCE,
+          model: { objects: {} },
+        },
+      ] as never,
+    });
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: "L", objectId: "P1" });
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes('"id" IN')
+        ? {
+            ok: true,
+            columns: ["id", "feature_id"],
+            rows: [{ id: "P1", feature_id: "B1" }],
+          }
+        : { ok: true, columns: ["value"], rows: [{ value: "Building" }] },
+    );
+    open({ table: FAMILY_TABLE, source: STREAMED_SOURCE });
+
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Selected records"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect((runExport.mock.calls[0]![0] as { where: string }).where).toBe(
+      'COALESCE("feature_id", "id") IN (\'B1\')',
+    );
+    // Asked of the table this dialog is exporting, by the selected ids.
+    expect(
+      runQuery.mock.calls
+        .map((c) => c[0] as string)
+        .some(
+          (sql) =>
+            sql.includes('FROM "layer_1"') &&
+            sql.includes("\"id\" IN ('P1')") &&
+            sql.includes("DISTINCT"),
+        ),
+    ).toBe(true);
+  });
+
+  it("REFUSES a selected export when the view could not be asked", async () => {
+    // Exporting the raw selected ids would write the wrong features (or none),
+    // and silence is what made the empty file so hard to explain.
+    useLayerStore.setState({
+      layers: [
+        {
+          id: "L",
+          name: "yokohama",
+          source: STREAMED_SOURCE,
+          model: { objects: {} },
+        },
+      ] as never,
+    });
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: "L", objectId: "P1" });
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes('"id" IN')
+        ? { ok: false, message: "IO Error: could not read footer" }
+        : { ok: true, columns: ["value"], rows: [{ value: "Building" }] },
+    );
+    open({ table: FAMILY_TABLE, source: STREAMED_SOURCE });
+
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Selected records"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("IO Error: could not read footer");
+    expect(runExport).not.toHaveBeenCalled();
   });
 
   it("runs an attribute export with the chosen columns and downloads it", async () => {
@@ -740,7 +1046,7 @@ describe("ExportDialog", () => {
         table={READER_TABLE}
         epsg={7415}
         selectedLod="2.2"
-        isStreaming={false}
+        source={RESIDENT_SOURCE}
         onClose={() => {}}
       />,
     );
@@ -755,7 +1061,7 @@ describe("ExportDialog", () => {
         table={FALLBACK_TABLE}
         epsg={7415}
         selectedLod={null}
-        isStreaming={false}
+        source={RESIDENT_SOURCE}
         onClose={() => {}}
       />,
     );
@@ -774,7 +1080,7 @@ describe("ExportDialog", () => {
         table={READER_TABLE}
         epsg={7415}
         selectedLod="2.2"
-        isStreaming={false}
+        source={RESIDENT_SOURCE}
         onClose={() => {}}
       />,
     );
@@ -796,7 +1102,7 @@ describe("ExportDialog", () => {
         }}
         epsg={7415}
         selectedLod="2.2"
-        isStreaming={false}
+        source={RESIDENT_SOURCE}
         onClose={() => {}}
       />,
     );

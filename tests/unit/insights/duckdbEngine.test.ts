@@ -7,12 +7,15 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   ddl,
   dropBuffer,
+  dropRegisteredFile,
   ensureExtension,
   formatDuckDBError,
   getDuckDBStatus,
   isExtensionLoaded,
   readFile,
   registerBuffer,
+  registerParquetFile,
+  registerParquetUrl,
   runQuery,
 } from "../../../src/insights/duckdb";
 
@@ -126,20 +129,27 @@ interface EngineHarness {
    * `register:<name>` / `read:<name>` / `drop:<name>`.
    */
   readonly hangWhen: (match: (key: string) => boolean) => void;
+  /** Every `registerFileURL` / `registerFileHandle` call, arguments and all —
+   *  the protocol and the `directIO` flag are the contract of those two. */
+  readonly registrations: unknown[][];
+  /** Every `open` config, in order. */
+  readonly opened: unknown[];
 }
 
 const EXTENSION_REFUSED = "Catalog Error: extension is not available";
 
 /**
  * A module instance whose `AsyncDuckDB` connects to a fake connection that
- * RECORDS its SQL. It is the only way to pin the INSTALL spellings: `spatial`
- * is a CORE extension and `INSTALL spatial FROM community` fails outright
- * against a real DuckDB, so a regression here is invisible until a browser.
+ * RECORDS its SQL. It is the only way to pin the repository settings and the
+ * INSTALL spellings: a `FROM community` would reach DuckDB's CDN instead of
+ * the vendored builds, and nothing short of a browser would notice.
  */
 async function bootEngine(): Promise<EngineHarness> {
   vi.resetModules();
 
   const sql: string[] = [];
+  const registrations: unknown[][] = [];
+  const opened: unknown[] = [];
   // What `duckdb_extensions()` reports; a successful LOAD adds to it, the way
   // a real database would.
   const loaded = new Set<string>(["parquet"]);
@@ -181,6 +191,9 @@ async function bootEngine(): Promise<EngineHarness> {
     LogLevel: { WARNING: 2 },
     AsyncDuckDB: class {
       async instantiate() {}
+      async open(config: unknown) {
+        opened.push(config);
+      }
       async connect() {
         return connection;
       }
@@ -197,6 +210,33 @@ async function bootEngine(): Promise<EngineHarness> {
       async dropFile(name: string) {
         return hangMatch(`drop:${name}`) ? await forever<void>() : undefined;
       }
+      async registerFileURL(...args: unknown[]) {
+        registrations.push(["url", ...args]);
+        const name = String(args[0]);
+        if (failMatch(`register:${name}`)) throw new Error("VFS refused");
+        return hangMatch(`register:${name}`)
+          ? await forever<void>()
+          : undefined;
+      }
+      async registerFileHandle(...args: unknown[]) {
+        registrations.push(["handle", ...args]);
+        const name = String(args[0]);
+        if (failMatch(`register:${name}`)) throw new Error("VFS refused");
+        return hangMatch(`register:${name}`)
+          ? await forever<void>()
+          : undefined;
+      }
+    },
+    // The engine reads `DuckDBDataProtocol.HTTP` and `.BROWSER_FILEREADER`,
+    // whose NUMBERS are what the wasm side switches on — spelled here as the
+    // real enum spells them (`bindings/runtime.d.ts`).
+    DuckDBDataProtocol: {
+      BUFFER: 0,
+      NODE_FS: 1,
+      BROWSER_FILEREADER: 2,
+      BROWSER_FSACCESS: 3,
+      HTTP: 4,
+      S3: 5,
     },
   }));
   vi.stubGlobal(
@@ -223,10 +263,12 @@ async function bootEngine(): Promise<EngineHarness> {
 
   sql.length = 0; // Init's own statements are not what these tests are about.
   return {
+    opened,
     engine,
     sql,
     failWhen: (match) => (failMatch = match),
     hangWhen: (match) => (hangMatch = match),
+    registrations,
   };
 }
 
@@ -236,7 +278,7 @@ describe("ensureExtension", () => {
     vi.resetModules();
   });
 
-  it("installs spatial as a CORE extension, never FROM community", async () => {
+  it("installs every extension from the vendored repository, never a CDN", async () => {
     const { engine, sql } = await bootEngine();
 
     expect(await engine.ensureExtension("spatial")).toBe(true);
@@ -252,14 +294,16 @@ describe("ensureExtension", () => {
     expect(status.extensions.spatial).toEqual({ state: "loaded" });
   });
 
-  it("installs three_d from the community repo", async () => {
+  it("opens the database allowing the vendored builds, which are unsigned", async () => {
+    const { opened } = await bootEngine();
+    expect(opened).toEqual([{ allowUnsignedExtensions: true }]);
+  });
+
+  it("installs three_d from the vendored repository", async () => {
     const { engine, sql } = await bootEngine();
 
     expect(await engine.ensureExtension("three_d")).toBe(true);
-    expect(sql.slice(0, 2)).toEqual([
-      "INSTALL three_d FROM community",
-      "LOAD three_d",
-    ]);
+    expect(sql.slice(0, 2)).toEqual(["INSTALL three_d", "LOAD three_d"]);
   });
 
   it("costs one INSTALL for two concurrent calls", async () => {
@@ -399,6 +443,91 @@ describe("a primitive caught by the engine's death", () => {
   });
 });
 
+describe("registering a Parquet SOURCE", () => {
+  afterEach(() => {
+    vi.doUnmock("@duckdb/duckdb-wasm");
+    vi.resetModules();
+  });
+
+  it("registers a URL over HTTP, with ranged reads and no directIO", async () => {
+    // The spike's exact call (`docs/performance/cityparquet-2026-09-21/
+    // duckdb-read-parquet-spike.json`): `DuckDBDataProtocol.HTTP` with
+    // `directIO` FALSE, which is what made a view over the 884 106-row
+    // Yokohama table cost 26 ms instead of a download.
+    const h = await bootEngine();
+
+    const outcome = await h.engine.registerParquetUrl(
+      "family_1.parquet",
+      "https://example.test/building.parquet",
+    );
+
+    expect(outcome).toEqual({ ok: true });
+    expect(h.registrations).toEqual([
+      [
+        "url",
+        "family_1.parquet",
+        "https://example.test/building.parquet",
+        4,
+        false,
+      ],
+    ]);
+  });
+
+  it("registers a local File through BROWSER_FILEREADER", async () => {
+    const h = await bootEngine();
+    const file = new File([new Uint8Array([1, 2])], "building.parquet");
+
+    const outcome = await h.engine.registerParquetFile(
+      "family_2.parquet",
+      file,
+    );
+
+    expect(outcome).toEqual({ ok: true });
+    expect(h.registrations).toEqual([
+      ["handle", "family_2.parquet", file, 2, true],
+    ]);
+  });
+
+  it("reports a refusal rather than throwing", async () => {
+    const h = await bootEngine();
+    h.failWhen((key) => key === "register:family_3.parquet");
+
+    const outcome = await h.engine.registerParquetUrl(
+      "family_3.parquet",
+      "https://example.test/x.parquet",
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error("unreachable");
+    expect(outcome.message).toBe("VFS refused");
+  });
+
+  it("settles on the engine's DEATH rather than stranding the caller", async () => {
+    // `ensureFamilyView` awaits this from inside the ONE table FIFO; a
+    // registration duckdb-wasm strands (its worker died without rejecting)
+    // would hold that queue for the life of the page.
+    const h = await bootEngine();
+    h.hangWhen((key) => key === "register:family_4.parquet");
+    const pending = h.engine.registerParquetUrl(
+      "family_4.parquet",
+      "https://example.test/x.parquet",
+    );
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      message: "The analytics engine is not running.",
+    });
+  });
+
+  it("settles `dropRegisteredFile` on the death too", async () => {
+    const h = await bootEngine();
+    h.hangWhen((key) => key === "drop:family_5.parquet");
+    const pending = h.engine.dropRegisteredFile("family_5.parquet");
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).resolves.toBeUndefined();
+  });
+});
+
 describe("engine entry points before init", () => {
   it("starts uninitialized with no extension loaded", () => {
     expect(getDuckDBStatus().state).toBe("uninitialized");
@@ -422,6 +551,20 @@ describe("engine entry points before init", () => {
   it("registerBuffer answers false and dropBuffer is a no-op", async () => {
     expect(await registerBuffer("x.json", new Uint8Array([1, 2]))).toBe(false);
     await expect(dropBuffer("x.json")).resolves.toBeUndefined();
+  });
+
+  it("the Parquet registrations refuse, and the drop is a no-op", async () => {
+    const url = await registerParquetUrl("f.parquet", "https://x.test/f");
+    expect(url).toEqual({
+      ok: false,
+      message: "The analytics engine is not running.",
+    });
+    const handle = await registerParquetFile(
+      "f.parquet",
+      new File([new Uint8Array([1])], "f.parquet"),
+    );
+    expect(handle.ok).toBe(false);
+    await expect(dropRegisteredFile("f.parquet")).resolves.toBeUndefined();
   });
 
   it("readFile answers null", async () => {

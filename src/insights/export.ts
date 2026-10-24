@@ -4,14 +4,12 @@
  * Everything goes through DuckDB's own writers and comes back through the VFS
  * as bytes — there is no app-side serialiser here, which is what keeps a CSV
  * of a DATE column formatted the way DuckDB formats it rather than the way JS
- * would.
+ * would. The geometry formats (CityJSON, CityJSONSeq, FlatCityBuf) are the
+ * cityjson extension's `COPY` writers over a re-read of the source; a
+ * CityParquet package is its `cityparquet_write`.
  *
- * NOT offered, and not to be added without re-probing: the `FORMAT cityjson |
- * cityjsonseq | flatcitybuf` sinks bypass DuckDB's VFS entirely — no file is
- * created at all — while the same extension writes fine through
- * `cityparquet_write`. A format that produces nothing is worse than a format
- * that is absent, so those three are offered only as DISABLED options in the
- * dialog, and every read-back here is validated by CONTENT.
+ * Every read-back is validated by CONTENT: a VFS name that was never created
+ * reads back as one garbage byte with no error.
  */
 
 import { zipSync } from "fflate";
@@ -23,10 +21,13 @@ import {
   buildAttributeExportSql,
   buildCityParquetModuleSql,
   buildCityParquetSourceSql,
+  buildFlatCityBufLossSql,
+  buildGeometryExportSql,
   exportColumnNames,
   quoteIdent,
   quoteLiteral,
   type AttributeExportFormat,
+  type GeometryExportFormat,
 } from "./sql";
 
 export interface AttributeExportRequest {
@@ -62,13 +63,65 @@ const MIME: Readonly<Record<AttributeExportFormat, string>> = {
 
 /** What a read-back is checked AS — not the download's format, since a
  *  CityParquet package's own files are parquet and json. */
-export type ExportContentFormat = "parquet" | "csv" | "json";
+export type ExportContentFormat =
+  | "parquet"
+  | "csv"
+  | "json"
+  | GeometryExportFormat;
 
 export type ReadbackOutcome =
   | { readonly ok: true; readonly bytes: Uint8Array }
   | { readonly ok: false; readonly message: string };
 
 const PAR1 = [0x50, 0x41, 0x52, 0x31]; // "PAR1"
+/** "fcb", version 1, "fcb", 0 — FlatCityBuf's eight magic bytes. */
+const FCB_MAGIC = [0x66, 0x63, 0x62, 0x01, 0x66, 0x63, 0x62, 0x00];
+
+function startsWith(bytes: Uint8Array, prefix: ReadonlyArray<number>): boolean {
+  return prefix.every((byte, i) => bytes[i] === byte);
+}
+
+/** A whole CityJSON file can be hundreds of megabytes, so only its two ends
+ *  are decoded: a document that opens and closes as an object, and the
+ *  writer's own error, which would be an exception, not a file. */
+const CITYJSON_EDGE_BYTES = 64;
+
+function isCityJsonObject(line: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(line);
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as { type?: unknown }).type === "CityJSON"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validGeometryBytes(
+  format: GeometryExportFormat,
+  bytes: Uint8Array,
+): boolean {
+  if (format === "flatcitybuf") return startsWith(bytes, FCB_MAGIC);
+  const decoder = new TextDecoder();
+  if (format === "cityjson") {
+    const head = decoder.decode(bytes.subarray(0, CITYJSON_EDGE_BYTES));
+    const tail = decoder.decode(bytes.subarray(-CITYJSON_EDGE_BYTES));
+    return (
+      head.trimStart().startsWith("{") &&
+      tail.trimEnd().endsWith("}") &&
+      // The type member is the writer's to place, anywhere in the document;
+      // a small file is cheap to check whole.
+      (bytes.length > CITYJSON_EDGE_BYTES * 1024 ||
+        isCityJsonObject(decoder.decode(bytes)))
+    );
+  }
+  // CityJSONSeq: the first line is the header, and it is a CityJSON object.
+  const newline = bytes.indexOf(0x0a);
+  if (newline <= 0) return false;
+  return isCityJsonObject(decoder.decode(bytes.subarray(0, newline)));
+}
 
 /**
  * Is this really the file DuckDB was asked to write?
@@ -96,10 +149,14 @@ export function validateExportBytes(
   if (bytes === null || bytes.length <= 1) return fail;
 
   if (format === "parquet") {
-    for (let i = 0; i < PAR1.length; i++) {
-      if (bytes[i] !== PAR1[i]) return fail;
-    }
-    return { ok: true, bytes };
+    return startsWith(bytes, PAR1) ? { ok: true, bytes } : fail;
+  }
+  if (
+    format === "cityjson" ||
+    format === "cityjsonseq" ||
+    format === "flatcitybuf"
+  ) {
+    return validGeometryBytes(format, bytes) ? { ok: true, bytes } : fail;
   }
 
   let text: string;
@@ -159,9 +216,10 @@ export function resetExportCounterForTests(): void {
  * refusal rather than `IN ()` — a syntax error — or an empty file, which the
  * user would have to open to discover.
  */
-function rootTypePredicateTypes(
-  request: AttributeExportRequest,
-): ReadonlyArray<string> | null {
+function rootTypePredicateTypes(request: {
+  readonly rootTypes: ReadonlyArray<string>;
+  readonly allRootTypes: ReadonlyArray<string>;
+}): ReadonlyArray<string> | null {
   const chosen = [...new Set(request.rootTypes)];
   if (chosen.length === 0) {
     throw new Error("Choose at least one object type to export.");
@@ -672,10 +730,147 @@ async function exportCityParquet(
   }
 }
 
-export type ExportRequest = AttributeExportRequest | CityParquetExportRequest;
+export interface GeometryExportRequest {
+  readonly kind: "geometry";
+  readonly format: GeometryExportFormat;
+  readonly table: string;
+  readonly reader: "read_cityjson" | "read_cityjsonseq";
+  readonly source: SourceProvider;
+  readonly sourceExtension: string;
+  /** `LodColumn.suffix`, as for a CityParquet package; `null` for a layer
+   *  drawn only through implicit geometries. */
+  readonly lodSuffix: string | null;
+  readonly attributes: ReadonlyArray<string>;
+  readonly computedAttributes: ReadonlyArray<string>;
+  readonly where: string | null;
+  readonly sourceFeatureIds: ReadonlyArray<string> | null;
+  readonly rootTypes: ReadonlyArray<string>;
+  readonly allRootTypes: ReadonlyArray<string>;
+  readonly fileName: string;
+}
+
+const GEOMETRY_EXTENSIONS: Readonly<Record<GeometryExportFormat, string>> = {
+  cityjson: "city.json",
+  cityjsonseq: "city.jsonl",
+  flatcitybuf: "fcb",
+};
+
+const GEOMETRY_MIME: Readonly<Record<GeometryExportFormat, string>> = {
+  cityjson: "application/city+json",
+  cityjsonseq: "application/city+json-seq",
+  flatcitybuf: "application/octet-stream",
+};
+
+/**
+ * A CityJSON, CityJSONSeq or FlatCityBuf file, written by the extension.
+ *
+ * The source is registered again because the browsing table has no geometry,
+ * and it STAYS registered through the `COPY`: the writer reads its metadata,
+ * appearance and templates from it (`metadata_from`).
+ */
+async function exportGeometry(
+  request: GeometryExportRequest,
+): Promise<ExportResult> {
+  const rootTypes = rootTypePredicateTypes(request);
+  const base = nextExportName();
+  const sourceName = `${base}_src.${request.sourceExtension}`;
+  const outFile = `${base}.${GEOMETRY_EXTENSIONS[request.format]}`;
+  try {
+    const scope = {
+      reader: request.reader,
+      sourceFile: sourceName,
+      table: request.table,
+      lodSuffix: request.lodSuffix,
+      attributes: request.attributes,
+      computedAttributes: request.computedAttributes,
+      where: request.where,
+      sourceFeatureIds: request.sourceFeatureIds,
+      rootTypes,
+    };
+    // Built before the source is fetched, so a bad LoD costs no download.
+    const statement = buildGeometryExportSql({
+      ...scope,
+      format: request.format,
+      outFile,
+    });
+    // A FRESH array from the provider: registering consumes it.
+    const bytes = await request.source();
+    if (!(await registerBuffer(sourceName, bytes))) {
+      throw new Error("The layer's source could not be re-read for export.");
+    }
+    const written = await runQuery(statement);
+    if (!written.ok) throw new Error(written.message);
+
+    const readback = validateExportBytes(
+      outFile,
+      request.format,
+      await readFile(outFile),
+    );
+    if (!readback.ok) throw new Error(readback.message);
+
+    const warnings: string[] = [];
+    if (Number(written.rows[0]?.Count) === 0) {
+      warnings.push("No objects matched, so the file is empty.");
+    } else if (request.format === "flatcitybuf") {
+      const lost = await flatCityBufLosses(buildFlatCityBufLossSql(scope));
+      if (lost !== null) warnings.push(lost);
+    }
+    return {
+      blob: new Blob([readback.bytes as BlobPart], {
+        type: GEOMETRY_MIME[request.format],
+      }),
+      fileName: request.fileName,
+      warnings,
+    };
+  } finally {
+    await dropBuffer(sourceName);
+    await dropWrittenFile(outFile);
+  }
+}
+
+/**
+ * What a FlatCityBuf export left behind, as a sentence, or null.
+ *
+ * The extension's FlatCityBuf writer writes neither implicit geometries nor
+ * addresses, although the format has room for instances. The file is still
+ * handed over — everything else in it is right — but not quietly.
+ */
+async function flatCityBufLosses(sql: string): Promise<string | null> {
+  const counted = await runQuery(sql);
+  if (!counted.ok) {
+    return `Could not check what the FlatCityBuf left out: ${counted.message}`;
+  }
+  const implicit = Number(counted.rows[0]?.implicit ?? 0);
+  const address = Number(counted.rows[0]?.address ?? 0);
+  const parts: string[] = [];
+  if (implicit > 0) {
+    parts.push(
+      `${String(implicit)} ${implicit === 1 ? "object was" : "objects were"} written without ${implicit === 1 ? "its" : "their"} implicit geometry`,
+    );
+  }
+  if (address > 0) {
+    const lead =
+      parts.length === 0
+        ? `${String(address)} ${address === 1 ? "object was written" : "objects were written"}`
+        : String(address);
+    parts.push(`${lead} without ${address === 1 ? "its" : "their"} address`);
+  }
+  if (parts.length === 0) return null;
+  return `FlatCityBuf cannot hold implicit geometries or addresses: ${parts.join(" and ")}. CityJSON and CityJSONSeq keep both.`;
+}
+
+export type ExportRequest =
+  | AttributeExportRequest
+  | CityParquetExportRequest
+  | GeometryExportRequest;
 
 export async function runExport(request: ExportRequest): Promise<ExportResult> {
-  return request.kind === "cityparquet"
-    ? await exportCityParquet(request)
-    : await exportAttributes(request);
+  switch (request.kind) {
+    case "cityparquet":
+      return await exportCityParquet(request);
+    case "geometry":
+      return await exportGeometry(request);
+    case "attributes":
+      return await exportAttributes(request);
+  }
 }

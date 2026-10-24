@@ -1,105 +1,35 @@
-import { type TablePresentation } from "../query/tablePresentation";
-import { type AttributeOrders } from "../attributes/attributeOrder";
 /**
  * Hook for loading city model files into the layer store.
  *
- * Extracts the file-loading logic from the app shell so it can be
- * reused by both the landing page and the "add layer" UI.
+ * The BOOKING half of a layer add: a pending row while it runs, a failed row
+ * with its own retry when it throws, and the per-source error behind
+ * `lastError`. Which format, which loader and which engine hold are
+ * {@link openCityLayer}'s, the one door every city layer opens through.
  */
 
-import type { AppearanceTheme, CityModelEncoding } from "@cityjson/navara-core";
+import type { CityModelEncoding } from "@cityjson/navara-core";
 import { useCallback, useRef, useState } from "react";
-import type { CityModel } from "../../domain/citymodel/types";
-import { detectEncoding } from "../../domain/citymodel/detectEncoding";
+import { fileNameFromUrl } from "../../domain/citymodel/loadCityModel";
 import {
-  parseText,
-  loadFromUrl,
-  fileNameFromUrl,
-  decodeModelBytes,
-  isGzipBytes,
-} from "../../domain/citymodel/loadCityModel";
-import {
-  cityParquetLayerNameFromUrl,
-  loadCityParquetFromFiles,
-  loadCityParquetFromUrl,
-} from "../cityparquet/loadCityParquet";
-import {
-  isZipBytes,
-  parseCityGmlArchive,
-} from "../../domain/citymodel/cityGmlArchive";
-import { isCityParquetUrl } from "../cityparquet/sourceClassify";
-import { ensureModelCrsLoadable } from "./ensureCrs";
-import {
-  addCityLayer,
-  fileSourceProvider,
-  modelTableSource,
-  urlSourceProvider,
-} from "./addCityLayer";
-import { useLayerStore } from "./layerStore";
-import { openStreamingLayer } from "../streaming/openStreamingLayer";
+  openCityLayer,
+  type CityLayerSettings,
+  type OpenCityLayerDeps,
+} from "./openCityLayer";
 import {
   requireStreamPlugin,
   type StreamPlugin,
 } from "../streaming/streamPlugin";
-import type { Rule } from "../rules/types";
-import type { ColorBy } from "../rules/colorBy";
 
-/** Optional per-layer settings to apply instead of the usual fresh-layer
- *  defaults (rules: [], visible: true, lodMode: "auto") — used when re-linking
- *  a file to a layer restored from a snapshot, so the saved
- *  rules/visibility/LoD survive the re-selection (see App.tsx's "unavailable
- *  layers" resolve flow). */
-export interface LayerOverrides {
-  readonly rules?: ReadonlyArray<Rule>;
-  /** A restored "Color by" choice — carried so re-selecting the file behind an
-   *  unavailable layer brings its colouring back, not just its rules. Absent
-   *  means DERIVED from {@link rules} (`rules/colorBy.ts`). */
-  readonly colorBy?: ColorBy;
-  readonly singleColor?: string;
-  readonly unmatchedColor?: string;
-  readonly visible?: boolean;
-  readonly lodMode?: "auto" | "manual";
-  readonly selectedLod?: string | null;
-  /** Applied at creation, not afterwards: the layer is built (or its first
-   *  cell fetched) already filtered. */
-  readonly hiddenTypes?: ReadonlyArray<string>;
-  readonly attributeOrders?: AttributeOrders;
-  readonly tablePresentation?: TablePresentation;
-  /** Applied at creation; kept only if the file carries that theme. */
-  readonly selectedAppearance?: AppearanceTheme | null;
-  /**
-   * What this source really IS, overriding what its name suggests.
-   *
-   * The Add Layer dialog detects a format from the name, SHOWS it, and lets
-   * the user correct it before anything is loaded — a correction that is worth
-   * nothing unless it reaches the routing here (which arm takes the source)
-   * and the parser (which reader gets the bytes). Both branches below consult
-   * it before `detectEncoding` / `isCityParquetUrl`.
-   *
-   * It rides in `LayerOverrides` rather than in a parameter of its own so a
-   * RETRY keeps it: `runTracked` re-invokes the captured closure, and the
-   * overrides are part of that closure.
-   */
+/**
+ * What a caller knows about the add beyond the source: the saved settings of a
+ * re-linked layer, and what the source IS when someone has said so.
+ *
+ * `encoding` rides here rather than in a parameter of its own so a RETRY
+ * keeps it: `runTracked` re-invokes the captured closure, and the overrides
+ * are part of that closure.
+ */
+export interface LayerOverrides extends Omit<CityLayerSettings, "name"> {
   readonly encoding?: CityModelEncoding;
-}
-
-function applyPostCreateOverrides(
-  layerId: string,
-  overrides: LayerOverrides | undefined,
-): void {
-  if (!overrides) return;
-  if (overrides.lodMode === "manual") {
-    useLayerStore.getState().setLodMode(layerId, "manual");
-  }
-  if (overrides.selectedLod !== undefined && overrides.selectedLod !== null) {
-    const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
-    // Only apply a saved LoD that actually exists on the (possibly
-    // different) file being re-linked — an invalid value would silently
-    // pin a LoD the new content never renders.
-    if (layer?.availableLods.includes(overrides.selectedLod)) {
-      useLayerStore.getState().setLayerLod(layerId, overrides.selectedLod);
-    }
-  }
 }
 
 /**
@@ -213,6 +143,13 @@ export interface LayerFileLoaderOptions {
    * viewport to ask — the error state below surfaces either one identically.
    */
   readonly resolveStreamPlugin?: () => Promise<StreamPlugin>;
+  /**
+   * Hold the 3D engine up around an open that turned out to stream — a large
+   * CityParquet source, whose format alone does not say it needs the engine
+   * (App's boot hold; see `CityParquetLayerDeps.holdEngine`). Absent: the
+   * open runs as is.
+   */
+  readonly holdEngine?: OpenCityLayerDeps["holdEngine"];
 }
 
 const defaultResolveStreamPlugin = async (): Promise<StreamPlugin> =>
@@ -311,6 +248,20 @@ export function useLayerFileLoader(
   );
   resolveStreamPlugin.current =
     options.resolveStreamPlugin ?? defaultResolveStreamPlugin;
+  const holdEngine = useRef(options.holdEngine);
+  holdEngine.current = options.holdEngine;
+  /** Read at call time, through the refs, for the same identity reason. */
+  const openDeps = (): OpenCityLayerDeps => ({
+    resolveStreamPlugin: () => resolveStreamPlugin.current(),
+    holdEngine: holdEngine.current,
+  });
+  const settingsOf = (
+    overrides: LayerOverrides | undefined,
+  ): CityLayerSettings | undefined => {
+    if (overrides === undefined) return undefined;
+    const { encoding: _encoding, ...settings } = overrides;
+    return settings;
+  };
 
   const addLayerFromFile = useCallback(
     (file: File, overrides?: LayerOverrides): Promise<string | null> =>
@@ -320,109 +271,15 @@ export function useLayerFileLoader(
           source: file.name,
           fallback: "Failed to parse file.",
         },
-        async () => {
-          let layerId: string;
-          // The override FIRST, everywhere: a name is a guess, and the user
-          // has already been shown that guess and given the chance to correct
-          // it (see LayerOverrides.encoding).
-          const encoding = overrides?.encoding ?? detectEncoding(file.name);
-          if (encoding === "flatcitybuf") {
-            // A `File` IS a `Blob` — passed straight through, never read into
-            // an ArrayBuffer first (see openStreamingLayer.ts's doc comment
-            // on why fromBytes' copy would OOM a multi-GB local file).
-            layerId = await openStreamingLayer({
-              plugin: await resolveStreamPlugin.current(),
-              source: { blob: file },
-              name: file.name,
-              modelRef: { type: "file", fileName: file.name },
-              rules: overrides?.rules,
-              colorBy: overrides?.colorBy,
-              singleColor: overrides?.singleColor,
-              unmatchedColor: overrides?.unmatchedColor,
-              visible: overrides?.visible,
-              hiddenTypes: overrides?.hiddenTypes,
-              attributeOrders: overrides?.attributeOrders,
-              tablePresentation: overrides?.tablePresentation,
-              selectedAppearance: overrides?.selectedAppearance,
-            });
-          } else if (encoding === "cityparquet") {
-            // A lone `.parquet` drop is a one-table package — the same loader as
-            // a picked folder, given a selection of one.
-            const model = await loadCityParquetFromFiles([file]);
-            await ensureModelCrsLoadable(model);
-            layerId = addCityLayer({
-              name: file.name,
-              model,
-              modelRef: { type: "file", fileName: file.name },
-              visible: overrides?.visible,
-              rules: overrides?.rules,
-              colorBy: overrides?.colorBy,
-              singleColor: overrides?.singleColor,
-              unmatchedColor: overrides?.unmatchedColor,
-              hiddenTypes: overrides?.hiddenTypes,
-              attributeOrders: overrides?.attributeOrders,
-              tablePresentation: overrides?.tablePresentation,
-              selectedAppearance: overrides?.selectedAppearance,
-              // The parser produces the model and nothing else — a CityParquet
-              // table is not something a cityjson reader can read.
-              duckdb: { kind: "model", model },
-            });
-          } else {
-            // Bytes, not `file.text()`: a dropped `.city.json.gz` — the form 3D
-            // BAG ships in, and therefore the form a user saves off the catalog
-            // — would otherwise reach the parser as mojibake. `decodeModelBytes`
-            // decides on the MAGIC BYTES, so an uncompressed file still takes the
-            // plain UTF-8 path.
-            const bytes = new Uint8Array(await file.arrayBuffer());
-            // A dropped ZIP of CityGML takes the same container path as a
-            // catalog `application/zip` asset, decided the same way — on the
-            // magic bytes, since this path already holds them.
-            const zipped = isZipBytes(bytes);
-            const gzipped = !zipped && isGzipBytes(bytes);
-            const text = zipped ? "" : await decodeModelBytes(bytes);
-            const parsed: CityModel = zipped
-              ? parseCityGmlArchive(bytes, file.name)
-              : parseText(file.name, text, encoding);
-            // Fetch-and-gate the CRS while we are still async — a refusal here
-            // reads as a load error instead of a dead layer in the scene sync.
-            await ensureModelCrsLoadable(parsed);
-            layerId = addCityLayer({
-              name: file.name,
-              model: parsed,
-              modelRef: { type: "file", fileName: file.name },
-              visible: overrides?.visible,
-              rules: overrides?.rules,
-              colorBy: overrides?.colorBy,
-              singleColor: overrides?.singleColor,
-              unmatchedColor: overrides?.unmatchedColor,
-              hiddenTypes: overrides?.hiddenTypes,
-              attributeOrders: overrides?.attributeOrders,
-              tablePresentation: overrides?.tablePresentation,
-              selectedAppearance: overrides?.selectedAppearance,
-              duckdb: modelTableSource({
-                model: parsed,
-                // The array we ALREADY READ when nothing was gunzipped: a
-                // re-encode would duplicate the whole file in the JS heap, and
-                // `registerBuffer` is about to consume whichever array it gets.
-                bytes:
-                  zipped || encoding === "citygml"
-                    ? null
-                    : gzipped
-                      ? new TextEncoder().encode(text)
-                      : bytes,
-                encoding:
-                  encoding === "cityjsonseq"
-                    ? "cityjsonseq"
-                    : encoding === "citygml"
-                      ? "citygml"
-                      : "cityjson",
-                refetch: fileSourceProvider(file),
-              }),
-            });
-          }
-          applyPostCreateOverrides(layerId, overrides);
-          return layerId;
-        },
+        () =>
+          openCityLayer(
+            {
+              source: { kind: "file", file },
+              encoding: overrides?.encoding,
+              settings: settingsOf(overrides),
+            },
+            openDeps(),
+          ),
       ),
     [runTracked],
   );
@@ -431,38 +288,25 @@ export function useLayerFileLoader(
     (
       files: ReadonlyArray<File>,
       overrides?: LayerOverrides,
-    ): Promise<string | null> =>
-      runTracked(
+    ): Promise<string | null> => {
+      const name = packageNameFromFiles(files);
+      return runTracked(
         {
-          name: packageNameFromFiles(files),
-          source: packageNameFromFiles(files),
+          name,
+          source: name,
           fallback: "Failed to load the picked files.",
         },
-        async () => {
-          const name = packageNameFromFiles(files);
-          const model = await loadCityParquetFromFiles(files);
-          await ensureModelCrsLoadable(model);
-          const layerId = addCityLayer({
-            name,
-            model,
-            // The FOLDER is the source, so that is what a snapshot records as
-            // needing re-selection — no single file could re-link this layer.
-            modelRef: { type: "file", fileName: name },
-            visible: overrides?.visible,
-            rules: overrides?.rules,
-            colorBy: overrides?.colorBy,
-            singleColor: overrides?.singleColor,
-            unmatchedColor: overrides?.unmatchedColor,
-            hiddenTypes: overrides?.hiddenTypes,
-            attributeOrders: overrides?.attributeOrders,
-            tablePresentation: overrides?.tablePresentation,
-            selectedAppearance: overrides?.selectedAppearance,
-            duckdb: { kind: "model", model },
-          });
-          applyPostCreateOverrides(layerId, overrides);
-          return layerId;
-        },
-      ),
+        () =>
+          openCityLayer(
+            {
+              source: { kind: "files", files, name },
+              encoding: overrides?.encoding,
+              settings: settingsOf(overrides),
+            },
+            openDeps(),
+          ),
+      );
+    },
     [runTracked],
   );
 
@@ -474,62 +318,15 @@ export function useLayerFileLoader(
           source: url,
           fallback: "Failed to load remote file.",
         },
-        async () => {
-          const encoding = overrides?.encoding ?? detectEncoding(url);
-          if (encoding === "flatcitybuf") {
-            return await openStreamingLayer({
-              plugin: await resolveStreamPlugin.current(),
-              source: { url },
-              name: fileNameFromUrl(url),
-              modelRef: { type: "url", url },
-              attributeOrders: overrides?.attributeOrders,
-              tablePresentation: overrides?.tablePresentation,
-            });
-          }
-
-          // `isCityParquetUrl`, not `detectEncoding`: a bucket pattern or a
-          // package directory has no extension to detect. The predicate is TOTAL
-          // and answers true for an unlistable https wildcard as well, so the
-          // classifier's explanation of why it cannot be served is thrown from
-          // the load below and lands in `error` — which is the point.
-          //
-          // An OVERRIDE replaces the predicate outright rather than widening
-          // it: a `.parquet` URL corrected to CityJSON must leave this arm, and
-          // an extensionless package directory the classifier cannot see (a
-          // path with no trailing "/") must be able to enter it.
-          const isParquet =
-            overrides?.encoding !== undefined
-              ? overrides.encoding === "cityparquet"
-              : isCityParquetUrl(url);
-          if (isParquet) {
-            const model = await loadCityParquetFromUrl(url);
-            await ensureModelCrsLoadable(model);
-            return addCityLayer({
-              name: cityParquetLayerNameFromUrl(url),
-              model,
-              modelRef: { type: "url", url },
-              attributeOrders: overrides?.attributeOrders,
-              tablePresentation: overrides?.tablePresentation,
-              duckdb: { kind: "model", model },
-            });
-          }
-
-          const parsed = await loadFromUrl(url, undefined, encoding);
-          await ensureModelCrsLoadable(parsed.model);
-          return addCityLayer({
-            name: fileNameFromUrl(url),
-            model: parsed.model,
-            modelRef: { type: "url", url },
-            attributeOrders: overrides?.attributeOrders,
-            tablePresentation: overrides?.tablePresentation,
-            duckdb: modelTableSource({
-              model: parsed.model,
-              bytes: parsed.bytes,
-              encoding: parsed.encoding,
-              refetch: urlSourceProvider(url),
-            }),
-          });
-        },
+        () =>
+          openCityLayer(
+            {
+              source: { kind: "url", url },
+              encoding: overrides?.encoding,
+              settings: settingsOf(overrides),
+            },
+            openDeps(),
+          ),
       ),
     [runTracked],
   );

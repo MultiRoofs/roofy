@@ -37,6 +37,11 @@ import { AppearanceSelector } from "../sidebar/AppearanceSelector";
 import { LodSelector } from "../sidebar/LodSelector";
 import { formatCount } from "../table/tableText";
 import { KIND_LABEL, sourceOf } from "./geoLayerMeta";
+import {
+  useHasFamilies,
+  useOpenedFamilyRows,
+} from "../../features/layers/familyStore";
+import { LayerFamilies } from "./LayerFamilies";
 import { LayerTypeToggles } from "./LayerTypeToggles";
 import { CityObjectIcon } from "./CityObjectIcon";
 import { StreamingLodControl } from "./StreamingLodControl";
@@ -48,15 +53,38 @@ const SOURCE_MAX = 44;
 const STREAMING_LOD_LABEL =
   "Streaming level of detail (applies to every streaming layer)";
 
+/** What a bucket-indexed stream's extent is measured in, where the EPSG would
+ *  otherwise go. Not the origin's coordinates: those belong to the fetch-box
+ *  diagnostic, which is where a user compares numbers against a query. */
+const LOCAL_FRAME_UNITS = "local metric frame, metres";
+
 export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   const layerId = item.layer.id;
 
   // Always subscribed, branched on only below — see the module comment.
   const streamVersion = useStreamStore((s) => s.streams[layerId]?.version);
   const streamTypes = useStreamStore((s) => s.streams[layerId]?.types);
+  const streamObjectsCount = useStreamStore(
+    (s) => s.streams[layerId]?.header.objectsCount,
+  );
   const streamThemes = useStreamStore(
     (s) => s.streams[layerId]?.appearanceThemes,
   );
+  // Whether the stream indexes in a local metric ("bucket") frame instead of a
+  // metric CRS. The field, not the whole descriptor: the two numbers in it never
+  // change for an open stream, and a `?.` field selector keeps this a stable
+  // `undefined` for a static layer.
+  const streamFrame = useStreamStore((s) => s.streams[layerId]?.header.frame);
+  // The OPENED families' rows are the honest denominator for a package (the same
+  // rule the status bar uses), and their presence is also what tells a
+  // file-backed family table from a FlatCityBuf layer's resident one. Subscribed
+  // UNCONDITIONALLY, like every other selector here: the geo branch below returns
+  // early, and a hook after it would change this component's hook order.
+  const openedRows = useOpenedFamilyRows(layerId);
+  // Whether the table is FILE-backed, which is a property of the layer and not
+  // of the current reopen: `openedRows` is null while a failed reopen has nothing
+  // open, and the table is a family view either way.
+  const hasFamilies = useHasFamilies(layerId);
   const setCameraSync = useLayerStore((s) => s.setCameraSync);
   const [metadataOpen, setMetadataOpen] = useState(false);
   // The SYNC/FROZEN badge is labelled by the caption beside it rather than
@@ -85,6 +113,7 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
   const resident = streaming
     ? getResidentModel(layerId, streamVersion ?? 0)
     : null;
+  const total = openedRows ?? streamObjectsCount ?? null;
 
   return (
     <>
@@ -94,42 +123,65 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
           label="Format"
           value={encodingLabel(model.sourceEncoding)}
         />
-        <DefinitionRow label="CRS" value={crs ?? "Not stated"} />
+        {/* TWO FACTS, not one. `crs` is the source's own CRS — the honest
+            answer to "what CRS is this layer?" — but a geographic stream's
+            extent and record bboxes are metres about its dataset centre, not
+            coordinates in that CRS. Printing only the EPSG would label the
+            extent below in degrees it is not measured in. */}
+        <DefinitionRow
+          label="CRS"
+          value={
+            crs === null
+              ? "Not stated"
+              : streamFrame
+                ? `${crs} · indexed in a local metric frame`
+                : crs
+          }
+        />
         <DefinitionRow
           label="Extent"
-          value={extentLine(model.bbox, crs) ?? "Not stated"}
+          value={
+            extentLine(model.bbox, streamFrame ? LOCAL_FRAME_UNITS : crs) ??
+            "Not stated"
+          }
         />
+      </dl>
+
+      {/* What is IN the layer. A streaming layer's objects arrive cell by
+          cell, so it lists the types discovered so far rather than
+          per-type counts of the resident cache read as the dataset's. */}
+      <div className="active-layer-group">
+        <h4 className="active-layer-group-title">Objects</h4>
         {resident && (
-          // Never "buildings": one FlatCityBuf feature can carry a Building
-          // plus several BuildingParts, so a building count would not add up
-          // against anything. The tooltip is the layer row's, verbatim — it
-          // is what stops this number being read as "what's on screen".
-          <DefinitionRow
-            label="Resident cache"
-            value={`${formatCount(resident.featureCount)} ${plural(
-              resident.featureCount,
-              "feature",
-            )} · ${formatCount(resident.cellCount)} ${plural(
-              resident.cellCount,
-              "cell",
-            )}`}
+          // "Objects", never "buildings": a Building's parts are objects too,
+          // so a building count would not add up against anything. The
+          // dataset's size is given only where the stream's header states it
+          // (CityParquet); a FlatCityBuf header counts features, not objects.
+          // The tooltip keeps the cache's own numbers and says the loaded set
+          // includes a margin around the view.
+          <p
+            className="active-layer-note"
             title={`Resident cache: ${resident.featureCount} ${plural(
               resident.featureCount,
-              "feature",
+              "object",
             )} loaded across ${resident.cellCount} resident ${plural(
               resident.cellCount,
               "cell",
-            )}. Reflects what's currently held in memory — including a margin around the viewport and cells not yet evicted — not exactly what's on screen right now.`}
-          />
+            )}. Includes a margin around the viewport and cells not yet evicted.`}
+          >
+            {`Showing the objects in view — ${formatCount(resident.featureCount)}${
+              total !== null ? ` of ${formatCount(total)}` : ""
+            } loaded. ${
+              // A FAMILY's table is a view over the FILE (ruling R-B′), so it
+              // answers for rows the camera never delivered: what is partial is
+              // the SCENE, not the table. A FlatCityBuf layer's table really is
+              // built from the resident set, and keeps the older sentence.
+              hasFamilies
+                ? "The table and statistics cover the whole family, whatever is on screen."
+                : "The table and statistics cover loaded objects only."
+            }`}
+          </p>
         )}
-      </dl>
-
-      {/* What is IN the layer. A streaming layer has no total to give — its
-          objects arrive cell by cell — so it lists the types discovered so
-          far and says where a count would come from, rather than printing
-          the resident cache's numbers as if they were the dataset's. */}
-      <div className="active-layer-group">
-        <h4 className="active-layer-group-title">Objects</h4>
         {streaming ? (
           <p
             className="active-layer-note"
@@ -144,6 +196,14 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
         )}
       </div>
 
+      {/* ABOVE Object visibility, and a block of its own: a family is OPENED
+          (its file is streaming, its table can be browsed either way), a type
+          is VISIBLE. One block that mixed them would make "hide Bridge" and
+          "close the bridge family" read as the same act. Renders nothing for
+          every layer that has no families, which is all but a streamed
+          CityParquet package. */}
+      <LayerFamilies layerId={layerId} />
+
       <div className="active-layer-group active-layer-types">
         <h4 className="active-layer-group-title">Object visibility</h4>
         <LayerTypeToggles layer={layer} expanded />
@@ -156,7 +216,7 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
             <StreamingLodControl label={STREAMING_LOD_LABEL} />
           ) : (
             layer.availableLods.length > 0 && (
-              <div className="active-layer-control">
+              <div className="active-layer-control active-layer-control--lod">
                 <span className="active-layer-control-label">
                   Level of detail
                 </span>
@@ -164,7 +224,8 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
                   layerId={layerId}
                   availableLods={layer.availableLods}
                   selectedLod={layer.selectedLod}
-                  isStreaming={false}
+                  selectedLods={layer.selectedLods}
+                  access="resident"
                   lodMode={layer.lodMode}
                 />
               </div>

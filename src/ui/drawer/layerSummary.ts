@@ -1,5 +1,5 @@
 import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import type { CityObject } from "../../domain/citymodel/types";
 
 export interface SummaryBin {

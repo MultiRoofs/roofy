@@ -12,7 +12,11 @@
  * `runQuery`/`ddl` from `insights/duckdb.ts`.
  */
 
-import { isTextColumn, type ColumnInfo } from "./columnKind";
+import {
+  isTextColumn,
+  readerTableSelectList,
+  type ColumnInfo,
+} from "./columnKind";
 import type {
   FilterCondition,
   FilterGroup,
@@ -641,9 +645,8 @@ export function exportColumnNames(
  * `COPY (SELECT …) TO '<file>' (FORMAT …)` for the attribute formats.
  *
  * See {@link exportProjection} for why a file's projection is not the grid's.
- *
- * NOT offered here, and never to be added without re-probing: `FORMAT cityjson
- * | cityjsonseq | flatcitybuf` write ZERO BYTES in wasm, silently.
+ * The geometry formats are {@link buildGeometryExportSql}: they need the
+ * source, which this table does not hold.
  */
 export function buildAttributeExportSql(input: {
   readonly table: string;
@@ -713,6 +716,52 @@ export const CITYPARQUET_SOURCE_TABLE = "src";
 const CITYPARQUET_COMPUTED_ALIAS = "computed";
 
 /**
+ * The layer table's computed columns, joined onto a re-read of its source.
+ *
+ * A DERIVED table, not the layer table itself, and joined with USING: the
+ * derived side carries `id` and the computed columns and nothing else, so
+ * `feature_id` stays unambiguous, `USING` leaves ONE `id`, and the scope
+ * predicates need no qualifying. An empty computed list emits no join at all.
+ */
+function computedJoin(table: string, computed: ReadonlyArray<string>): string {
+  return computed.length === 0
+    ? ""
+    : ` LEFT JOIN (SELECT ${["id", ...computed]
+        .map(quoteIdent)
+        .join(", ")} FROM ${quoteIdent(table)}) AS ${quoteIdent(
+        CITYPARQUET_COMPUTED_ALIAS,
+      )} USING (${quoteIdent("id")})`;
+}
+
+/**
+ * The user's filter and a derived layer's cut, as conditions over a re-read
+ * of the source.
+ *
+ * The derived cut is over the READER's own rows, so it is a plain
+ * `COALESCE(...) IN (...)` and not another `buildFeatureScopeWhere` (which
+ * subqueries the layer TABLE — correct for the user's filter, circular here).
+ * An empty id list is spelled `FALSE`: `IN ()` is a syntax error.
+ */
+function sourceScopeConditions(
+  table: string,
+  where: string | null,
+  ids: ReadonlyArray<string> | null,
+): string[] {
+  const scope = buildFeatureScopeWhere(table, where);
+  const cut =
+    ids === null
+      ? null
+      : ids.length === 0
+        ? "FALSE"
+        : `COALESCE("feature_id", "id") IN (${ids.map((id) => quoteLiteral(id)).join(", ")})`;
+  return [scope, cut].filter((c): c is string => c !== null);
+}
+
+function whereOf(conditions: ReadonlyArray<string>): string {
+  return conditions.length === 0 ? "" : ` WHERE ${conditions.join(" AND ")}`;
+}
+
+/**
  * ONE read of the re-registered source, filtered to the export's feature scope.
  *
  * The source is read again (rather than the layer's browsing table being
@@ -733,9 +782,8 @@ const CITYPARQUET_COMPUTED_ALIAS = "computed";
  * bind-time failure mode for an LoD spelled differently than the file spells it.
  *
  * `lodSuffix` is the exact text after `geometry_lod` in the SOURCE'S OWN column
- * name — "0_0", "2_2" — never a label put through string surgery: the reader
- * spells Delft's LoD 0 as `geometry_lod0_0` while another file may spell the
- * same rung `geometry_lod0`, so only the column list can say which it is.
+ * name — "0_0", "2_2" — `LodColumn.suffix`, never a label put through string
+ * surgery.
  *
  * The whole select list is DEDUPED. A caller's attribute list is chosen from
  * the layer's columns, which include the required names and the geometry pair,
@@ -790,32 +838,10 @@ export function buildCityParquetSourceSql(input: {
     (name) => !fromTable.has(name.toLowerCase()),
   );
   const select = [...fromReader, ...computed].map(quoteIdent).join(", ");
-  // A DERIVED table, not the layer table itself, and joined with USING: the
-  // derived side carries `id` and the computed columns and nothing else, so
-  // `feature_id` stays unambiguous, `USING` leaves ONE `id`, and the scope
-  // predicate below needs no qualifying. An empty computed list emits no join
-  // at all — the statement the reader path has always sent.
-  const join =
-    computed.length === 0
-      ? ""
-      : ` LEFT JOIN (SELECT ${["id", ...computed]
-          .map(quoteIdent)
-          .join(", ")} FROM ${quoteIdent(input.table)}) AS ${quoteIdent(
-          CITYPARQUET_COMPUTED_ALIAS,
-        )} USING (${quoteIdent("id")})`;
-  const scope = buildFeatureScopeWhere(input.table, input.where);
-  // The derived filter is over the READER's own rows, so it is a plain
-  // `COALESCE(...) IN (...)` and not another `buildFeatureScopeWhere` (which
-  // subqueries the layer TABLE — correct for the user's filter, circular here).
-  const ids = input.sourceFeatureIds;
-  const cut =
-    ids === null
-      ? null
-      : ids.length === 0
-        ? "FALSE"
-        : `COALESCE("feature_id", "id") IN (${ids.map((id) => quoteLiteral(id)).join(", ")})`;
-  const both = [scope, cut].filter((c): c is string => c !== null);
-  const whereClause = both.length === 0 ? "" : ` WHERE ${both.join(" AND ")}`;
+  const join = computedJoin(input.table, computed);
+  const whereClause = whereOf(
+    sourceScopeConditions(input.table, input.where, input.sourceFeatureIds),
+  );
   return `CREATE TABLE ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} AS SELECT ${select} FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${join}${whereClause}`;
 }
 
@@ -843,4 +869,181 @@ export function buildCityParquetModuleSql(input: {
       ? "FALSE"
       : buildRootTypeWhere(input.table, input.moduleTypes);
   return `CREATE TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.module)} AS SELECT * FROM ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} WHERE ${modulePredicate}`;
+}
+
+export type GeometryExportFormat = "cityjson" | "cityjsonseq" | "flatcitybuf";
+
+/**
+ * The reader's own columns a geometry writer turns back into CityObject
+ * members: identity and hierarchy, `bbox` as the geographical extent,
+ * `address`, `implicit_geometry` as a GeometryInstance, and `other`'s members
+ * as attributes. They are always present in the reader's output.
+ */
+export const GEOMETRY_EXPORT_READER_COLUMNS: ReadonlyArray<string> = [
+  ...CITYPARQUET_REQUIRED_COLUMNS,
+  "address",
+  "implicit_geometry",
+  "other",
+];
+
+/** The extension's LoD suffix grammar: `<major>_<minor>`, both canonical
+ *  decimals. */
+const LOD_SUFFIX = /^(0|[1-9][0-9]*)_(0|[1-9][0-9]*)$/;
+
+/** What {@link buildGeometryExportSql} reads: the source, scoped. */
+export interface GeometryExportScope {
+  readonly reader: "read_cityjson" | "read_cityjsonseq";
+  readonly sourceFile: string;
+  readonly table: string;
+  /** The chosen LoD's suffix, or `null` for a layer with no per-LoD geometry
+   *  (one drawn only through implicit geometries). */
+  readonly lodSuffix: string | null;
+  readonly attributes: ReadonlyArray<string>;
+  /**
+   * As in {@link buildCityParquetSourceSql}: on the layer table only, so
+   * joined in by id. A computed name must not also be a reader column — the
+   * tools refuse one that belongs to the source data — or both would be
+   * written.
+   */
+  readonly computedAttributes: ReadonlyArray<string>;
+  readonly where: string | null;
+  readonly sourceFeatureIds: ReadonlyArray<string> | null;
+  readonly rootTypes: ReadonlyArray<string> | null;
+}
+
+/** The scoped source as `FROM … [JOIN …] [WHERE …]`. */
+function geometryExportFrom(input: GeometryExportScope): string {
+  const computed = [...new Set(input.computedAttributes)];
+  const conditions = sourceScopeConditions(
+    input.table,
+    input.where,
+    input.sourceFeatureIds,
+  );
+  if (input.rootTypes !== null) {
+    conditions.push(buildRootTypeWhere(input.table, input.rootTypes));
+  }
+  return `FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${computedJoin(input.table, computed)}${whereOf(conditions)}`;
+}
+
+/**
+ * A CityJSON, CityJSONSeq or FlatCityBuf file of the export's features, in
+ * ONE statement: the re-registered source goes straight through the
+ * extension's `COPY` writer, with no scratch table in between.
+ *
+ * The chosen LoD's column group is selected by PATTERN, so its material and
+ * texture columns travel when the source has them and are simply absent when
+ * it does not — the browsing table drops them, so it cannot say which. The
+ * `metadata_from` names the same registered source: the writer then carries its
+ * CRS, transform, appearance definitions and geometry templates across.
+ *
+ * `other` travels whole, whatever the attribute selection: it holds the
+ * attributes the reader could not give a column of their own.
+ *
+ * `rootTypes` is `null` for "every type": that predicate is a subquery over the
+ * whole layer table, and paying for it to keep every row is pure cost.
+ */
+export function buildGeometryExportSql(
+  input: GeometryExportScope & {
+    readonly format: GeometryExportFormat;
+    readonly outFile: string;
+  },
+): string {
+  // Spliced into a regular expression, so anything outside the grammar is a
+  // refusal rather than a pattern that matches something else.
+  if (input.lodSuffix !== null && !LOD_SUFFIX.test(input.lodSuffix)) {
+    throw new Error(
+      `"${input.lodSuffix}" is not an LoD column suffix, so no geometry can be chosen for the export.`,
+    );
+  }
+  const names = [
+    ...new Set([
+      ...GEOMETRY_EXPORT_READER_COLUMNS,
+      ...input.attributes,
+      ...input.computedAttributes,
+    ]),
+  ];
+  const byName = `c IN (${names.map((n) => quoteLiteral(n)).join(", ")})`;
+  const lodGroup =
+    input.lodSuffix === null
+      ? ""
+      : ` OR regexp_matches(c, ${quoteLiteral(`^(geometry|geometry_properties|material|texture)_lod${input.lodSuffix}$`)})`;
+  const source = quoteLiteral(input.sourceFile);
+  return `COPY (SELECT COLUMNS(c -> ${byName}${lodGroup}) ${geometryExportFrom(input)}) TO ${quoteLiteral(input.outFile)} (FORMAT ${input.format}, metadata_from ${source})`;
+}
+
+/**
+ * How many of the exported objects carry an implicit geometry and an address
+ * — the two members a FlatCityBuf file cannot hold.
+ */
+export function buildFlatCityBufLossSql(input: GeometryExportScope): string {
+  return `SELECT count(*) FILTER (WHERE "implicit_geometry" IS NOT NULL) AS "implicit", count(*) FILTER (WHERE len("address") > 0) AS "address" ${geometryExportFrom(input)}`;
+}
+
+// ---------------------------------------------------------------------------
+// A static CityParquet package's table
+// ---------------------------------------------------------------------------
+
+/**
+ * Every object table of a package in ONE table, matched by column name: the
+ * reserved columns are the same in every family, and an attribute only one
+ * family has is NULL in the others' rows. The reader builds' select list, so
+ * the geometry is left out and the LoD markers are made.
+ */
+export function buildParquetTableSql(
+  table: string,
+  files: ReadonlyArray<string>,
+): string {
+  const list = files.map((name) => quoteLiteral(name)).join(", ");
+  return `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT ${readerTableSelectList()} FROM read_parquet([${list}], union_by_name = true)`;
+}
+
+/** The merged JSON structure of a table's `other` column, as text. */
+export function buildOtherStructureSql(table: string): string {
+  return `SELECT json_group_structure("other")::VARCHAR AS "s" FROM ${quoteIdent(table)}`;
+}
+
+/**
+ * Rebuild `table` with each member of `other` as a column of its own, or
+ * `null` when no member can come out.
+ *
+ * `structure` is {@link buildOtherStructureSql}'s answer. A member whose name
+ * is taken — by a column, or by another member differing only in case, since
+ * DuckDB's names are case-insensitive — stays packed: `unnest` would otherwise
+ * silently REPLACE the column of that name. `other` itself is dropped only
+ * when every member came out.
+ */
+export function buildUnpackOtherSql(
+  table: string,
+  columns: ReadonlyArray<string>,
+  structure: string | null,
+): string | null {
+  if (structure === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(structure);
+  } catch {
+    return null;
+  }
+  // "NULL" for an all-NULL column, "JSON" for members that are not objects.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  const taken = new Set(columns.map((c) => c.toLowerCase()));
+  const seen = new Map<string, number>();
+  for (const [key] of entries) {
+    const lower = key.toLowerCase();
+    seen.set(lower, (seen.get(lower) ?? 0) + 1);
+  }
+  const unpacked = Object.create(null) as Record<string, unknown>;
+  let packed = false;
+  for (const [key, type] of entries) {
+    const lower = key.toLowerCase();
+    if (taken.has(lower) || (seen.get(lower) ?? 0) > 1) packed = true;
+    else unpacked[key] = type;
+  }
+  if (Object.keys(unpacked).length === 0) return null;
+  const t = quoteIdent(table);
+  const keep = packed ? "*" : `* EXCLUDE (${quoteIdent("other")})`;
+  return `CREATE OR REPLACE TABLE ${t} AS SELECT ${keep}, unnest(json_transform(${quoteIdent("other")}, ${quoteLiteral(JSON.stringify(unpacked))})) FROM ${t}`;
 }

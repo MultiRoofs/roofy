@@ -36,6 +36,25 @@ export interface EligibilityContext {
   readonly extensionState: Readonly<
     Record<"spatial" | "three_d", "unloaded" | "loading" | "loaded" | "failed">
   >;
+  /**
+   * The CRS the target's ACTIVE table measures in (`LayerTable.sourceCrs`,
+   * ruling R-G), or `null` when nothing recorded one.
+   *
+   * Only a file-backed CityParquet family view records it today, which is
+   * exactly the case ruling S2 is about: the view reads the FILE, so its `bbox`
+   * columns are the file's own coordinates — degrees for a PLATEAU package —
+   * rather than the metres the scene is drawn in.
+   */
+  readonly activeTableCrs: string | null;
+  /**
+   * Whether {@link activeTableCrs} is metre-based. `null` is NO CLAIM, which is
+   * every layer whose table carries no CRS — so nothing that worked before this
+   * ruling is refused by it.
+   *
+   * Resolved by the caller (`eligibilityContextFor`) rather than here, because
+   * the answer needs proj4's registry and this module stays a pure predicate.
+   */
+  readonly activeTableCrsMetric: boolean | null;
 }
 
 const ENCODING_LABEL: Readonly<Record<EncodingName, string>> = {
@@ -106,5 +125,33 @@ export function toolEligibility(
   if (ctx.tableState === "failed") {
     return { ok: false, reason: "This layer's table could not be built" };
   }
+  // Ruling S2, LAST of the reasons: it is about the table's coordinates, so
+  // every reason that says the table is not even usable outranks it.
+  const metric = metricBoundsRefusal(tool, ctx);
+  if (metric !== null) return { ok: false, reason: metric };
   return { ok: true };
+}
+
+/**
+ * Ruling S2's sentence, or `null` when the tool may run.
+ *
+ * Exported because the refusal is a statement about a TABLE, and the table a
+ * run measures is not always the target's: Aggregate buildings per area writes
+ * to a vector layer and reads a CITY layer, whose row in the source select has
+ * to carry the same sentence (`useToolForm`).
+ *
+ * "Temporary" is part of the message on purpose: the bounds are not wrong, they
+ * are in the file's own CRS, and the next milestone makes the coordinate story
+ * coherent. A user told only "not supported" would go looking for a different
+ * file.
+ */
+export function metricBoundsRefusal(
+  tool: Pick<ToolDefinition, "needsMetricBounds">,
+  ctx: Pick<EligibilityContext, "activeTableCrs" | "activeTableCrsMetric">,
+): string | null {
+  if (!tool.needsMetricBounds) return null;
+  if (ctx.activeTableCrsMetric !== false) return null;
+  return `This layer's table measures ${
+    ctx.activeTableCrs ?? "an unknown CRS"
+  }, which is not metre-based; temporary, until CityParquet coordinates are reworked`;
 }

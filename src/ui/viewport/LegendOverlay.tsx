@@ -58,7 +58,7 @@ export function LegendOverlay() {
   const residents = useMemo(() => {
     const next = new Map();
     for (const layer of layers) {
-      if (!layer.isStreaming) continue;
+      if (layer.source.access !== "stream") continue;
       next.set(
         layer.id,
         getResidentModel(layer.id, streams[layer.id]?.version ?? 0),
@@ -144,9 +144,13 @@ export function LegendOverlay() {
                     style={{ background: row.color }}
                   />
                   <span>{row.label}</span>
-                  <span className="legend-count">
-                    {row.count === null ? "Unavailable" : row.count}
-                  </span>
+                  {/* An expression's surfaces are not counted: it has
+                      no categories to count them into. */}
+                  {row.kind !== "expression" && (
+                    <span className="legend-count">
+                      {row.count === null ? "Unavailable" : row.count}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

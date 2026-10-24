@@ -4,24 +4,50 @@
  *
  * `ResidentObjectRecord` (the payload shipped for every resident cell)
  * deliberately excludes `Surface.rings` — see the doc comment on
- * `ResidentObjectRecord` in the plugin's workerProtocol. The two main-thread
- * consumers that need rings (rooftop solar scoring, and the
- * Surfaces tab) act on exactly one selected object at a time, so this hook
+ * `ResidentObjectRecord` in the plugin's workerProtocol. A consumer that
+ * needs rings acts on exactly one selected object at a time, so this hook
  * fetches rings for that one object lazily instead of shipping every object's
  * full geometry on every cell fetch/recolor.
+ *
+ * `useObjectSurfaces` currently has NO production caller — only its own test.
+ * The processing toolbox's streaming branch reads
+ * `ResidentObjectRecord.roofMetrics`, which the worker computed in the
+ * owning cell's level frame, and nothing else asks for rings. This is a
+ * capability kept correct for its first consumer, not a hook in use; whoever
+ * wires one must read `frame` below before treating a ring as a POSITION.
  *
  * Static (non-streaming) layers never use this — `CityObject.surfaces` is
  * already resident and synchronous, so callers keep using it directly and
  * only reach for this hook (with a non-null handle) for streaming layers.
  */
-import { useEffect, useState } from "react";
-import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
+import { useEffect, useRef, useState } from "react";
+import type {
+  CellEnuFrameDescriptor,
+  StreamLayerHandle,
+} from "@cityjson/navara-stream";
 import type { Surface } from "../../domain/citymodel/types";
+import { useStreamStore } from "./streamStore";
 
 export type SurfacesFetchState =
   | { readonly status: "empty" }
   | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly surfaces: ReadonlyArray<Surface> }
+  | {
+      readonly status: "ready";
+      readonly surfaces: ReadonlyArray<Surface>;
+      /**
+       * The ENU frame {@link surfaces}' ring coordinates are metres in, or
+       * `null` for the layer's source CRS.
+       *
+       * Not a property of the layer: since the geographic-to-ENU milestone a
+       * GEOGRAPHIC stream is baked per cell, so an object's rings are the
+       * owning CELL's local metres and which cell that is, is the worker's
+       * business. Area, slope and azimuth are frame-independent and need none
+       * of this (a level cell frame in fact measures them better than a
+       * projection, which carries a scale factor and a grid convergence);
+       * anything that PLACES a ring does.
+       */
+      readonly frame: CellEnuFrameDescriptor | null;
+    }
   | { readonly status: "error"; readonly message: string };
 
 /**
@@ -32,28 +58,51 @@ export type SurfacesFetchState =
  * caller-side conditional hook call.
  */
 export function useObjectSurfaces(
-  handle: FcbStreamLayerHandle | null,
+  handle: StreamLayerHandle | null,
   objectId: string | null,
 ): SurfacesFetchState {
   const [state, setState] = useState<SurfacesFetchState>({ status: "empty" });
+  // The handle's commit counter: a commit (a LoD switch refetches every cell)
+  // can change the object's resident surfaces, so it re-runs the fetch. Found
+  // by handle identity because the hook is given no layer id; a primitive, so
+  // another layer's commit does not re-render this one.
+  const streamVersion = useStreamStore((s) => {
+    if (!handle) return undefined;
+    for (const entry of Object.values(s.streams)) {
+      if (entry.handle === handle) return entry.version;
+    }
+    return undefined;
+  });
+  // What the last fetch was FOR. A commit-driven refetch of the same object
+  // keeps the surfaces on screen until the new ones land instead of flashing
+  // "Loading" on every camera settle.
+  const fetchedFor = useRef<{
+    handle: StreamLayerHandle;
+    objectId: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!handle || !objectId) {
+      fetchedFor.current = null;
       setState({ status: "empty" });
       return;
     }
 
     let cancelled = false;
-    setState({ status: "loading" });
+    const sameObject =
+      fetchedFor.current?.handle === handle &&
+      fetchedFor.current.objectId === objectId;
+    fetchedFor.current = { handle, objectId };
+    if (!sameObject) setState({ status: "loading" });
 
     // No response-shape branch any more: `fetchSurfaces` types its result and
     // REJECTS both for a worker error and for an object that is not resident
     // in any cached cell, so every failure arrives on the one path below.
     handle
       .fetchSurfaces(objectId)
-      .then((surfaces) => {
+      .then(({ surfaces, frame }) => {
         if (cancelled) return; // objectId/handle changed or unmounted — stale
-        setState({ status: "ready", surfaces });
+        setState({ status: "ready", surfaces, frame });
       })
       .catch((err: unknown) => {
         // A layer removed mid-request terminates its WorkerClient, which
@@ -71,7 +120,7 @@ export function useObjectSurfaces(
     return () => {
       cancelled = true;
     };
-  }, [handle, objectId]);
+  }, [handle, objectId, streamVersion]);
 
   return state;
 }

@@ -1,11 +1,8 @@
 /**
  * Per-layer LoD selector.
  *
- * For a static (non-streaming) layer this is unchanged from before: a
- * plain, always-interactive dropdown of the LoDs present in the model.
- * `Layer.lodMode` has no effect on a static layer's rendering — `handleSync`
- * only ever pushes `selectedLod` into `CityModelHandle.setLod` — so the
- * dropdown ignores it rather than gating on a mode that does nothing here.
+ * Static layers select multiple LoDs; each object draws only its highest
+ * selected representation. Streaming keeps its existing zoom-driven policy.
  *
  * For a streaming layer, `lodMode` DOES matter: "auto" hands the choice to
  * the viewport-streaming driver (commitPlanner.ts's `resolveLod`), which
@@ -19,18 +16,21 @@
  */
 
 import { useLayerStore } from "../../features/layers/layerStore";
+import type { SourceCapabilities } from "../../features/layers/cityLayerSource";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import {
   cellSize,
   lodForCellSize,
   type LodSelection,
-} from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
 
 interface LodSelectorProps {
   readonly layerId: string;
   readonly availableLods: ReadonlyArray<string>;
   readonly selectedLod: string | null;
-  readonly isStreaming: boolean;
+  readonly selectedLods?: readonly string[];
+  /** A streamed layer picks its LoD from the stream's ladder. */
+  readonly access: SourceCapabilities["access"];
   readonly lodMode: "auto" | "manual";
 }
 
@@ -38,9 +38,11 @@ export function LodSelector({
   layerId,
   availableLods,
   selectedLod,
-  isStreaming,
+  selectedLods,
+  access,
   lodMode,
 }: LodSelectorProps) {
+  const setLayerLods = useLayerStore((s) => s.setLayerLods);
   const setLayerLod = useLayerStore((s) => s.setLayerLod);
   const setLodMode = useLayerStore((s) => s.setLodMode);
 
@@ -56,24 +58,41 @@ export function LodSelector({
 
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
-  if (!isStreaming) {
+  if (access !== "stream") {
     if (availableLods.length === 0) return null;
+    const selected =
+      selectedLods ?? (selectedLod === null ? availableLods : [selectedLod]);
     return (
-      <select
-        className="lod-select"
-        value={selectedLod ?? ""}
-        onChange={(e) => setLayerLod(layerId, e.target.value || null)}
-        onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-        title="Level of Detail"
-      >
-        {availableLods.map((lod) => (
-          <option key={lod} value={lod}>
-            LoD {lod}
-          </option>
-        ))}
-      </select>
+      <div className="lod-multiselect" onClick={stop} onPointerDown={stop}>
+        <div
+          className="layer-types-list"
+          role="group"
+          aria-label="Levels of detail"
+        >
+          {availableLods.map((lod) => (
+            <label className="layer-types-item" key={lod}>
+              <input
+                type="checkbox"
+                checked={selected.includes(lod)}
+                onChange={() =>
+                  setLayerLods(
+                    layerId,
+                    selected.includes(lod)
+                      ? selected.filter((value) => value !== lod)
+                      : [...selected, lod],
+                  )
+                }
+              />
+              LoD {lod}
+            </label>
+          ))}
+        </div>
+        <p className="active-layer-note">
+          {selected.length === 0
+            ? "No LoDs selected. Nothing is shown."
+            : "Shows each object's highest selected LoD available."}
+        </p>
+      </div>
     );
   }
 

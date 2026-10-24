@@ -14,6 +14,10 @@
  * that one fails a run whose fake executor never started, this one fails the
  * SECOND roof run while the first is inside the real executor's own read.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -253,6 +257,23 @@ vi.mock("../../../../src/insights/layerTables", async () => {
       adopted.set(layerId, info);
     }),
     getLayerTable: vi.fn(() => tableInfo),
+    // The composite-key helpers `runQueue` reads (R-C′), spelled here rather
+    // than imported: the real module reaches DuckDB at module scope. Its own
+    // round trip is pinned in `tests/unit/insights/layerTableKeys`.
+    layerTableKey: (layerId: string, family: string | null) =>
+      family === null ? layerId : `${layerId}::${family}`,
+    parseTableKey: (key: string) => {
+      const at = key.indexOf("::");
+      return at === -1
+        ? { layerId: key, family: null }
+        : { layerId: key.slice(0, at), family: key.slice(at + 2) };
+    },
+    resolveActiveTable: vi.fn((layerId: string) => {
+      const info = tableInfo;
+      return info === null
+        ? null
+        : { key: layerId, layerId, familyKey: null, info };
+    }),
     runOnTableQueue: vi.fn(<T>(task: () => Promise<T>): Promise<T> => {
       const next = chain.then(task, task);
       chain = next.then(
@@ -432,7 +453,7 @@ function streamingLayer(): Layer {
   return {
     ...layer(),
     model: cityModel({}),
-    isStreaming: true,
+    source: STREAMED_SOURCE,
     modelRef: { type: "url", url: "https://x/delft.fcb" },
   };
 }
@@ -457,7 +478,7 @@ function layer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     derivedFrom: null,
   };
 }

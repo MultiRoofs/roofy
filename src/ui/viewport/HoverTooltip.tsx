@@ -10,7 +10,11 @@ function surfaceName(type: string): string {
   return type.replace(/Surface$/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
-function orientation(azimuth: number): string {
+/** `null` is "no aspect" (core answers that below `FLAT_INCLINATION_DEG` of
+ *  inclination), and `Math.round(null / 45)` would have printed it as due
+ *  north. */
+function orientation(azimuth: number | null): string {
+  if (azimuth === null) return "flat";
   const labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   return labels[Math.round(azimuth / 45) % labels.length]!;
 }
@@ -25,7 +29,7 @@ export function HoverTooltip() {
     const layer = layers.find((candidate) => candidate.id === hovered.layerId);
     if (layer === undefined) return null;
 
-    if (layer.isStreaming) {
+    if (layer.source.access === "stream") {
       const resident = getResidentModel(
         layer.id,
         streams[layer.id]?.version ?? 0,

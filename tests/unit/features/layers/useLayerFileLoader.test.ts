@@ -10,16 +10,16 @@ import { renderHook, act } from "@testing-library/react";
 import { gzipSync } from "node:zlib";
 import { zipSync, strToU8 } from "fflate";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
-import { classifyCityParquetUrl } from "../../../../src/features/cityparquet/sourceClassify";
+import { classifyCityParquetUrl } from "../../../../src/domain/citymodel/formats/cityParquetUrl";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { useLayerFileLoader } from "../../../../src/features/layers/useLayerFileLoader";
 import { setStreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
-import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
-import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
+import type { StreamLayerHandle } from "@cityjson/navara-stream";
+import type { StreamHeader } from "@cityjson/navara-stream";
 
-/** The CityParquet READER is faked, its ROUTING is not: `sourceClassify` and
+/** The CityParquet READER is faked, its ROUTING is not: `cityParquetUrl` and
  *  `cityParquetLayerNameFromUrl` stay real (that is what decides which arm a
  *  URL takes and what the layer is called), while the two I/O entry points are
  *  replaced — parsing real parquet bytes is `navara-cityparquet`'s own test. */
@@ -57,6 +57,21 @@ vi.mock("../../../../src/insights/layerTables", () => ({
   // two; the graph under test imports them whether or not this file calls one.
   nextTableName: vi.fn(() => "layer_99"),
   adoptLayerTable: vi.fn(),
+  hasFileBackedTable: vi.fn(() => false),
+  // The family store asks the REGISTRY whether a view really exists before it
+  // (re)builds one — never its own `table` state, which an engine death leaves
+  // behind. Nothing is registered in this suite, so: none.
+  getLayerTable: vi.fn(() => null),
+  onEngineRetry: vi.fn(() => () => {}),
+  layerTableKey: (layerId: string, family: string | null) =>
+    family === null ? layerId : `${layerId}::${family}`,
+}));
+// A streamed CityParquet layer ensures its ACTIVE family's view as it opens
+// (ruling S3). No DuckDB here, so it simply succeeds.
+vi.mock("../../../../src/insights/familyViews", () => ({
+  ensureFamilyView: vi.fn(async () => ({ ok: true }) as const),
+  dropFamilyView: vi.fn(async () => {}),
+  dropFamilyViews: vi.fn(async () => {}),
 }));
 
 /**
@@ -100,6 +115,28 @@ vi.mock(
   }),
 );
 
+/**
+ * The static-or-stream DECISION is faked (its own suite is
+ * `streamDecision.test.ts`): static by default, so every CityParquet test
+ * below keeps today's whole-file path and nothing probes a real server; the
+ * streaming tests flip it.
+ */
+const decision = vi.hoisted(() => ({
+  decideCityParquetMode: vi.fn<(input: unknown) => Promise<unknown>>(
+    async () => ({ mode: "static" }),
+  ),
+}));
+
+vi.mock(
+  "../../../../src/features/cityparquet/streamDecision",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../src/features/cityparquet/streamDecision")
+    >()),
+    decideCityParquetMode: decision.decideCityParquetMode,
+  }),
+);
+
 const PARQUET_MODEL: CityModel = {
   sourceEncoding: "cityparquet",
   metadata: { referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/28992" },
@@ -108,7 +145,15 @@ const PARQUET_MODEL: CityModel = {
   vertexCount: 0,
 };
 
-const HEADER: FcbHeaderModel = {
+/** What the loader resolves: the model, and the tables its DuckDB table is
+ *  read from. */
+const PARQUET_LOADED = {
+  model: PARQUET_MODEL,
+  tables: [{ bytes: new Uint8Array([1]) }],
+  sourceCrs: null,
+};
+
+const HEADER: StreamHeader = {
   version: "1.0",
   featuresCount: 10,
   extent: [0, 0, 0, 100, 100, 10],
@@ -118,14 +163,14 @@ const HEADER: FcbHeaderModel = {
 
 /** The engine is faked at the plugin seam, not at `Worker`: `openStream` now
  *  owns the worker, admission, the CRS gate and the vertical datum, and the
- *  real `FlatCityBufPlugin` cannot be imported under Node at all (Global
+ *  real `CityStreamPlugin` cannot be imported under Node at all (Global
  *  Constraints -> NODE_IMPORT_SAFE = false). */
 let openStream: ReturnType<typeof vi.fn>;
 
 /** The handle `openStream` resolves with. Named so a test that has to control
  *  WHEN the open resolves (the pending-row tests) can hand back the same shape
  *  the default fake would have. */
-function fakeHandle(id: string): FcbStreamLayerHandle {
+function fakeHandle(id: string): StreamLayerHandle {
   return {
     id,
     grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 3 },
@@ -142,7 +187,7 @@ function fakeHandle(id: string): FcbStreamLayerHandle {
     onAppearanceThemes: () => () => {},
     appearanceThemes: [],
     onCommit: () => () => undefined,
-  } as unknown as FcbStreamLayerHandle;
+  } as unknown as StreamLayerHandle;
 }
 
 function installPlugin(): void {
@@ -155,6 +200,8 @@ function installPlugin(): void {
 beforeEach(() => {
   installPlugin();
   tables.enqueueLayerTable.mockClear();
+  decision.decideCityParquetMode.mockReset();
+  decision.decideCityParquetMode.mockResolvedValue({ mode: "static" });
   useLayerStore.getState().removeAllLayers();
   useStreamStore.setState({ streams: {} });
 });
@@ -164,7 +211,7 @@ afterEach(() => {
 });
 
 describe("useLayerFileLoader — .fcb routing", () => {
-  it("addLayerFromUrl routes a .fcb URL through openStreamingLayer, producing an isStreaming layer", async () => {
+  it("addLayerFromUrl routes a .fcb URL through openStreamingLayer, producing a streamed layer", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
     await act(async () => {
@@ -179,7 +226,7 @@ describe("useLayerFileLoader — .fcb routing", () => {
 
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
-    expect(layers[0]!.isStreaming).toBe(true);
+    expect(layers[0]!.source.access).toBe("stream");
     expect(layers[0]!.attributeOrders).toEqual({
       Building: ["height", "name"],
     });
@@ -201,10 +248,11 @@ describe("useLayerFileLoader — .fcb routing", () => {
 
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
-    expect(layers[0]!.isStreaming).toBe(true);
+    expect(layers[0]!.source.access).toBe("stream");
     expect(layers[0]!.modelRef).toEqual({
       type: "file",
       fileName: "local.fcb",
+      encoding: "flatcitybuf",
     });
   });
 
@@ -239,7 +287,9 @@ describe("useLayerFileLoader — .fcb routing", () => {
       await result.current.addLayerFromUrl("https://x/delft.fcb");
     });
     expect(useLayerStore.getState().layers).toHaveLength(0);
-    expect(result.current.error).toMatch(/3D engine is not running yet/);
+    expect(result.current.error).toBe(
+      "The 3D engine is not running yet, so a streaming layer cannot be opened. Wait for the viewer to finish loading and try again.",
+    );
   });
 });
 
@@ -392,8 +442,8 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
 });
 
 // ---------------------------------------------------------------------------
-// CityParquet routing. The arm is chosen by `isCityParquetUrl`, NOT by
-// `detectEncoding`: a `gs://` bucket or a package directory has no extension
+// CityParquet routing. The arm is chosen by `isCityParquetUrl` (inside
+// `formatFromName`): a `gs://` bucket or a package directory has no extension
 // to detect, and handing either to the CityJSON path would parse a listing —
 // or parquet bytes — as JSON.
 // ---------------------------------------------------------------------------
@@ -411,8 +461,8 @@ describe("useLayerFileLoader — CityParquet routing", () => {
   beforeEach(() => {
     cityparquet.loadCityParquetFromUrl.mockReset();
     cityparquet.loadCityParquetFromFiles.mockReset();
-    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
-    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_MODEL);
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_LOADED);
+    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_LOADED);
   });
 
   it("addLayerFromFile routes a .parquet File through loadCityParquetFromFiles", async () => {
@@ -430,6 +480,7 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     expect(layer.modelRef).toEqual({
       type: "file",
       fileName: "building.parquet",
+      encoding: "cityparquet",
     });
     expect(result.current.error).toBeNull();
   });
@@ -446,7 +497,11 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("cityparquet");
     expect(layer.name).toBe("building");
-    expect(layer.modelRef).toEqual({ type: "url", url });
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url,
+      encoding: "cityparquet",
+    });
   });
 
   it("addLayerFromUrl routes an extension-less gs:// package directory too", async () => {
@@ -477,7 +532,11 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
     expect(layers[0]!.name).toBe("delft");
-    expect(layers[0]!.modelRef).toEqual({ type: "file", fileName: "delft" });
+    expect(layers[0]!.modelRef).toEqual({
+      type: "file",
+      fileName: "delft",
+      encoding: "cityparquet",
+    });
     expect(layers[0]!.model.sourceEncoding).toBe("cityparquet");
   });
 
@@ -502,7 +561,7 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     // for the fetching that would follow if it did not.
     cityparquet.loadCityParquetFromUrl.mockImplementation((url: string) => {
       classifyCityParquetUrl(url);
-      return Promise.resolve(PARQUET_MODEL);
+      return Promise.resolve(PARQUET_LOADED);
     });
 
     await act(async () => {
@@ -554,6 +613,166 @@ describe("useLayerFileLoader — CityParquet routing", () => {
   });
 });
 
+describe("useLayerFileLoader — streaming large CityParquet sources", () => {
+  const MB = 1024 * 1024;
+
+  beforeEach(() => {
+    cityparquet.loadCityParquetFromUrl.mockReset();
+    cityparquet.loadCityParquetFromFiles.mockReset();
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_LOADED);
+    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_LOADED);
+  });
+
+  it("streams a package the decision sizes over the threshold, never reading it whole", async () => {
+    const urls = [
+      "https://x/yokohama-shi/a/building.parquet",
+      "https://x/yokohama-shi/b/building.parquet",
+    ];
+    decision.decideCityParquetMode.mockResolvedValue({
+      mode: "stream",
+      source: { urls },
+      totalBytes: 610 * MB,
+      // Two BUILDING tables, so R-D's default opens both and the stream still
+      // carries the pair.
+      families: urls.map((url) => ({
+        key: "building",
+        href: url,
+        size: 305 * MB,
+        source: { url },
+      })),
+    });
+    let holds = 0;
+    const holdEngine = <T>(open: () => Promise<T>): Promise<T> => {
+      holds += 1;
+      return open();
+    };
+    const { result } = renderHook(() => useLayerFileLoader({ holdEngine }));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/yokohama-shi/", {
+        attributeOrders: { Building: ["height"] },
+      });
+    });
+
+    expect(decision.decideCityParquetMode).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "url", url: "https://x/yokohama-shi/" }),
+    );
+    expect(cityparquet.loadCityParquetFromUrl).not.toHaveBeenCalled();
+    expect(openStream).toHaveBeenCalledTimes(1);
+    const opts = openStream.mock.calls[0]![0] as {
+      format?: string;
+      source: unknown;
+    };
+    expect(opts.format).toBe("cityparquet");
+    expect(opts.source).toEqual({ urls });
+    // The open ran under an engine hold: from the landing page there is no
+    // viewport yet, and a stream cannot exist without one.
+    expect(holds).toBe(1);
+
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.source.access).toBe("stream");
+    expect(layer.name).toBe("yokohama-shi");
+    expect(layer.model.sourceEncoding).toBe("cityparquet");
+    // The modelRef is the URL the user gave, so save/share/restore re-run
+    // the decision rather than pinning today's tables.
+    expect(layer.modelRef).toEqual({
+      type: "url",
+      url: "https://x/yokohama-shi/",
+      encoding: "cityparquet",
+    });
+    expect(layer.attributeOrders).toEqual({ Building: ["height"] });
+    expect(result.current.error).toBeNull();
+  });
+
+  it("keeps a source the decision calls static on today's whole-file path", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft/building.parquet");
+    });
+    expect(decision.decideCityParquetMode).toHaveBeenCalledTimes(1);
+    expect(cityparquet.loadCityParquetFromUrl).toHaveBeenCalledWith(
+      "https://x/delft/building.parquet",
+    );
+    expect(openStream).not.toHaveBeenCalled();
+  });
+
+  it("streams a large dropped .parquet as a Blob", async () => {
+    const file = new File(["PAR1"], "yokohama.parquet");
+    decision.decideCityParquetMode.mockResolvedValue({
+      mode: "stream",
+      source: { blob: file },
+      totalBytes: 335 * MB,
+      families: [
+        {
+          key: "yokohama",
+          href: "yokohama.parquet",
+          size: 335 * MB,
+          source: { file },
+        },
+      ],
+    });
+    const { result } = renderHook(() => useLayerFileLoader());
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+    expect(decision.decideCityParquetMode).toHaveBeenCalledWith({
+      kind: "files",
+      files: [file],
+    });
+    expect(cityparquet.loadCityParquetFromFiles).not.toHaveBeenCalled();
+    const opts = openStream.mock.calls[0]![0] as {
+      format?: string;
+      source: { blob?: Blob };
+    };
+    expect(opts.format).toBe("cityparquet");
+    expect(opts.source.blob).toBe(file);
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.modelRef).toEqual({
+      type: "file",
+      fileName: "yokohama.parquet",
+      encoding: "cityparquet",
+    });
+  });
+
+  it("streams a large picked folder as its object tables' blobs, named after the folder", async () => {
+    const files = [
+      pickedFile("yokohama-shi/a/building.parquet"),
+      pickedFile("yokohama-shi/b/building.parquet"),
+    ];
+    decision.decideCityParquetMode.mockResolvedValue({
+      mode: "stream",
+      source: { blobs: files },
+      totalBytes: 200 * MB,
+      families: files.map((file, i) => ({
+        key: "building",
+        href: `${i === 0 ? "a" : "b"}/building.parquet`,
+        size: 100 * MB,
+        source: { file },
+      })),
+    });
+    const { result } = renderHook(() => useLayerFileLoader());
+    await act(async () => {
+      await result.current.addLayerFromFiles(files, { visible: false });
+    });
+    expect(cityparquet.loadCityParquetFromFiles).not.toHaveBeenCalled();
+    const opts = openStream.mock.calls[0]![0] as {
+      format?: string;
+      source: { blobs?: Blob[] };
+      visible?: boolean;
+    };
+    expect(opts.format).toBe("cityparquet");
+    expect(opts.source.blobs).toEqual(files);
+    expect(opts.visible).toBe(false);
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.name).toBe("yokohama-shi");
+    expect(layer.modelRef).toEqual({
+      type: "file",
+      fileName: "yokohama-shi",
+      encoding: "cityparquet",
+    });
+  });
+});
+
 describe("useLayerFileLoader — CityGML ZIP routing", () => {
   /** A real archive holding one minimal CityGML document. */
   function zipBytes(): Uint8Array {
@@ -591,7 +810,11 @@ describe("useLayerFileLoader — CityGML ZIP routing", () => {
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.model.sourceEncoding).toBe("citygml");
     expect(Object.keys(layer.model.objects)).toEqual(["zipped-b1"]);
-    expect(layer.modelRef).toEqual({ type: "file", fileName: "lod2.zip" });
+    expect(layer.modelRef).toEqual({
+      type: "file",
+      fileName: "lod2.zip",
+      encoding: "citygml",
+    });
     // Never the streaming or CityParquet arm.
     expect(openStream).not.toHaveBeenCalled();
     expect(cityparquet.loadCityParquetFromFiles).not.toHaveBeenCalled();
@@ -634,9 +857,9 @@ describe("useLayerFileLoader — pending and failed adds", () => {
   it("lists an in-flight add in `pending`, and drops it when the add settles", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
-    let release!: (handle: FcbStreamLayerHandle) => void;
+    let release!: (handle: StreamLayerHandle) => void;
     openStream.mockReturnValueOnce(
-      new Promise<FcbStreamLayerHandle>((resolve) => {
+      new Promise<StreamLayerHandle>((resolve) => {
         release = resolve;
       }),
     );
@@ -742,15 +965,15 @@ describe("useLayerFileLoader — several adds at once, and retrying", () => {
   it("stays loading until BOTH concurrent adds settle, one pending row each", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
-    let releaseFirst!: (handle: FcbStreamLayerHandle) => void;
-    let releaseSecond!: (handle: FcbStreamLayerHandle) => void;
+    let releaseFirst!: (handle: StreamLayerHandle) => void;
+    let releaseSecond!: (handle: StreamLayerHandle) => void;
     openStream.mockReturnValueOnce(
-      new Promise<FcbStreamLayerHandle>((resolve) => {
+      new Promise<StreamLayerHandle>((resolve) => {
         releaseFirst = resolve;
       }),
     );
     openStream.mockReturnValueOnce(
-      new Promise<FcbStreamLayerHandle>((resolve) => {
+      new Promise<StreamLayerHandle>((resolve) => {
         releaseSecond = resolve;
       }),
     );
@@ -870,7 +1093,7 @@ describe("useLayerFileLoader — the encoding override", () => {
     expect(
       (openStream.mock.calls[0]![0] as { source: unknown }).source,
     ).toEqual({ url: "https://x/model.json" });
-    expect(useLayerStore.getState().layers[0]!.isStreaming).toBe(true);
+    expect(useLayerStore.getState().layers[0]!.source.access).toBe("stream");
   });
 
   it("takes the STREAMING route for a `.json` FILE overridden to FlatCityBuf, as a Blob", async () => {
@@ -902,7 +1125,7 @@ describe("useLayerFileLoader — the encoding override", () => {
     expect(openStream).not.toHaveBeenCalled();
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
-    expect(layers[0]!.isStreaming).toBe(false);
+    expect(layers[0]!.source.access).toBe("resident");
     expect(layers[0]!.model.sourceEncoding).toBe("cityjson");
   });
 
@@ -927,7 +1150,7 @@ describe("useLayerFileLoader — the encoding override", () => {
   });
 
   it("routes an extensionless URL into the CityParquet arm when the override says so", async () => {
-    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_LOADED);
     const { result } = renderHook(() => useLayerFileLoader());
 
     await act(async () => {
@@ -1008,6 +1231,6 @@ describe("useLayerFileLoader — the encoding override", () => {
     // Twice: the retry took the streaming route too. Without the override in
     // the closure it would have fetched `/model.json` as CityJSON instead.
     expect(openStream).toHaveBeenCalledTimes(2);
-    expect(useLayerStore.getState().layers[0]!.isStreaming).toBe(true);
+    expect(useLayerStore.getState().layers[0]!.source.access).toBe("stream");
   });
 });

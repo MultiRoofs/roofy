@@ -15,6 +15,7 @@
  * when its worker dies) and the death is a real one-shot dispatch, so
  * `racedWithDeath` has something true to race.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -68,7 +69,10 @@ vi.mock("../../../../src/insights/duckdb", () => {
         rows: [
           { column_name: "id", column_type: "VARCHAR" },
           { column_name: "feature_id", column_type: "VARCHAR" },
-          { column_name: "geometry_lod2_2", column_type: "BLOB" },
+          {
+            column_name: `${(await import("../../../../src/insights/columnKind")).LOD_MARKER_PREFIX}geometry_lod2_2`,
+            column_type: "BOOLEAN",
+          },
         ],
       };
     }
@@ -181,7 +185,7 @@ function cityLayer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     derivedFrom: null,
   };
 }

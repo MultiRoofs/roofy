@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import type {
@@ -21,6 +25,20 @@ const roof: Surface = {
       [0, 0, 0],
       [10, 0, 0],
       [0, 10, 10],
+    ],
+  ],
+  attributes: {},
+  lod: "2",
+};
+/** A horizontal roof: no aspect at all, so `computeRoofMetrics` gives it a
+ *  null azimuth (navara-core's flatness convention). */
+const flatRoof: Surface = {
+  type: "RoofSurface",
+  rings: [
+    [
+      [0, 0, 6],
+      [10, 0, 6],
+      [0, 10, 6],
     ],
   ],
   attributes: {},
@@ -58,7 +76,7 @@ const model: CityModel = {
       id: "part",
       objectType: "BuildingPart",
       attributes: {},
-      surfaces: [roof, wall],
+      surfaces: [roof, wall, flatRoof],
       bbox: null,
       children: [],
       parents: ["root"],
@@ -87,7 +105,7 @@ function layer(): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   };
 }
 afterEach(() => {
@@ -108,7 +126,7 @@ describe("HoverTooltip", () => {
       .hover({ kind: "object", layerId: "L", objectId: "root" });
     render(<HoverTooltip />);
     expect(screen.getByText("Building · root")).toBeTruthy();
-    expect(screen.getByText("1 roof surfaces")).toBeTruthy();
+    expect(screen.getByText("2 roof surfaces")).toBeTruthy();
     expect(useSelectionStore.getState().selections).toEqual([]);
   });
   it("shows static roof metrics and hides after hover clears", () => {
@@ -125,8 +143,25 @@ describe("HoverTooltip", () => {
     act(() => useSelectionStore.getState().hover(null));
     expect(view.container.textContent).toBe("");
   });
+  it("says a flat roof surface faces nowhere instead of calling it north", () => {
+    // `azimuthDeg` is null below 0.1 degrees of tilt; reading that as a bearing
+    // used to print "N", and formatting it used to be a crash waiting to
+    // happen.
+    useLayerStore.setState({ layers: [layer()] });
+    useSelectionStore.getState().hover({
+      kind: "surface",
+      layerId: "L",
+      objectId: "part",
+      surfaceIndex: 2,
+    });
+    render(<HoverTooltip />);
+    expect(screen.getByText("Roof surface")).toBeTruthy();
+    expect(screen.getByText(/50.0 m² · 0.0° · flat/)).toBeTruthy();
+  });
   it("reports loading rather than fabricated streaming metrics after eviction", () => {
-    useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });
+    useLayerStore.setState({
+      layers: [{ ...layer(), source: STREAMED_SOURCE }],
+    });
     useStreamStore.setState({
       streams: {
         L: {

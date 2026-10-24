@@ -4,12 +4,12 @@ import {
   type StreamState,
 } from "../../../../src/features/streaming/streamStore";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
-import type { FcbStreamLayerHandle, Grid } from "@cityjson/navara-flatcitybuf";
-import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
+import type { StreamLayerHandle, Grid } from "@cityjson/navara-stream";
+import type { StreamHeader } from "@cityjson/navara-stream";
 
 const grid: Grid = { originX: 0, originY: 0, rootCell: 800, maxLevel: 3 };
 
-const header: FcbHeaderModel = {
+const header: StreamHeader = {
   version: "1.0",
   featuresCount: 100,
   extent: [0, 0, 0, 800, 800, 50],
@@ -19,17 +19,17 @@ const header: FcbHeaderModel = {
 
 /**
  * A stand-in for the plugin handle. Constructing a real
- * `FcbStreamLayerHandle` would spin up a `WorkerClient`, whose constructor
+ * `StreamLayerHandle` would spin up a `WorkerClient`, whose constructor
  * reaches the DOM `Worker` constructor jsdom does not implement — and none of
  * `streamStore`'s actions ever call a method on the handle: they only hold the
  * reference and hand it back. So the handle is the one field cast at that true
- * boundary (`as unknown as FcbStreamLayerHandle`, never `as never`: `never`
+ * boundary (`as unknown as StreamLayerHandle`, never `as never`: `never`
  * type-checks against ANY value whatsoever and would hide a genuine shape
  * mismatch on every other field). Every other field below is a real,
- * correctly-typed value: a real `Grid` literal and a real `FcbHeaderModel`.
+ * correctly-typed value: a real `Grid` literal and a real `StreamHeader`.
  */
-function fakeHandle(): FcbStreamLayerHandle {
-  return { id: "L", grid, header } as unknown as FcbStreamLayerHandle;
+function fakeHandle(): StreamLayerHandle {
+  return { id: "L", grid, header } as unknown as StreamLayerHandle;
 }
 
 function makeStreamState(overrides: Partial<StreamState> = {}): StreamState {
@@ -102,11 +102,11 @@ describe("streamStore", () => {
     ).toBe("auto");
   });
 
-  it("defaults a new layer to not streaming", () => {
+  it("defaults a new layer to a resident source", () => {
     const id = addLayer();
     expect(
-      useLayerStore.getState().layers.find((l) => l.id === id)!.isStreaming,
-    ).toBe(false);
+      useLayerStore.getState().layers.find((l) => l.id === id)!.source.access,
+    ).toBe("resident");
   });
 
   it("setLodMode updates only the targeted layer, leaving the other's mode alone", () => {

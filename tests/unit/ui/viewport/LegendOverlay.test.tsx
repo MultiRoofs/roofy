@@ -13,6 +13,7 @@
  * the overlay's own behaviour: grouping, hiding, the heading click and the
  * presentation-size class.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   cleanup,
@@ -90,7 +91,7 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   };
 }

@@ -10,9 +10,8 @@
  * A ZIP IS RECOGNISED BY ITS MAGIC BYTES, NEVER BY ITS EXTENSION — the same
  * rule `decodeModelBytes` uses for gzip, and for the same reason: the catalog
  * is full of `?download=` endpoints and signed-URL redirects whose path has no
- * useful extension at all. `detectEncoding(".zip")` still returns its
- * `"cityjson"` default and that is deliberately left alone; the byte sniff in
- * the loader runs first and never reaches it.
+ * useful extension at all. The format registry names `.zip` CityGML, but the
+ * byte sniff in the loader runs first and decides without it.
  *
  * ONE ZIP IS ONE LAYER. The archive is a container, not a model, so a
  * multi-entry archive is merged into a single `CityModel` — but ONLY when the

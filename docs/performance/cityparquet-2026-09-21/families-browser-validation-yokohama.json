@@ -1,0 +1,37 @@
+{
+  "what": "Browser validation of CityParquet object families on the real Yokohama package",
+  "url": "https://cityparquet.open3d.city/data/plateau/yokohama-shi/",
+  "date": "2026-09-23",
+  "browser": "Chrome 147 headless, SwiftShader (software GL), Linux",
+  "build": "Vite dev server (npm run dev), develop 26be3ac",
+  "status": "Navara\u00b7 1 FPS\u00b7 4.5K of 884.1K loaded objects\n21 resident cells \u00b7 Settled",
+  "heapMB": 189,
+  "consoleErrors": [],
+  "families": [
+    "Building | 884,106 loaded | Table",
+    "Bridge | Not opened | Table",
+    "Water Body | Not opened | Table",
+    "City Furniture | Not opened | Table",
+    "Transportation | Not opened | Table",
+    "Vegetation | Not opened | Table"
+  ],
+  "clickedTableButtonOfClosedFamily": "Show Bridge table",
+  "familiesAfterOpeningBridgeTable": [
+    "Building | 884,106 loaded | Table",
+    "Bridge | Not opened | Table",
+    "Water Body | Not opened | Table",
+    "City Furniture | Not opened | Table",
+    "Transportation | Not opened | Table",
+    "Vegetation | Not opened | Table"
+  ],
+  "familySelector": [
+    "Building",
+    "Bridge",
+    "Water Body",
+    "City Furniture",
+    "Transportation",
+    "Vegetation"
+  ],
+  "tablePanelExcerpt": "Nishitokyo | All 1,797 \u00b7 Matching 1,797 \u00b7 Selected 0 objects | Table only | Expand | Columns | Building | Bridge | Water Body | City Furniture | Transportation | Vegetation | Show selected records | Clear selection | Add condition | Apply | Clear | \t | ID | \t | FEATURE_ID | \t | OBJECT_TYPE | \t | PARENTS | \t | CHILDREN | \t | CHILDREN_ROLES | \t | ADDRESS | \t | BBOX | \t | OTHER | \t | MEASUREDHEIGHT |",
+  "note": "Bridge table shows 1,797 rows read from the file while Bridge geometry stays closed; bbox is in the file CRS (degrees), which is why the metric tools refuse these layers (Ruling R-G/S2)."
+}

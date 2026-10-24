@@ -26,6 +26,7 @@
  * The engine is never imported: `NavaraViewport` is mocked (jsdom has no
  * WebGL, and `@navaramap/three` crashes at module scope under Node).
  */
+import { RESIDENT_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -392,7 +393,7 @@ describe("a geospatial-only workspace", () => {
         modelRef: { type: "url", url: "https://example.test/delft.city.json" },
         visible: true,
         rules: [],
-        isStreaming: false,
+        source: RESIDENT_SOURCE,
       });
     });
 
@@ -441,7 +442,7 @@ describe("a geospatial-only workspace", () => {
         modelRef: { type: "url", url: "https://example.test/delft.city.json" },
         visible: true,
         rules: [],
-        isStreaming: false,
+        source: RESIDENT_SOURCE,
       });
     });
     await waitFor(() =>
@@ -497,7 +498,7 @@ describe("a geospatial-only workspace", () => {
         modelRef: { type: "url", url: "https://example.test/delft.city.json" },
         visible: true,
         rules: [],
-        isStreaming: false,
+        source: RESIDENT_SOURCE,
       });
     });
     act(() => readyGate.resolve());

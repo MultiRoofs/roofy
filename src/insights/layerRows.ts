@@ -17,7 +17,7 @@
  */
 
 import type { BBox3, CityModel } from "../domain/citymodel/types";
-import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import { parentsIndexOf, rootFeatureId } from "../domain/citymodel/featureId";
 
 /**

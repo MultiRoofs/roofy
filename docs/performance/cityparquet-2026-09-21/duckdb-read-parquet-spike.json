@@ -1,0 +1,24 @@
+{
+  "allColumns": 37,
+  "keptColumns": 15,
+  "viewCreateMs": 26,
+  "viewPageMs": 793,
+  "viewPageRows": 100,
+  "viewFilterMs": 34,
+  "viewFilterN": "7809",
+  "viewDeepPageMs": 1503,
+  "heapAfterViewMB": 115,
+  "tableCreateMs": 961,
+  "tablePageMs": 97,
+  "tablePageRows": 100,
+  "tableFilterMs": 10,
+  "duckdbMemMB": 247,
+  "requests": 0,
+  "transferMB": 0,
+  "encodedMB": 0,
+  "heapMB": 115,
+  "log": [
+    ["module", 21],
+    ["instantiate", 2500]
+  ]
+}

@@ -1,12 +1,12 @@
 /**
  * `openStreamingLayer` is now a thin store-registration wrapper over
- * `FlatCityBufPlugin.openStream`: the worker, the admission gate, the CRS
+ * `CityStreamPlugin.openStream`: the worker, the admission gate, the CRS
  * gate, the grid and the cell cache all live inside the plugin (and are
  * tested there, in `packages/navara-flatcitybuf/tests/streamRegistry.test.ts`).
  *
  * So there is no `FakeWorker` here any more. The plugin is faked at its own
  * seam — the `StreamPlugin` interface — which keeps this suite engine-free:
- * the real `FlatCityBufPlugin` lives behind the `/plugin` subpath and imports
+ * the real `CityStreamPlugin` lives behind the `/plugin` subpath and imports
  * `@navaramap/*`, which crashes at module scope under Node (Global
  * Constraints -> NODE_IMPORT_SAFE = false).
  */
@@ -22,13 +22,13 @@ import type { StreamPlugin } from "../../../../src/features/streaming/streamPlug
 import { effectiveRules } from "../../../../src/features/rules/colorBy";
 import type { Rule } from "../../../../src/features/rules/types";
 import type {
-  FcbStreamLayerHandle,
+  StreamLayerHandle,
   Grid,
   StreamStatus,
-} from "@cityjson/navara-flatcitybuf";
-import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
+import type { StreamHeader } from "@cityjson/navara-stream";
 
-const HEADER: FcbHeaderModel = {
+const HEADER: StreamHeader = {
   version: "1.0",
   featuresCount: 1000,
   extent: [0, 0, 0, 1000, 1000, 40],
@@ -42,7 +42,7 @@ const GRID: Grid = { originX: 0, originY: 0, rootCell: 1000, maxLevel: 4 };
  *  drive exactly what the plugin would report and assert what the store
  *  mirrored. */
 interface FakeHandle {
-  readonly handle: FcbStreamLayerHandle;
+  readonly handle: StreamLayerHandle;
   emitStatus: (status: StreamStatus, message: string | null) => void;
   emitLadder: (ladder: ReadonlyArray<string>) => void;
   emitAppearance: (themes: ReadonlyArray<AppearanceTheme>) => void;
@@ -106,7 +106,7 @@ function fakeHandle(id: string): FakeHandle {
       return () => drop(commitCbs, cb);
     },
     delete: deleted,
-  } as unknown as FcbStreamLayerHandle;
+  } as unknown as StreamLayerHandle;
   return {
     handle,
     listenerCount: () =>
@@ -165,7 +165,7 @@ describe("openStreamingLayer", () => {
 
     const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
     expect(layer).toBeDefined();
-    expect(layer!.isStreaming).toBe(true);
+    expect(layer!.source.access).toBe("stream");
     expect(layer!.model.bbox).toEqual(HEADER.extent);
     expect(layer!.model.objects).toEqual({});
 
@@ -202,6 +202,59 @@ describe("openStreamingLayer", () => {
     const source = plugin.openStream.mock.calls[0]![0].source;
     expect("blob" in source && source.blob).toBe(blob); // same ref, not re-encoded
     expect("url" in source).toBe(false);
+  });
+
+  it("opens a flatcitybuf stream by default, with a flatcitybuf stub model", async () => {
+    const plugin = fakePlugin();
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+    });
+    expect(plugin.openStream.mock.calls[0]![0].format).toBe("flatcitybuf");
+    const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
+    expect(layer!.model.sourceEncoding).toBe("flatcitybuf");
+  });
+
+  it("opens a CityParquet url list in the cityparquet worker, with a cityparquet stub model", async () => {
+    const plugin = fakePlugin();
+    const urls = [
+      "https://x/yokohama-shi/a/building.parquet",
+      "https://x/yokohama-shi/b/building.parquet",
+    ];
+    const layerId = await openStreamingLayer({
+      plugin,
+      format: "cityparquet",
+      source: { urls },
+      name: "yokohama-shi",
+      modelRef: { type: "url", url: "https://x/yokohama-shi/" },
+    });
+    const opts = plugin.openStream.mock.calls[0]![0];
+    expect(opts.format).toBe("cityparquet");
+    expect(opts.source).toEqual({ urls });
+    const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
+    expect(layer!.model.sourceEncoding).toBe("cityparquet");
+    expect(layer!.model.metadata.referenceSystem).toBe(HEADER.referenceSystem);
+    expect(layer!.model.bbox).toEqual(HEADER.extent);
+    expect(layer!.modelRef).toEqual({
+      type: "url",
+      url: "https://x/yokohama-shi/",
+    });
+  });
+
+  it("passes a picked folder's blobs straight through", async () => {
+    const plugin = fakePlugin();
+    const blobs = [new Blob(["a"]), new Blob(["b"])];
+    await openStreamingLayer({
+      plugin,
+      format: "cityparquet",
+      source: { blobs },
+      name: "pkg",
+      modelRef: { type: "file", fileName: "pkg" },
+    });
+    const source = plugin.openStream.mock.calls[0]![0].source;
+    expect("blobs" in source && source.blobs[0]).toBe(blobs[0]);
   });
 
   it("rejects and registers nothing when the plugin refuses the file (admission, CRS, missing extent)", async () => {

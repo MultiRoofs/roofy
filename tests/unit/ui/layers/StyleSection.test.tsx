@@ -9,8 +9,13 @@
  * raster's is one slider. A tileset's is nothing, said out loud rather than
  * left as an empty box.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -89,7 +94,7 @@ function cityLayer(overrides: Partial<Layer> = {}): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   } as Layer;
 }
@@ -141,13 +146,148 @@ function readLayer(id = "L") {
   return useLayerStore.getState().layers.find((l) => l.id === id)!;
 }
 
+describe("StyleSection — Color by expression", () => {
+  const FLAT = {
+    id: "r1",
+    name: "Flat",
+    color: "#3b82f6",
+    logic: "AND" as const,
+    enabled: true,
+    conditions: [
+      { field: "inclinationDeg", operator: "<" as const, value: 10 },
+    ],
+  };
+
+  function editor(): HTMLTextAreaElement {
+    return screen.getByRole("textbox", {
+      name: "Colour expression",
+    }) as HTMLTextAreaElement;
+  }
+
+  it("opens on the expression that draws the layer's rules", () => {
+    render(
+      <StyleSection
+        item={city(cityLayer({ rules: [FLAT], colorBy: "rules" }))}
+      />,
+    );
+    fireEvent.change(colorBySelect(), { target: { value: "expression" } });
+    expect(readLayer().colorBy).toBe("expression");
+    const written = readLayer().styleExpression;
+    expect(JSON.stringify(written)).toContain("inclinationDeg");
+    expect(JSON.parse(editor().value)).toEqual(written);
+    expect(
+      screen.getByText("Delft · Color surfaces by an expression"),
+    ).toBeTruthy();
+  });
+
+  it("lays the expression out compactly: short arrays stay on one line", () => {
+    render(
+      <StyleSection
+        item={city(
+          cityLayer({
+            colorBy: "expression",
+            styleExpression: [
+              "case",
+              ["==", ["get", "$surface"], "RoofSurface"],
+              "#ff0000",
+              ["get", "$base"],
+            ],
+          }),
+        )}
+      />,
+    );
+    expect(editor().value).toBe(
+      [
+        "[",
+        '  "case",',
+        '  ["==", ["get", "$surface"], "RoofSurface"],',
+        '  "#ff0000",',
+        '  ["get", "$base"]',
+        "]",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps an expression the layer already has", () => {
+    const mine = ["case", true, "#ff0000", ["get", "$base"]];
+    render(
+      <StyleSection
+        item={city(cityLayer({ rules: [FLAT], styleExpression: mine }))}
+      />,
+    );
+    fireEvent.change(colorBySelect(), { target: { value: "expression" } });
+    expect(readLayer().styleExpression).toBe(mine);
+  });
+
+  it("applies an edit that compiles, after a pause", async () => {
+    render(
+      <StyleSection
+        item={city(
+          cityLayer({ colorBy: "expression", styleExpression: "#000000" }),
+        )}
+      />,
+    );
+    fireEvent.change(editor(), { target: { value: '"#ff0000"' } });
+    expect(readLayer().styleExpression).toBe("#000000");
+    await waitFor(() => expect(readLayer().styleExpression).toBe("#ff0000"));
+  });
+
+  it("keeps a valid edit when the editor goes away before the pause ends", () => {
+    // Switching layer remounts the panel, and collapsing it unmounts it: an
+    // edit that already compiles must not be lost to the debounce.
+    const { unmount } = render(
+      <StyleSection
+        item={city(
+          cityLayer({ colorBy: "expression", styleExpression: "#000000" }),
+        )}
+      />,
+    );
+    fireEvent.change(editor(), { target: { value: '"#ff0000"' } });
+    unmount();
+    expect(readLayer().styleExpression).toBe("#ff0000");
+  });
+
+  it("shows why an edit does not apply, and leaves the layer as it was", async () => {
+    render(
+      <StyleSection
+        item={city(
+          cityLayer({ colorBy: "expression", styleExpression: "#000000" }),
+        )}
+      />,
+    );
+    fireEvent.change(editor(), { target: { value: '["frobnicate"' } });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/JSON/);
+    fireEvent.change(editor(), { target: { value: '["frobnicate"]' } });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(/frobnicate/),
+    );
+    await new Promise((r) => setTimeout(r, 600));
+    expect(readLayer().styleExpression).toBe("#000000");
+  });
+
+  it("shows an expression copied in from elsewhere", () => {
+    render(
+      <StyleSection
+        item={city(
+          cityLayer({ colorBy: "expression", styleExpression: "#000000" }),
+        )}
+      />,
+    );
+    act(() =>
+      useLayerStore.getState().updateLayer("L", { styleExpression: "#123456" }),
+    );
+    expect(editor().value).toBe('"#123456"');
+  });
+});
+
 describe("StyleSection — a city layer is coloured three ways", () => {
-  it("offers exactly Surface type, Rules and Single colour", () => {
+  it("offers exactly Surface type, Rules, Single colour and Expression", () => {
     render(<StyleSection item={city(cityLayer())} />);
     expect([...colorBySelect().options].map((o) => o.textContent)).toEqual([
       "Surface type",
       "Rules",
       "Single colour",
+      "Expression",
     ]);
   });
 
@@ -260,7 +400,7 @@ describe("StyleSection — Rules", () => {
         item={city(
           cityLayer({
             name: "Delft stream",
-            isStreaming: true,
+            source: STREAMED_SOURCE,
             colorBy: "rules",
           }),
         )}

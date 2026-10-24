@@ -1,3 +1,4 @@
+import { RESIDENT_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { describe, expect, it, vi } from "vitest";
 import { syncLayers } from "../../../src/scene/handleSync";
 import type { LiveLayer } from "../../../src/scene/handleSync";
@@ -47,7 +48,7 @@ function layer(over: Partial<Layer> = {}): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     visibleObjectIds: null,
     ...over,
   } as Layer;

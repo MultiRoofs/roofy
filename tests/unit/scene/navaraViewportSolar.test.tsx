@@ -23,6 +23,7 @@
  * The animation is driven by the timestamp the engine passes to `preUpdate`,
  * so every case below is deterministic without fake timers.
  */
+import { RESIDENT_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -151,6 +152,8 @@ vi.mock("@navaramap/three", () => ({
       screenSize: { x: 800, y: 600 },
       pixelRatio: 1,
       pickDepthPosition: vi.fn(() => null as unknown),
+      forceUpdate: vi.fn(),
+      animation: false,
     };
   }),
   getPickRay: vi.fn(() => null as unknown),
@@ -171,8 +174,8 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
   }),
 }));
 
-vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
-  FlatCityBufPlugin: vi.fn(function () {
+vi.mock("@cityjson/navara-stream/plugin", () => ({
+  CityStreamPlugin: vi.fn(function () {
     return {
       openStream: vi.fn(),
       remove: vi.fn(),
@@ -242,7 +245,7 @@ function makeLayer(id: string): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     derivedFrom: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   } as Layer;
 }
 

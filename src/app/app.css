@@ -3748,6 +3748,16 @@ body {
   white-space: nowrap;
 }
 
+/* Which object family the panel is about (a streamed CityParquet package).
+   The compact field height every other control in this row wears; the label is
+   the select's own `aria-label`, because the option text already names the
+   family and a visible "Family:" would repeat it. */
+.table-family-select {
+  min-height: var(--control-height-compact);
+  max-width: 11rem;
+  font-size: 0.65rem;
+}
+
 .table-panel-body {
   flex: 1;
   overflow: auto;
@@ -6066,6 +6076,68 @@ button.file-label:disabled {
   cursor: pointer;
 }
 
+/* ── Object families (a streamed CityParquet package) ──────────────────────
+   One row per family, on `.layer-types-item`'s own geometry so the two blocks
+   below each other read as one list: a family is OPENED (the checkbox), a type
+   is VISIBLE (the block under it). The table button is the panel's ghost action
+   (`.active-layer-action`) at the compact control height, never the table
+   toolbar's 24px icon button — this is the layer panel.
+
+   The ROW selector is doubled (`.layer-types-item.layer-families-item`) on
+   purpose: `.layer-types-item` is defined further down this file with equal
+   specificity, so a single class here lost its gap and its cursor to source
+   order alone — the rows shipped at 0.35rem under a pointer. Specificity, not
+   position, is what keeps this true if either block moves. */
+.layer-families {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layer-types-item.layer-families-item {
+  gap: 8px;
+  /* The row is not itself a label: the checkbox, the state and two buttons each
+     answer for themselves, so the pointer must not promise one target. */
+  cursor: default;
+  min-height: var(--control-height-compact);
+}
+
+.layer-families-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.layer-families-state {
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  /* A family's row count changes as the stream learns it; tabular figures keep
+     the buttons beside it from shifting. */
+  font-variant-numeric: tabular-nums;
+}
+
+.layer-families-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: var(--control-height-compact);
+  white-space: nowrap;
+}
+
+.layer-families-btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.layer-families-error {
+  color: var(--danger);
+}
+
 .layer-types-empty {
   color: var(--fg-muted);
   font-size: 0.62rem;
@@ -6710,4 +6782,39 @@ button.file-label:disabled {
   padding: 0 12px;
   width: 100%;
   font-size: 13px;
+}
+
+.active-layer-control--lod {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.lod-multiselect .layer-types-list {
+  border-top: none;
+  padding: 0;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+}
+
+.lod-multiselect .layer-types-item {
+  min-height: var(--control-compact-height, 30px);
+}
+
+/* "Color by expression": JSON, in the brand's code face, tall enough to read a
+   `case` at a glance. */
+.style-expression {
+  width: 100%;
+  min-height: 10rem;
+  padding-block: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.style-expression-error {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--danger);
 }

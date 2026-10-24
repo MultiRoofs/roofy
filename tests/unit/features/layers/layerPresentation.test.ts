@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { describe, it, expect } from "vitest";
 import {
   countRootObjects,
@@ -39,7 +43,7 @@ function cityObject(
 function cityLayer(overrides: Partial<Layer> = {}): ActiveLayer {
   return {
     kind: "city",
-    layer: { isStreaming: false, ...overrides } as unknown as Layer,
+    layer: { source: RESIDENT_SOURCE, ...overrides } as unknown as Layer,
   };
 }
 
@@ -66,11 +70,13 @@ function modelWith(objects: ReadonlyArray<CityObject>): CityModel {
 
 describe("layerKindOf", () => {
   it("classifies a non-streaming city layer as city", () => {
-    expect(layerKindOf(cityLayer({ isStreaming: false }))).toBe("city");
+    expect(layerKindOf(cityLayer({ source: RESIDENT_SOURCE }))).toBe("city");
   });
 
   it("classifies a streaming city layer as streaming", () => {
-    expect(layerKindOf(cityLayer({ isStreaming: true }))).toBe("streaming");
+    expect(layerKindOf(cityLayer({ source: STREAMED_SOURCE }))).toBe(
+      "streaming",
+    );
   });
 
   it("classifies a geojson layer as vector", () => {
@@ -227,7 +233,7 @@ describe("layerKindLine", () => {
   it("names a static city layer with the encoding its model was parsed from", () => {
     expect(
       layerKindLine(
-        cityLayer({ isStreaming: false, model: modelOf("cityjson") }),
+        cityLayer({ source: RESIDENT_SOURCE, model: modelOf("cityjson") }),
       ),
     ).toBe("City model · CityJSON");
   });
@@ -235,7 +241,7 @@ describe("layerKindLine", () => {
   it("says a streaming layer streams, and from what", () => {
     expect(
       layerKindLine(
-        cityLayer({ isStreaming: true, model: modelOf("flatcitybuf") }),
+        cityLayer({ source: STREAMED_SOURCE, model: modelOf("flatcitybuf") }),
       ),
     ).toBe("Streaming city model · FlatCityBuf");
   });

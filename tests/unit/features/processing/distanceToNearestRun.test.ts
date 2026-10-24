@@ -15,6 +15,7 @@
  * so the death is a real one-shot dispatch and `engineAwait`'s races have
  * something true to race.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -67,8 +68,11 @@ vi.mock("../../../../src/insights/duckdb", () => {
         rows: [
           { column_name: "id", column_type: "VARCHAR" },
           { column_name: "feature_id", column_type: "VARCHAR" },
-          // An LoD 0 rung, so §7.7's footprint proxy is on offer at all.
-          { column_name: "geometry_lod0", column_type: "BLOB" },
+          // The build's marker for an LoD 0 rung, so §7.7's footprint proxy is on offer at all.
+          {
+            column_name: `${(await import("../../../../src/insights/columnKind")).LOD_MARKER_PREFIX}geometry_lod0_0`,
+            column_type: "BOOLEAN",
+          },
         ],
       };
     }
@@ -212,7 +216,7 @@ function cityLayer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     derivedFrom: null,
   };
 }

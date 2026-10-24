@@ -3,6 +3,10 @@
  * for a static layer, the resident set for a streaming one — and the one place
  * that decides how much of it is measured.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 
@@ -79,7 +83,7 @@ function staticLayer(): Layer {
   return {
     id: "L1",
     name: "roofs",
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     selectedLod: "2.2",
     availableLods: ["2.2", "1.2"],
     model: {
@@ -199,7 +203,7 @@ describe("roofLodOptions", () => {
     const layer = {
       id: "S1",
       name: "delft",
-      isStreaming: true,
+      source: STREAMED_SOURCE,
       model: { sourceEncoding: "flatcitybuf", objects: {} },
     } as unknown as Layer;
     expect(roofLodOptions(layer)).toEqual([{ lod: "2", features: 1 }]);
@@ -266,7 +270,7 @@ describe("roofGeometrySource", () => {
     const layer = {
       id: "S1",
       name: "delft",
-      isStreaming: true,
+      source: STREAMED_SOURCE,
       model: { sourceEncoding: "flatcitybuf", objects: {} },
     } as unknown as Layer;
     const source = roofGeometrySource(layer);

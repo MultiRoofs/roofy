@@ -3,7 +3,7 @@ import {
   classifyCityParquetUrl,
   isCityParquetUrl,
   UnlistableUrlError,
-} from "../../../../src/features/cityparquet/sourceClassify";
+} from "../../../../../src/domain/citymodel/formats/cityParquetUrl";
 
 describe("classifyCityParquetUrl", () => {
   it("classifies gs:// forms", () => {

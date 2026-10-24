@@ -9,6 +9,7 @@
  * ready-table `candidates` at all — which is why this suite used to mock the
  * registry to invent a tool that could.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -159,7 +160,7 @@ function addCityLayer(name: string, withReader: boolean): string {
     visible: true,
     rules: [],
     colorBy: "surface",
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   };
   const id = useLayerStore.getState().addLayer(input);
   useLayerTableStore.setState({

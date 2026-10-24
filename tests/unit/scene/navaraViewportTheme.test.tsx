@@ -8,6 +8,7 @@
  * a theme puts back the user's own choices, which were never written in the
  * first place. How any of it LOOKS is the commander's browser pass.
  */
+import { RESIDENT_SOURCE } from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
@@ -164,6 +165,8 @@ vi.mock("@navaramap/three", () => ({
       screenSize: { x: 800, y: 600 },
       pixelRatio: 2,
       pickDepthPosition: vi.fn(() => null as unknown),
+      forceUpdate: vi.fn(),
+      animation: false,
     };
     viewInstances.push(view as unknown as Record<string, unknown>);
     return view;
@@ -210,8 +213,8 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
   }),
 }));
 
-vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
-  FlatCityBufPlugin: vi.fn(function () {
+vi.mock("@cityjson/navara-stream/plugin", () => ({
+  CityStreamPlugin: vi.fn(function () {
     return {
       openStream: vi.fn(),
       remove: vi.fn(),
@@ -272,7 +275,7 @@ function makeLayer(id: string): Layer {
     availableLods: ["2.2"],
     lodMode: "auto",
     hiddenTypes: [],
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
   } as unknown as Layer;
 }
 

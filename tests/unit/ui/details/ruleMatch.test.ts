@@ -2,6 +2,7 @@
  * RULE MATCH — which rule coloured a selection, by rule identity (never by
  * colour). Pure, pinned against the core rule engine.
  */
+import { RESIDENT_SOURCE } from "../../../../src/features/layers/cityLayerSource";
 import { describe, expect, it } from "vitest";
 import type { CityObject } from "../../../../src/domain/citymodel/types";
 import type { RoofMetrics } from "@cityjson/navara-core";
@@ -57,7 +58,7 @@ function layer(overrides: Partial<Layer> = {}): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     ...overrides,
   } as Layer;
 }

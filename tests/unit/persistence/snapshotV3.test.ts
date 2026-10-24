@@ -132,3 +132,19 @@ describe("normalizeViewMode", () => {
     expect(normalizeViewMode(null as never)).toBe("3d");
   });
 });
+
+it("restores selected LoDs while leaving older single-LoD snapshots readable", () => {
+  const layers = normalizeLayers({
+    layers: [
+      { selectedLods: ["1", "2", "1"] },
+      { selectedLods: [] },
+      { selectedLod: "1" },
+      { selectedLods: "invalid" },
+    ],
+  });
+  expect(layers[0]?.selectedLods).toEqual(["2", "1"]);
+  expect(layers[1]?.selectedLods).toEqual([]);
+  expect(layers[2]?.selectedLods).toBeUndefined();
+  expect(layers[2]?.selectedLod).toBe("1");
+  expect(layers[3]?.selectedLods).toBeUndefined();
+});

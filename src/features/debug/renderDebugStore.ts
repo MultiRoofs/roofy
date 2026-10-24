@@ -24,6 +24,7 @@ import {
   DEFAULT_SHADOW_QUALITY,
   type ShadowQuality,
 } from "../../scene/shadowQuality";
+import { appPreferences } from "../../persistence/storage/appStorage";
 
 /**
  * The exposure Navara's own getting-started sets (`view.toneMappingExposure =
@@ -41,30 +42,20 @@ import {
  */
 export const DEFAULT_EXPOSURE = 10;
 
-/** Slider bounds. 0.5 is "nearly black", 30 is "blown out" — both useful when
- *  diagnosing a scene, neither a sensible resting place. */
-export const SHADOW_QUALITY_PREFERENCE_KEY = "roofy.shadowQuality";
+/** The preference store key the shadow quality is kept under. */
+export const SHADOW_QUALITY_PREFERENCE_KEY = "shadow-quality";
 function storedShadowQuality(): ShadowQuality {
-  try {
-    const value =
-      typeof localStorage === "undefined"
-        ? null
-        : localStorage.getItem(SHADOW_QUALITY_PREFERENCE_KEY);
-    return value === "low" || value === "medium" || value === "high"
-      ? value
-      : DEFAULT_SHADOW_QUALITY;
-  } catch {
-    return DEFAULT_SHADOW_QUALITY;
-  }
+  const value = appPreferences.get(SHADOW_QUALITY_PREFERENCE_KEY);
+  return value === "low" || value === "medium" || value === "high"
+    ? value
+    : DEFAULT_SHADOW_QUALITY;
 }
 function persistShadowQuality(value: ShadowQuality): void {
-  try {
-    localStorage.setItem(SHADOW_QUALITY_PREFERENCE_KEY, value);
-  } catch {
-    /* preference storage is optional */
-  }
+  appPreferences.set(SHADOW_QUALITY_PREFERENCE_KEY, value);
 }
 
+/** Slider bounds. 0.5 is "nearly black", 30 is "blown out" — both useful when
+ *  diagnosing a scene, neither a sensible resting place. */
 export const EXPOSURE_RANGE = { min: 0.5, max: 30, step: 0.5 } as const;
 
 export interface RenderDebugState {
@@ -88,7 +79,7 @@ export interface RenderDebugState {
   readonly exposure: number;
   /**
    * Draw the ground-plane rectangle each FlatCityBuf layer's last commit
-   * actually queried (`FcbStreamLayerHandle.onQueryRegion`), plus a readout of
+   * actually queried (`StreamLayerHandle.onQueryRegion`), plus a readout of
    * its source-CRS numbers.
    *
    * Its engine counterpart is a `smoothLines` mesh per streaming layer, added

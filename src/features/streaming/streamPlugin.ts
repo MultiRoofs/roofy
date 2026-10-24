@@ -1,5 +1,5 @@
 /**
- * The app's one reference to the live `FlatCityBufPlugin`.
+ * The app's one reference to the live `CityStreamPlugin`.
  *
  * The plugin is constructed by the component that owns the engine
  * (`NavaraViewport`, Task C13) and torn down with it, but the code that OPENS
@@ -21,21 +21,21 @@
  * a layer cannot be opened before the engine is up in the first place.
  */
 import type {
-  FcbStreamLayerHandle,
+  StreamLayerHandle,
   OpenStreamOptions,
-} from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
 
 /**
- * The part of `FlatCityBufPlugin` the app actually calls.
+ * The part of `CityStreamPlugin` the app actually calls.
  *
- * Structural, not the class: `FlatCityBufPlugin` lives behind the
+ * Structural, not the class: `CityStreamPlugin` lives behind the
  * `/plugin` subpath, which imports `@navaramap/*` and therefore cannot be
  * loaded under Node (Global Constraints -> NODE_IMPORT_SAFE = false). Typing
  * against the shape keeps every app-side streaming test engine-free while
  * still accepting the real plugin.
  */
 export interface StreamPlugin {
-  openStream(opts: OpenStreamOptions): Promise<FcbStreamLayerHandle>;
+  openStream(opts: OpenStreamOptions): Promise<StreamLayerHandle>;
   /** Tears one layer down: its worker, its cell meshes, its place in the
    *  plugin's settle loop. Unknown ids are ignored. */
   remove(id: string): void;
@@ -59,7 +59,8 @@ export function getStreamPlugin(): StreamPlugin | null {
  *
  * Streaming is the ONE load path that cannot work without the 3D engine — the
  * plugin owns the worker, the cell meshes and the camera-driven commit loop —
- * so a `.fcb` opened before the engine is up has to fail loudly. Both call
+ * so a streaming source (FlatCityBuf, or a large CityParquet) opened before
+ * the engine is up has to fail loudly. Both call
  * sites already catch and surface the message (`useLayerFileLoader`'s error
  * state, `App.tsx`'s restore toast), so this reads as a normal load failure
  * rather than a crash.
@@ -67,7 +68,7 @@ export function getStreamPlugin(): StreamPlugin | null {
 export function requireStreamPlugin(): StreamPlugin {
   if (!current) {
     throw new Error(
-      "The 3D engine is not running yet, so a streaming (.fcb) layer cannot be opened. Wait for the viewer to finish loading and try again.",
+      "The 3D engine is not running yet, so a streaming layer cannot be opened. Wait for the viewer to finish loading and try again.",
     );
   }
   return current;

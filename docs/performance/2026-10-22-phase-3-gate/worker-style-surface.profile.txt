@@ -1,0 +1,181 @@
+#### main timeline
+     200 ms  busy    2 ms  wasm-function[12427] engine/navara_wasm_bg.wasm:0
+     300 ms  busy    3 ms  wasm-function[1151] engine/navara_wasm_bg.wasm:0
+     400 ms  busy    4 ms  wasm-function[225] engine/navara_wasm_bg.wasm:0
+     500 ms  busy    3 ms  requestAnimationFrame :-1
+     600 ms  busy    6 ms  emit deps/dist-Cl39IsRE.js?v=c2f02669:35254
+     700 ms  busy    3 ms  wasm-function[701] engine/navara_wasm_bg.wasm:0
+     800 ms  busy   47 ms  cityCounts viewport/legendCounts.ts:22
+     900 ms  busy   95 ms  setColors src/cityStyle.ts:103
+    1000 ms  busy   11 ms  (garbage collector) :-1
+    1100 ms  busy    1 ms  (anon) :0
+    1500 ms  busy    1 ms  (anon) :-1
+    2100 ms  busy    1 ms  (anon) :-1
+    3000 ms  busy    1 ms  wasm-function[2137] engine/navara_wasm_bg.wasm:0
+    3100 ms  busy    1 ms  (anon) :0
+    3500 ms  busy    1 ms  (anon) :-1
+    3600 ms  busy    1 ms  (anon) :-1
+    3700 ms  busy    1 ms  (anon) :-1
+    5100 ms  busy    1 ms  wasm-function[1748] engine/navara_wasm_bg.wasm:0
+    5200 ms  busy    2 ms  requestAnimationFrame :-1
+    5300 ms  busy    6 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    5400 ms  busy    3 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    5500 ms  busy    2 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    5600 ms  busy    3 ms  wasm-function[6760] engine/navara_wasm_bg.wasm:0
+    5700 ms  busy    4 ms  (anon) :0
+    5800 ms  busy    2 ms  wasm-function[116] engine/navara_wasm_bg.wasm:0
+    5900 ms  busy    2 ms  wasm-function[829] engine/navara_wasm_bg.wasm:0
+    6000 ms  busy    1 ms  (anon) :-1
+    6100 ms  busy    4 ms  wasm-function[6022] engine/navara_wasm_bg.wasm:0
+    6200 ms  busy    6 ms  wasm-function[324] engine/navara_wasm_bg.wasm:0
+    6300 ms  busy    2 ms  wasm-function[1023] engine/navara_wasm_bg.wasm:0
+    6400 ms  busy    2 ms  wasm-function[8329] engine/navara_wasm_bg.wasm:0
+    6500 ms  busy    3 ms  wasm-function[12002] engine/navara_wasm_bg.wasm:0
+    6600 ms  busy    3 ms  wasm-function[116] engine/navara_wasm_bg.wasm:0
+    6700 ms  busy    2 ms  (anon) :0
+    6800 ms  busy    1 ms  wasm-function[289] engine/navara_wasm_bg.wasm:0
+    6900 ms  busy    5 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+    7000 ms  busy    6 ms  wasm-function[327] engine/navara_wasm_bg.wasm:0
+#### main span 7192 ms
+-- self --
+   6704 ms  (idle) :-1
+    241 ms  (program) :-1
+     43 ms  setColors src/cityStyle.ts:103
+     33 ms  cityCounts viewport/legendCounts.ts:22
+     27 ms  parentsIndexOf citymodel/featureId.ts:1
+     18 ms  exports.jsxDEV deps/react_jsx-dev-runtime.js?v=c2f02669:189
+     12 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+      9 ms  (anon) :-1
+      7 ms  (garbage collector) :-1
+      6 ms  requestAnimationFrame :-1
+      4 ms  (anon) :0
+      3 ms  updateMatrixWorld deps/three.module-B8nzIm16.js?v=c2f02669:31796
+      2 ms  wasm-function[562] engine/navara_wasm_bg.wasm:0
+      2 ms  wasm-function[116] engine/navara_wasm_bg.wasm:0
+      2 ms  onAnimationFrame deps/three.module-B8nzIm16.js?v=c2f02669:41017
+      2 ms  wasm-function[434] engine/navara_wasm_bg.wasm:0
+      1 ms  commitMutationEffectsOnFiber deps/react-dom_client.js?v=c2f02669:7233
+      1 ms  needsUpdate deps/three.module-B8nzIm16.js?v=c2f02669:41950
+      1 ms  wasm-function[6840] engine/navara_wasm_bg.wasm:0
+      1 ms  emit deps/dist-Cl39IsRE.js?v=c2f02669:35254
+      1 ms  wasm-function[12002] engine/navara_wasm_bg.wasm:0
+      1 ms  wasm-function[9622] engine/navara_wasm_bg.wasm:0
+      1 ms  wasm-function[225] engine/navara_wasm_bg.wasm:0
+      1 ms  FiberNode deps/react-dom_client.js?v=c2f02669:2701
+      1 ms  wasm-function[238] engine/navara_wasm_bg.wasm:0
+      1 ms  wasm-function[8678] engine/navara_wasm_bg.wasm:0
+      1 ms  wasm-function[221] engine/navara_wasm_bg.wasm:0
+      1 ms  wasm-function[701] engine/navara_wasm_bg.wasm:0
+      1 ms  WebGLRenderer.getClearColor deps/three.module-B8nzIm16.js?v=c2f02669:50470
+      1 ms  wasm-function[1748] engine/navara_wasm_bg.wasm:0
+-- inclusive --
+   7191 ms  (root) :-1
+   6704 ms  (idle) :-1
+    241 ms  (program) :-1
+     88 ms  onAnimationFrame deps/three.module-B8nzIm16.js?v=c2f02669:41017
+     86 ms  (anon) deps/dist-Cl39IsRE.js?v=c2f02669:70449
+     86 ms  performWorkOnRoot deps/react-dom_client.js?v=c2f02669:7938
+     86 ms  performSyncWorkOnRoot deps/react-dom_client.js?v=c2f02669:9061
+     86 ms  flushSyncWorkAcrossRoots_impl deps/react-dom_client.js?v=c2f02669:8966
+     86 ms  processRootScheduleInMicrotask deps/react-dom_client.js?v=c2f02669:8993
+     86 ms  (anon) deps/react-dom_client.js?v=c2f02669:9075
+     82 ms  runWithFiberInDEV deps/react-dom_client.js?v=c2f02669:845
+     81 ms  performUnitOfWork deps/react-dom_client.js?v=c2f02669:8425
+     81 ms  workLoopSync deps/react-dom_client.js?v=c2f02669:8322
+     81 ms  renderRootSync deps/react-dom_client.js?v=c2f02669:8266
+     80 ms  beginWork deps/react-dom_client.js?v=c2f02669:6079
+     80 ms  run :-1
+     79 ms  react_stack_bottom_frame deps/react-dom_client.js?v=c2f02669:12862
+     79 ms  renderWithHooks deps/react-dom_client.js?v=c2f02669:4199
+     78 ms  updateFunctionComponent deps/react-dom_client.js?v=c2f02669:5559
+     71 ms  _update deps/dist-Cl39IsRE.js?v=c2f02669:70129
+     70 ms  wasm-function[4600] engine/navara_wasm_bg.wasm:0
+     70 ms  js-to-wasm:id: engine/navara_wasm_bg.wasm:0
+     68 ms  wasm-function[961] engine/navara_wasm_bg.wasm:0
+     68 ms  wasm-function[8907] engine/navara_wasm_bg.wasm:0
+     68 ms  wasm-function[10389] engine/navara_wasm_bg.wasm:0
+     67 ms  wasm-function[567] engine/navara_wasm_bg.wasm:0
+     66 ms  wasm-function[12430] engine/navara_wasm_bg.wasm:0
+     65 ms  wasm-function[6010] engine/navara_wasm_bg.wasm:0
+     60 ms  updateMemo deps/react-dom_client.js?v=c2f02669:4941
+     60 ms  useMemo deps/react-dom_client.js?v=c2f02669:13268
+     60 ms  exports.useMemo deps/react-B0Q-N9AP.js?v=c2f02669:756
+     43 ms  setColors src/cityStyle.ts:103
+     43 ms  setColors src/cityStyle.ts:202
+     43 ms  setColors src/cityMesh.ts:128
+     43 ms  setColors src/cityMesh.ts:252
+     43 ms  (anon) src/streamLayer.ts:672
+     43 ms  onMessage src/workerClient.ts:88
+     43 ms  WorkerClient.worker.onmessage src/workerClient.ts:27
+     35 ms  LegendOverlay viewport/LegendOverlay.tsx:34
+     33 ms  cityCounts viewport/legendCounts.ts:22
+     33 ms  (anon) viewport/legendCounts.ts:122
+     33 ms  countedLegendGroups viewport/legendCounts.ts:121
+     33 ms  (anon) viewport/LegendOverlay.tsx:57
+     27 ms  parentsIndexOf citymodel/featureId.ts:1
+     27 ms  (anon) table/useLayerCounts.ts:46
+     27 ms  useLayerCounts table/useLayerCounts.ts:26
+     27 ms  FilterChip viewport/FilterChip.tsx:11
+     19 ms  exports.jsxDEV deps/react_jsx-dev-runtime.js?v=c2f02669:189
+     14 ms  _render deps/dist-Cl39IsRE.js?v=c2f02669:70146
+     13 ms  render deps/dist-Cl39IsRE.js?v=c2f02669:44286
+     13 ms  render deps/dist-Cl39IsRE.js?v=c2f02669:68070
+     12 ms  render deps/dist-Cl39IsRE.js?v=c2f02669:67837
+     12 ms  WebGLRenderer.render deps/three.module-B8nzIm16.js?v=c2f02669:50824
+     11 ms  _renderWithLight deps/dist-Cl39IsRE.js?v=c2f02669:67774
+     10 ms  (anon) :-1
+      8 ms  renderWithHooksAgain deps/react-dom_client.js?v=c2f02669:4246
+      7 ms  WebGLRenderer.renderBufferDirect deps/three.module-B8nzIm16.js?v=c2f02669:50625
+      7 ms  (garbage collector) :-1
+      6 ms  requestAnimationFrame :-1
+      6 ms  tick debug/perfProbe.ts:125
+#### c9b81f40-1470-4ad8-94be-b15b33f6f679 timeline
+
+#### c9b81f40-1470-4ad8-94be-b15b33f6f679 span 7004 ms
+-- self --
+   7004 ms  (idle) :-1
+-- inclusive --
+   7004 ms  (idle) :-1
+   7004 ms  (root) :-1
+#### fcb.worker.ts?worker_file&type=module timeline
+     900 ms  busy    3 ms  ctx.onmessage src/streamWorkerCore.ts:453
+#### fcb.worker.ts?worker_file&type=module span 6854 ms
+-- self --
+   6851 ms  (idle) :-1
+      3 ms  ctx.onmessage src/streamWorkerCore.ts:453
+-- inclusive --
+   6854 ms  (root) :-1
+   6851 ms  (idle) :-1
+      3 ms  ctx.onmessage src/streamWorkerCore.ts:453
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 6467 ms
+-- self --
+   6466 ms  (idle) :-1
+-- inclusive --
+   6466 ms  (idle) :-1
+   6466 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 6467 ms
+-- self --
+   6466 ms  (idle) :-1
+-- inclusive --
+   6466 ms  (idle) :-1
+   6466 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 6466 ms
+-- self --
+   6465 ms  (idle) :-1
+-- inclusive --
+   6465 ms  (idle) :-1
+   6465 ms  (root) :-1
+#### index-DuPVPW0m.js timeline
+
+#### index-DuPVPW0m.js span 6466 ms
+-- self --
+   6465 ms  (idle) :-1
+-- inclusive --
+   6465 ms  (idle) :-1
+   6465 ms  (root) :-1

@@ -1,12 +1,15 @@
 /**
- * DuckDB-wasm integration with the cityjson community extension.
+ * DuckDB-wasm integration with the cityjson extension.
  *
  * Provides a lazy-initialized singleton DuckDB instance that attempts
  * to load the cityjson extension for analytical SQL queries over city
  * model files.
  *
- * If extension loading fails (e.g., WASM build unavailable in the
- * community repo), the module reports the failure via getDuckDBStatus()
+ * Every extension comes from the app's own origin: `public/duckdb-ext/` holds
+ * the builds for the pinned DuckDB version (`scripts/vendor-extensions.mjs`,
+ * checked by `scripts/check-lockstep.mjs`), never DuckDB's CDN at runtime.
+ *
+ * If extension loading fails, the module reports the failure via getDuckDBStatus()
  * and all query functions return null. The M4.2 pure-function stats
  * remain fully functional as the primary analytics path.
  *
@@ -29,10 +32,9 @@ export type ExtensionStatus =
   | { readonly state: "unloaded" | "loading" | "loaded" }
   | { readonly state: "failed"; readonly error: string };
 
-/** One row of `duckdb_extensions() WHERE loaded`, for the status tooltip. The
- *  community slot for a DuckDB version can be REBUILT under us — the
- *  duckdb-wasm pin is what pins the extension build — so a schema drift has to
- *  be diagnosable from the UI without a console. */
+/** One row of `duckdb_extensions() WHERE loaded`, for the status tooltip, so
+ *  the vendored build the session runs is diagnosable from the UI without a
+ *  console. */
 export interface LoadedExtension {
   readonly name: string;
   readonly version: string;
@@ -322,13 +324,22 @@ export function formatDuckDBError(error: unknown): string {
 // Extensions
 // ---------------------------------------------------------------------------
 
-/** `spatial` is a CORE extension — `INSTALL spatial FROM community` fails
- *  outright — while `cityjson` and `three_d` come from the community repo.
- *  Neither `spatial` nor `three_d` autoloads in wasm. */
+/** The vendored extensions, served by the app itself at
+ *  `<base>/duckdb-ext/<duckdb version>/<platform>/`. A CDN path carries no
+ *  extension version, so a new upstream release would change behaviour
+ *  without a deploy. Only `wasm_eh` is vendored: a browser without wasm
+ *  exceptions (none current) gets the mvp bundle, whose extension downloads
+ *  fail, and the status shows them as failed. */
+const EXTENSION_REPOSITORY = new URL(
+  `${import.meta.env.BASE_URL}duckdb-ext`,
+  location.href,
+).href;
+
+/** Plain `INSTALL`: the session's repositories point at the vendored
+ *  directory before any extension is installed. Neither `spatial` nor
+ *  `three_d` autoloads in wasm. */
 function installStatement(name: ExtensionName): string {
-  return name === "spatial"
-    ? "INSTALL spatial"
-    : `INSTALL ${name} FROM community`;
+  return `INSTALL ${name}`;
 }
 
 /** The boot passes its OWN connection, rather than letting this read `conn`
@@ -401,8 +412,7 @@ function failLazyExtensionsIfOffline(): void {
 }
 
 /** `PRAGMA platform` — "wasm_eh" or "wasm_mvp". Which one a session got
- *  decides WHICH extension artefacts the community repo served it, so a
- *  schema-drift report is unactionable without it. Best effort. */
+ *  decides which vendored directory its extensions come from. Best effort. */
 async function readPlatform(
   connection: duckdb.AsyncDuckDBConnection | null = conn,
 ): Promise<string | null> {
@@ -461,10 +471,8 @@ async function doInit(): Promise<void> {
     // Bundles come from jsDelivr, not from our own dist/: the mvp wasm alone
     // is 38 MB, which is over Cloudflare Workers' 25 MiB per-asset limit —
     // self-hosting it made the app undeployable there. DuckDB analytics
-    // already needs the network at runtime regardless (the cityjson
-    // community extension below is fetched from DuckDB's CDN), and this
-    // whole module degrades gracefully offline, so the CDN is not a new
-    // point of failure. `selectBundle` picks eh over mvp where the browser
+    // degrades gracefully offline, so the CDN is not a point of failure the
+    // app cannot survive. `selectBundle` picks eh over mvp where the browser
     // supports wasm exceptions; neither needs COOP/COEP.
     const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
 
@@ -510,6 +518,16 @@ async function doInit(): Promise<void> {
       created.terminate();
       return;
     }
+    // The vendored cityjson and three_d are CI builds of their develop
+    // branches, which no repository has signed. Safe because the app's own
+    // origin is the only extension repository (below) and no user-written SQL
+    // reaches the engine: `insights/sql.ts` quotes every identifier and
+    // literal it builds.
+    await instance.open({ allowUnsignedExtensions: true });
+    if (stale()) {
+      created.terminate();
+      return;
+    }
     const connection = await instance.connect();
     if (stale()) {
       created.terminate();
@@ -520,6 +538,18 @@ async function doInit(): Promise<void> {
     // read it in between.
     db = instance;
     conn = connection;
+
+    // Both repositories, before anything installs: `INSTALL` reads the
+    // custom one, and an autoload (`parquet`, for `read_parquet`) the
+    // autoinstall one. Left at its default, an autoload would still reach
+    // DuckDB's CDN.
+    await connection.query(
+      `SET custom_extension_repository = '${EXTENSION_REPOSITORY}'`,
+    );
+    await connection.query(
+      `SET autoinstall_extension_repository = '${EXTENSION_REPOSITORY}'`,
+    );
+    if (stale()) return;
 
     // `cityjson` at init, because every layer table wants it. `spatial` and
     // `three_d` are lazy (`ensureExtension`): nothing in this feature needs
@@ -801,6 +831,116 @@ export async function registerBuffer(
     })(),
     false,
   );
+}
+
+/**
+ * What a registration DID, never a throw.
+ *
+ * A boolean would do for {@link registerBuffer}, whose failure has one cause
+ * (the bytes could not be handed over). These two can fail for reasons the user
+ * can act on — a URL that 404s or is blocked by CORS, a `File` the browser will
+ * not read any more — and the message is what the family's table state shows
+ * instead of a bare "failed".
+ */
+export type RegisterOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string };
+
+const NOT_RUNNING_OUTCOME: RegisterOutcome = {
+  ok: false,
+  message: NOT_RUNNING,
+};
+
+/**
+ * Register `url` as a DuckDB file that is read over HTTP, in RANGES.
+ *
+ * Nothing is downloaded here, and nothing is copied: `read_parquet` of this
+ * name reads the footer and then only the column chunks a query needs. That is
+ * the whole of ruling R-B′ — the family "table" is a view over this, so a
+ * 884 106-row table costs 26 ms to publish and no JS heap at all, against
+ * 961 ms and 247 MB of DuckDB memory to materialise (measured, see
+ * `docs/performance/cityparquet-2026-09-21/duckdb-read-parquet-spike.json`).
+ *
+ * `directIO` is FALSE, exactly as the spike ran it: it is what lets the HTTP
+ * filesystem serve ranged reads out of its own buffering rather than reading
+ * through on every request.
+ *
+ * `name` is interpolated into `read_parquet('<name>')` by the caller, so it
+ * must be a name this app GENERATED — never a URL, a filename or anything else
+ * a third party chose. Registering the same name again replaces what it points
+ * at (the same rule as {@link registerBuffer}).
+ */
+export async function registerParquetUrl(
+  name: string,
+  url: string,
+): Promise<RegisterOutcome> {
+  if (!db || status.state !== "ready") return NOT_RUNNING_OUTCOME;
+  const live = db;
+  return await settleOnDeath(
+    (async (): Promise<RegisterOutcome> => {
+      try {
+        await live.registerFileURL(
+          name,
+          url,
+          duckdb.DuckDBDataProtocol.HTTP,
+          false,
+        );
+        return { ok: true };
+      } catch (error) {
+        console.warn(`DuckDB could not register "${url}":`, error);
+        return { ok: false, message: formatDuckDBError(error) };
+      }
+    })(),
+    NOT_RUNNING_OUTCOME,
+  );
+}
+
+/**
+ * Register a local `File` as a DuckDB file, read through `FileReader`.
+ *
+ * The local-package twin of {@link registerParquetUrl}: a `File` is a REFERENCE
+ * to bytes on disk, so a package the user picked from a folder is read in the
+ * same ranged way and never lands on the JS heap.
+ *
+ * `directIO` is TRUE here, which is how duckdb-wasm's own examples register a
+ * picked file — the FileReader protocol reads the slices DuckDB asks for and
+ * has no buffering layer of its own to bypass.
+ */
+export async function registerParquetFile(
+  name: string,
+  file: File,
+): Promise<RegisterOutcome> {
+  if (!db || status.state !== "ready") return NOT_RUNNING_OUTCOME;
+  const live = db;
+  return await settleOnDeath(
+    (async (): Promise<RegisterOutcome> => {
+      try {
+        await live.registerFileHandle(
+          name,
+          file,
+          duckdb.DuckDBDataProtocol.BROWSER_FILEREADER,
+          true,
+        );
+        return { ok: true };
+      } catch (error) {
+        console.warn(`DuckDB could not register the file "${name}":`, error);
+        return { ok: false, message: formatDuckDBError(error) };
+      }
+    })(),
+    NOT_RUNNING_OUTCOME,
+  );
+}
+
+/**
+ * Forget a registered source (a URL or a `File` handle).
+ *
+ * {@link dropBuffer} by another name — the VFS entry goes the same way — and
+ * spelled separately because what it releases is a REGISTRATION, not bytes this
+ * app holds: the caller that drops one must have retired every view over it
+ * first, since a dropped name still resolves, to nothing.
+ */
+export async function dropRegisteredFile(name: string): Promise<void> {
+  await dropBuffer(name);
 }
 
 /** Drop a VFS entry. Never throws: a drop that fails must not discard a

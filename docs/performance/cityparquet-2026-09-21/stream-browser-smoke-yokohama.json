@@ -1,0 +1,26 @@
+{
+  "trianglesAt": 43320,
+  "finalStatus": "Navara\u00b7 1 FPS\u00b7 4.5K of 884.1K loaded objects\n21 resident cells \u00b7 Settled",
+  "heapMB": 175,
+  "longtasksOver500": [
+    [3000, 609],
+    [11875, 696],
+    [43337, 1863],
+    [45207, 839]
+  ],
+  "logs": [
+    "warning: THREE.WARNING: Multiple instances of Three.js being imported.",
+    "warning: [googleTiles] VITE_GOOGLE_MAPS_API_KEY not set. Tiles disabled."
+  ],
+  "what": "Browser smoke, Yokohama building.parquet streamed via share link",
+  "date": "2026-09-22",
+  "browser": "Chrome 147 headless, SwiftShader (software GL), Linux host",
+  "build": "Vite dev server (npm run dev), develop 145d19a",
+  "camera": {
+    "lng": 139.622,
+    "lat": 35.4625,
+    "height": 900,
+    "pitch": -65
+  },
+  "note": "trianglesAt = ms from navigation until the status bar first showed resident objects; heapMB = performance.memory.usedJSHeapSize at the end; longtasksOver500 = [startMs, durationMs]"
+}

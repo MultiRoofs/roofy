@@ -770,6 +770,63 @@ Carried to M4 — things a user can notice today:
   1024 at `innerWidth` 1000), clipping the right edge of the right panel with
   the panel collapsed too. Pre-existing and unrelated to the toolbox.
 
+## Open follow-ups
+
+Named here because they belong to no milestone above and would otherwise live
+only in a plan nobody re-reads.
+
+### A restored selection of a non-resident streamed object never resolves
+
+A share link or a saved workspace that names an object of a STREAMED layer
+which is not resident — its cell has not been fetched, because the restored
+camera does not cover it — leaves `useResolvedBuilding` at `loading: true`
+indefinitely. Nothing ever completes it: residency arrives only when the
+camera visits that cell, so the inspector shows a spinner for a selection the
+workspace itself recorded. **This is a correctness bug, not a performance
+task.**
+
+It is also the one place a per-object lookup has positive value, and the fix
+is small because the machinery already exists: each object family publishes a
+DuckDB VIEW over its own file (`src/insights/familyViews.ts`), so
+`SELECT … FROM <family view> WHERE id = ?` answers for any row of the file,
+resident or not — provided the view is ready when the selection restores.
+
+Found by the task-4 measurement of 2026-09-23, which refused the on-demand
+attribute fetch it was gating (`docs/plans/2026-09-22-cityparquet-on-demand-attributes.md`).
+Deliberately NOT implemented there: resolving a non-resident object is a
+different feature from avoiding an attribute read, and it belongs in a plan of
+its own — "resolve a non-resident selection from its family view" — never as a
+revival of the deferred-attribute idea, which the measurement closed.
+
+### The winding heuristic needs a real inside/outside test, not a bbox centre
+
+`orientExteriorRing` (`navara-core/src/geometry/buildCityMeshArrays.ts`) decides
+a face's orientation with one bit: does the face's centroid sit on the far side
+of the object's bbox CENTRE from where its normal points. That is right only
+while the box puts the face clearly on ONE side of its centre, and four shapes
+fail it — a null `bbox` (a CityParquet child row), a valid but z-degenerate or
+near-flat box (a table whose only geometry is LoD 0 footprints has one
+legitimately), geometry the read kept sitting on the wrong side of a box
+dominated by geometry the read dropped (a roof at 8 m inside a 0..40 m row box
+inverts, at exactly `boxHeight / 2`), and a face that legitimately faces its own
+centroid (an L-shape's inner walls, a courtyard). All four are measured and
+described in `docs/architecture-notes.md`'s Winding bullet, and the first three
+are pinned in `navara-core/tests/geo/geodeticRingsToEnu.test.ts`.
+
+**A real inside/outside test closes all four at once** — a signed-volume test
+over the object's shell, or consistency of orientation across a closed shell
+(propagate from one face whose direction is known, or flip the whole shell if
+its signed volume is negative) — where widening the bbox heuristic closes none
+of them properly. The cost of leaving it is bounded: the city material is
+`DoubleSide`, so what a wrong normal costs is the normal G-buffer, and any
+effect reading it.
+
+Found by the fix-round-2 review of the geographic → ENU milestone
+(2026-09-23), which measured every sub-case. Deliberately NOT fixed there:
+`projectCityObjects` seeds the static path from the same box, so these are the
+heuristic's standing limit rather than that milestone's regression, and a real
+orientation test is a change to every format's bake — its own plan.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions

@@ -2,24 +2,37 @@ import { describe, it, expect, vi } from "vitest";
 import { act, renderHook, cleanup, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { useObjectSurfaces } from "../../../../src/features/streaming/useResidentSurfaces";
-import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
+import { useStreamStore } from "../../../../src/features/streaming/streamStore";
+import type { StreamLayerHandle } from "@cityjson/navara-stream";
 import type { Surface } from "../../../../src/domain/citymodel/types";
+import type { ObjectSurfaces } from "@cityjson/navara-stream";
 
 afterEach(() => {
   cleanup();
+  useStreamStore.setState({ streams: {} });
 });
 
 /** Only `fetchSurfaces` is reached; the rest of the handle owns a worker and
  *  GPU meshes that jsdom cannot provide. */
 function fakeHandle(
-  fetchSurfaces: FcbStreamLayerHandle["fetchSurfaces"],
-): FcbStreamLayerHandle {
-  return { fetchSurfaces } as unknown as FcbStreamLayerHandle;
+  fetchSurfaces: StreamLayerHandle["fetchSurfaces"],
+): StreamLayerHandle {
+  return { fetchSurfaces } as unknown as StreamLayerHandle;
 }
 
 const SURFACES: Surface[] = [
   { type: "RoofSurface", rings: [], attributes: {}, lod: null },
 ];
+
+/** A projected layer's answer: rings in the source CRS, so no local frame. */
+const PROJECTED: ObjectSurfaces = { surfaces: SURFACES, frame: null };
+
+/** A geographic layer's answer: rings in the owning cell's ENU metres, with
+ *  the origin they are measured from. */
+const CELL_ENU: ObjectSurfaces = {
+  surfaces: SURFACES,
+  frame: { kind: "enu", lngDeg: 139.6, latDeg: 35.46, heightM: 37.2 },
+};
 
 describe("useObjectSurfaces", () => {
   it("stays 'empty' and does not fetch when objectId is null (handle present)", () => {
@@ -44,9 +57,9 @@ describe("useObjectSurfaces", () => {
   });
 
   it("goes 'loading' immediately, then 'ready' once the handle resolves", async () => {
-    let resolve!: (s: readonly Surface[]) => void;
+    let resolve!: (s: ObjectSurfaces) => void;
     const fetchSurfaces = vi.fn(
-      () => new Promise<readonly Surface[]>((r) => (resolve = r)),
+      () => new Promise<ObjectSurfaces>((r) => (resolve = r)),
     );
     const handle = fakeHandle(fetchSurfaces);
 
@@ -55,11 +68,32 @@ describe("useObjectSurfaces", () => {
     expect(fetchSurfaces).toHaveBeenCalledWith("obj-1");
 
     await act(async () => {
-      resolve(SURFACES);
+      resolve(PROJECTED);
       await Promise.resolve();
     });
 
-    expect(result.current).toEqual({ status: "ready", surfaces: SURFACES });
+    expect(result.current).toEqual({
+      status: "ready",
+      surfaces: SURFACES,
+      frame: null,
+    });
+  });
+
+  it("carries the CELL frame a geographic layer's rings are measured in", async () => {
+    // Since the geographic-to-ENU milestone a streamed cell is baked in its own
+    // ENU frame, so these rings are local metres rather than source-CRS
+    // coordinates. A consumer measuring area or slope can ignore that (those
+    // are frame-independent, and a level cell frame measures them better than a
+    // projection does); one placing a ring cannot, so the origin is published
+    // rather than dropped on the floor here.
+    const handle = fakeHandle(vi.fn().mockResolvedValue(CELL_ENU));
+    const { result } = renderHook(() => useObjectSurfaces(handle, "obj-1"));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current).toEqual({
+      status: "ready",
+      surfaces: SURFACES,
+      frame: CELL_ENU.frame,
+    });
   });
 
   it("reports an error when the handle rejects (object not resident, or the layer was removed mid-request)", async () => {
@@ -76,7 +110,7 @@ describe("useObjectSurfaces", () => {
   it("does not resurrect a rejected result after unmount (the cancelled guard covers the rejection path too)", async () => {
     let reject!: (e: Error) => void;
     const fetchSurfaces = vi.fn(
-      () => new Promise<readonly Surface[]>((_, r) => (reject = r)),
+      () => new Promise<ObjectSurfaces>((_, r) => (reject = r)),
     );
     const handle = fakeHandle(fetchSurfaces);
 
@@ -97,10 +131,11 @@ describe("useObjectSurfaces", () => {
   });
 
   it("re-fetches when objectId changes", async () => {
+    const empty: ObjectSurfaces = { surfaces: [], frame: null };
     const fetchSurfaces = vi
       .fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce(empty)
+      .mockResolvedValueOnce(empty);
     const handle = fakeHandle(fetchSurfaces);
 
     const { result, rerender } = renderHook(
@@ -113,7 +148,11 @@ describe("useObjectSurfaces", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(result.current).toEqual({ status: "ready", surfaces: [] });
+    expect(result.current).toEqual({
+      status: "ready",
+      surfaces: [],
+      frame: null,
+    });
 
     rerender({ objectId: "b" });
     expect(fetchSurfaces).toHaveBeenCalledTimes(2);
@@ -121,9 +160,9 @@ describe("useObjectSurfaces", () => {
   });
 
   it("ignores a stale response that resolves after objectId already changed", async () => {
-    const resolvers: Array<(s: readonly Surface[]) => void> = [];
+    const resolvers: Array<(s: ObjectSurfaces) => void> = [];
     const fetchSurfaces = vi.fn(
-      () => new Promise<readonly Surface[]>((r) => resolvers.push(r)),
+      () => new Promise<ObjectSurfaces>((r) => resolvers.push(r)),
     );
     const handle = fakeHandle(fetchSurfaces);
 
@@ -138,14 +177,84 @@ describe("useObjectSurfaces", () => {
 
     // Resolve the FIRST (now-stale) request after the second has started.
     await act(async () => {
-      resolvers[0]!([
-        { type: "WallSurface", rings: [], attributes: {}, lod: null },
-      ]);
+      resolvers[0]!({
+        surfaces: [
+          { type: "WallSurface", rings: [], attributes: {}, lod: null },
+        ],
+        frame: null,
+      });
       await Promise.resolve();
     });
 
     // Still loading — waiting on "b"'s request, the stale "a" response for
     // the unmounted-from-view object was discarded rather than applied.
     expect(result.current).toEqual({ status: "loading" });
+  });
+
+  it("re-fetches when the handle's stream commits (a LoD refetch changes the resident surfaces)", async () => {
+    const fetchSurfaces = vi.fn().mockResolvedValue({
+      surfaces: [],
+      frame: null,
+    } satisfies ObjectSurfaces);
+    const handle = fakeHandle(fetchSurfaces);
+    useStreamStore.setState({
+      streams: { L: { handle, version: 1 } as never },
+    });
+
+    const { result } = renderHook(() => useObjectSurfaces(handle, "obj-1"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSurfaces).toHaveBeenCalledTimes(1);
+
+    let resolveSecond!: (s: ObjectSurfaces) => void;
+    fetchSurfaces.mockImplementationOnce(
+      () => new Promise<ObjectSurfaces>((r) => (resolveSecond = r)),
+    );
+    await act(async () => {
+      useStreamStore.getState().bumpVersion("L");
+      await Promise.resolve();
+    });
+    expect(fetchSurfaces).toHaveBeenCalledTimes(2);
+    expect(fetchSurfaces).toHaveBeenNthCalledWith(2, "obj-1");
+    // Same object: the old surfaces stay up while the new ones load, rather
+    // than flashing "Loading" on every commit.
+    expect(result.current).toEqual({
+      status: "ready",
+      surfaces: [],
+      frame: null,
+    });
+
+    await act(async () => {
+      resolveSecond(PROJECTED);
+      await Promise.resolve();
+    });
+    expect(result.current).toEqual({
+      status: "ready",
+      surfaces: SURFACES,
+      frame: null,
+    });
+  });
+
+  it("does not re-fetch when ANOTHER layer's stream commits", async () => {
+    const fetchSurfaces = vi.fn().mockResolvedValue({
+      surfaces: [],
+      frame: null,
+    } satisfies ObjectSurfaces);
+    const handle = fakeHandle(fetchSurfaces);
+    const other = fakeHandle(vi.fn());
+    useStreamStore.setState({
+      streams: {
+        L: { handle, version: 1 } as never,
+        M: { handle: other, version: 1 } as never,
+      },
+    });
+
+    renderHook(() => useObjectSurfaces(handle, "obj-1"));
+    await act(async () => {
+      useStreamStore.getState().bumpVersion("M");
+      await Promise.resolve();
+    });
+    expect(fetchSurfaces).toHaveBeenCalledTimes(1);
   });
 });

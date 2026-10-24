@@ -54,6 +54,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     target: "city",
     sourceKind: null,
     needsLod: true,
+    needsMetricBounds: false,
     defaultPrefix: "roof_",
     destinations: ["layer", "new"],
     outputColumns: (prefix, params) =>
@@ -83,6 +84,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     target: "city",
     sourceKind: null,
     needsLod: true,
+    needsMetricBounds: false,
     defaultPrefix: "solid_",
     destinations: ["layer", "new"],
     outputColumns: (prefix, params) =>
@@ -112,6 +114,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     target: "city",
     sourceKind: null,
     needsLod: true,
+    needsMetricBounds: false,
     defaultPrefix: "solid_",
     destinations: ["layer", "new"],
     // No `validateParams` and no `normaliseParams`: §7.3 has no parameters, so
@@ -141,6 +144,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     target: "city",
     sourceKind: null,
     needsLod: false,
+    needsMetricBounds: false,
     defaultPrefix: "extent_",
     destinations: ["layer", "new"],
     outputColumns: (p) => [
@@ -168,6 +172,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     target: "city",
     sourceKind: "vector",
     needsLod: false,
+    needsMetricBounds: true,
     defaultPrefix: "",
     destinations: ["layer", "new"],
     outputColumns: (prefix, params) => joinColumns(prefix, joinParams(params)),
@@ -208,6 +213,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     target: "vector",
     sourceKind: "city",
     needsLod: false,
+    needsMetricBounds: true,
     defaultPrefix: "bld_",
     destinations: ["layer", "new"],
     outputColumns: (prefix, params) =>
@@ -238,6 +244,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     target: "city",
     sourceKind: "vector",
     needsLod: false,
+    needsMetricBounds: true,
     defaultPrefix: "",
     destinations: ["layer", "new"],
     outputColumns: (prefix, params) =>

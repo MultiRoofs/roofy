@@ -22,7 +22,8 @@ import {
   computeObjectStats,
 } from "../../insights/computeStats";
 import { runQuery } from "../../insights/duckdb";
-import { useLayerTableStore } from "../../insights/layerTables";
+import { layerTableKey, useLayerTableStore } from "../../insights/layerTables";
+import { useActiveFamily } from "../../features/layers/familyStore";
 import { quoteIdent } from "../../insights/sql";
 
 interface StatsTabProps {
@@ -52,8 +53,10 @@ export function StatsTab({ model, selection, layerId }: StatsTabProps) {
   // Subscribed to the entry, not read imperatively: the table is built
   // asynchronously after the layer lands, so the panel has to re-render when
   // it becomes ready.
+  // The ACTIVE family's table for a CityParquet layer (ruling S3).
+  const family = useActiveFamily(layerId);
   const tableState = useLayerTableStore((s) =>
-    layerId === null ? undefined : s.tables[layerId],
+    layerId === null ? undefined : s.tables[layerTableKey(layerId, family)],
   );
   const table = tableState?.state === "ready" ? tableState.info : null;
 
@@ -113,7 +116,7 @@ export function StatsTab({ model, selection, layerId }: StatsTabProps) {
             label="Avg slope"
             value={`${objectStats.avgRoofSlope.toFixed(1)}\u00B0`}
           />
-          {objectStats.avgRoofAzimuth > 0 && (
+          {objectStats.avgRoofAzimuth !== null && (
             <StatRow
               label="Avg azimuth"
               value={`${cardinalFromDeg(objectStats.avgRoofAzimuth)} (${objectStats.avgRoofAzimuth.toFixed(0)}\u00B0)`}

@@ -3,7 +3,7 @@
  *
  * A `.fcb` layer cannot exist before the 3D engine does: streaming has no
  * parse step that produces a `CityModel`, so the layer only appears once
- * `FlatCityBufPlugin.openStream` has resolved — and the plugin only exists
+ * `CityStreamPlugin.openStream` has resolved — and the plugin only exists
  * once a `NavaraViewport` is mounted, which used to require a layer. That
  * circle is what made a `.fcb` impossible as the FIRST layer.
  *
@@ -18,6 +18,10 @@
  * no WebGL, and `@navaramap/three` crashes at module scope under Node — Task
  * B1's NODE_IMPORT_SAFE = false). The real path is Task C14's browser smoke.
  */
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -215,7 +219,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
         modelRef: { type: "url", url: FCB_URL },
         visible: true,
         rules: [],
-        isStreaming: true,
+        source: STREAMED_SOURCE,
       });
       return "stream-1";
     };
@@ -280,11 +284,11 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     render(<App persistenceStore={emptyStore} />);
     loadFromUrlBox(JSON_URL);
 
-    // Three arguments: the URL, the default http client, and the encoding the
-    // landing page's detection resolved to — a `.city.json` reaching the
-    // reader as CityJSON rather than being re-derived there.
+    // Three arguments: the URL, the default http client, and no override. The
+    // user never corrected the dialog's guess, so the reader decides from the
+    // name and the bytes rather than being handed that guess.
     await waitFor(() =>
-      expect(loadFromUrl).toHaveBeenCalledWith(JSON_URL, undefined, "cityjson"),
+      expect(loadFromUrl).toHaveBeenCalledWith(JSON_URL, undefined, undefined),
     );
     // Still parsing: a CityJSON layer mounts the viewport as a CONSEQUENCE of
     // existing, so there is nothing to boot early for.
@@ -317,7 +321,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "Error · The 3D viewport did not start. The .fcb layer could not be opened.",
+          "Error · The 3D viewport did not start. The streaming layer could not be opened.",
         ),
       ).toBeInTheDocument(),
     );
@@ -364,7 +368,7 @@ describe("App object count across static and streaming layers", () => {
       modelRef: { type: "url", url: FCB_URL },
       visible: true,
       rules: [],
-      isStreaming: true,
+      source: STREAMED_SOURCE,
     });
     useStreamStore.setState({
       streams: {
@@ -378,6 +382,14 @@ describe("App object count across static and streaming layers", () => {
             }),
           },
           disposers: [],
+          // A FlatCityBuf header: no `objectsCount`, so no "of M".
+          header: {
+            version: "1",
+            featuresCount: 5000,
+            extent: undefined,
+            referenceSystem: undefined,
+            epsg: 28992,
+          },
           version: 1,
           status: "idle",
           message: null,
@@ -427,7 +439,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
     });
     const geoLayerId = useGeoLayerStore.getState().addGeoLayer({
       name: "roads",
@@ -474,7 +486,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
     });
     useGeoLayerStore.getState().addGeoLayer({
       name: "roads",
@@ -536,7 +548,7 @@ describe("App renders exactly one attribute view for a selection", () => {
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      isStreaming: false,
+      source: RESIDENT_SOURCE,
     });
 
     render(<App persistenceStore={emptyStore} />);

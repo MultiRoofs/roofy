@@ -1,58 +1,41 @@
 /**
  * What a STAC asset is, and whether this app can open it.
  *
- * THE INVARIANT: `loadable` must agree with what `addLayerFromUrl` will
- * ACTUALLY do with the href. That routing is by extension alone — the loader
- * calls `detectEncoding(url)`, which sends `.fcb` to the streaming plugin and
- * DEFAULTS every unrecognised extension to `"cityjson"`, i.e. to `JSON.parse`.
- * So an asset is loadable only when its extension is one the loader
- * recognises, and the decision is made by calling `detectEncoding` itself
- * rather than by a parallel table here — a second table would be free to drift
- * out of agreement with the router, and the failure mode of that drift is an
- * Add button that hands a GML document to the JSON parser.
+ * THE INVARIANT: `loadable` must agree with what the layer opener will
+ * ACTUALLY do with the href. That routing starts from the name — the format
+ * registry's `formatFromName` — so an asset is loadable only when its name is
+ * one the registry recognises, and the decision is made by asking the registry
+ * itself rather than a parallel table here: a second table would be free to
+ * drift out of agreement with the router, and the failure mode of that drift
+ * is an Add button that hands a GML document to the JSON parser.
  *
- * TWO EXCEPTIONS:
- *  - In the safe direction: a collection's stac-geoparquet items MIRROR is a
- *    `.parquet` file and is never a city model, so it is excluded from
- *    `loadable` BY DEFAULT — see {@link MIRROR_FILENAME}.
- *  - `.zip` is loadable WITHOUT `detectEncoding` agreeing, because the loader
- *    decides that one on the response's MAGIC BYTES rather than on the
- *    extension — see {@link ZIP_EXTENSION}. The invariant is unchanged; only
- *    the authority it defers to differs.
+ * ONE EXCEPTION, in the safe direction: a collection's stac-geoparquet items
+ * MIRROR is a `.parquet` file and is never a city model, so it is excluded from
+ * `loadable` BY DEFAULT — see {@link MIRROR_FILENAME}. A `.zip` is CityGML to
+ * the registry, which is what the loader unpacks from it.
  *
  * A media type is therefore used for the LABEL only. `application/gml+xml`
  * behind a `?download=` endpoint, or on an `.xml` file, names the format
  * honestly and still cannot be loaded, so the UI shows it as a download link.
  */
 
-import { detectEncoding } from "../../domain/citymodel/detectEncoding";
+import {
+  cityFormat,
+  detectFormat,
+  formatFromName,
+} from "../../domain/citymodel/formats";
 import type { StacAssetInfo, StacAssetKind } from "./stacTypes";
 
-const LABELS: Record<StacAssetKind, string> = {
-  cityjson: "CityJSON",
-  cityjsonseq: "CityJSONSeq",
-  flatcitybuf: "FlatCityBuf",
-  citygml: "CityGML",
-  cityparquet: "CityParquet",
+const OTHER_LABELS = {
   archive: "ZIP archive",
   unknown: "Unknown format",
-};
+} as const;
 
-/**
- * Extensions the loader routes. `.json` and `.jsonl` are included because
- * `detectEncoding` handles them; anything not listed falls through to its
- * `"cityjson"` default, which is exactly the case that must NOT be loadable.
- */
-const MODEL_EXTENSIONS = [
-  ".fcb",
-  ".city.jsonl",
-  ".jsonl",
-  ".city.json",
-  ".json",
-  ".citygml",
-  ".gml",
-  ".parquet",
-] as const;
+function labelOf(kind: StacAssetKind): string {
+  return kind === "archive" || kind === "unknown"
+    ? OTHER_LABELS[kind]
+    : cityFormat(kind).label;
+}
 
 /**
  * How a collection's stac-geoparquet items mirror is recognised.
@@ -107,13 +90,10 @@ const ARCHIVE_EXTENSIONS = [".zip", ".7z", ".tar"] as const;
  * The one container this app can open, and the one exception to the
  * extension-routing rule in this file's header.
  *
- * `detectEncoding(".zip")` still returns its `"cityjson"` default and is
- * deliberately not taught otherwise — the loader never asks it. `loadFromUrl`
- * sniffs ZIP MAGIC BYTES on the fetched body before it consults the encoding
- * at all, and unzips the CityGML inside (`cityGmlArchive.ts`). So the
- * invariant still holds, just through a different authority: what the loader
- * ACTUALLY does with a `.zip` href is unzip-and-parse-CityGML, and that is
- * what `loadable: true` promises here.
+ * The registry names `.zip` CityGML, and `loadFromUrl` checks the ZIP MAGIC
+ * BYTES on the fetched body before anything else and unzips the CityGML inside
+ * (`cityGmlArchive.ts`). What the loader ACTUALLY does with a `.zip` href is
+ * unzip-and-parse-CityGML, and that is what `loadable: true` promises here.
  *
  * The archive is offered even though many catalog hosts will refuse the
  * cross-origin read: a blocked fetch produces the loader's own CORS sentence
@@ -139,12 +119,12 @@ const MEDIA_TYPE_KINDS: Record<string, StacAssetKind> = {
 };
 
 function info(kind: StacAssetKind, loadable: boolean): StacAssetInfo {
-  return { kind, loadable, label: LABELS[kind] };
+  return { kind, loadable, label: labelOf(kind) };
 }
 
 /**
  * The path of an href, lowercased, with query/fragment gone and one trailing
- * `.gz` stripped — the same normalisation `detectEncoding` applies, repeated
+ * `.gz` stripped — the same normalisation `formatFromName` applies, repeated
  * here only so the "is this an extension we route?" gate sees the same string.
  */
 function extensionPath(href: string): string {
@@ -190,15 +170,17 @@ export function classifyStacAsset(
 
   // The items mirror is labelled honestly — by its media type first, since a
   // mirror behind an extensionless endpoint would otherwise read as the
-  // `detectEncoding` default, "CityJSON" — but never offered as a layer.
+  // CityJSON fallback — but never offered as a layer.
   if (isItemsMirror(path, context)) {
-    return info(kindFromMediaType(mediaType) ?? detectEncoding(path), false);
+    return info(
+      kindFromMediaType(mediaType) ?? detectFormat({ name: path }),
+      false,
+    );
   }
 
-  if (MODEL_EXTENSIONS.some((ext) => path.endsWith(ext))) {
-    // Single source of truth: whatever the loader would parse it as.
-    return info(detectEncoding(path), true);
-  }
+  // Single source of truth: whatever the loader would open it as.
+  const format = formatFromName(path);
+  if (format !== null) return info(format, true);
 
   return info(kindFromMediaType(mediaType) ?? "unknown", false);
 }

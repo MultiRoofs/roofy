@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../src/features/layers/cityLayerSource";
 import { describe, it, expect, vi } from "vitest";
 import {
   syncLayers,
@@ -59,7 +63,7 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     availableLods: [],
     lodMode: "auto",
     cameraSync: true,
-    isStreaming: false,
+    source: RESIDENT_SOURCE,
     hiddenTypes: [],
     visibleObjectIds: null,
     availableObjectTypes: [],
@@ -174,7 +178,7 @@ describe("syncStreamState appearance", () => {
   it("pushes the theme by value and only when it changes", () => {
     const handle = streamHandle();
     const memos = new Map<string, StreamSyncMemo>();
-    const l = layer({ id: "S1", isStreaming: true });
+    const l = layer({ id: "S1", source: STREAMED_SOURCE });
     syncStreamState(l, handle, memos);
     expect(handle.setAppearance).toHaveBeenCalledWith({
       kind: "texture",
@@ -183,7 +187,7 @@ describe("syncStreamState appearance", () => {
     syncStreamState(
       layer({
         id: "S1",
-        isStreaming: true,
+        source: STREAMED_SOURCE,
         selectedAppearance: { kind: "texture", name: "rgb" },
       }),
       handle,
@@ -191,7 +195,7 @@ describe("syncStreamState appearance", () => {
     );
     expect(handle.setAppearance).toHaveBeenCalledTimes(1);
     syncStreamState(
-      layer({ id: "S1", isStreaming: true, selectedAppearance: null }),
+      layer({ id: "S1", source: STREAMED_SOURCE, selectedAppearance: null }),
       handle,
       memos,
     );

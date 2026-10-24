@@ -1,3 +1,7 @@
+import {
+  RESIDENT_SOURCE,
+  STREAMED_SOURCE,
+} from "../../../../src/features/layers/cityLayerSource";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
@@ -72,7 +76,7 @@ beforeEach(() => {
     layers: [
       {
         id: "L",
-        isStreaming: false,
+        source: RESIDENT_SOURCE,
         model: {
           objects: {
             B1: { id: "B1", parents: [], children: ["P1"] },
@@ -110,6 +114,47 @@ describe("useLayerCounts", () => {
     );
     expect(runQuery.mock.calls.map(([sql]) => sql)).toContain(
       'SELECT COUNT(*) AS "n" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" = \'Building\'',
+    );
+  });
+
+  it("counts a selected object the residents never held for a FILE-backed table", async () => {
+    // A streamed CityParquet family's table reads the whole file, so a part the
+    // camera never delivered can be selected. Resolving its root through the
+    // residents found nothing, so the selected count asked about the PART's id
+    // against `feature_id` and answered zero — "Nothing selected on this layer"
+    // over a selection the user can see.
+    useLayerTableStore.setState({
+      tables: {
+        L: {
+          state: "ready",
+          info: { ...TABLE, fileBacked: true, familyKey: "building" },
+        },
+      },
+      tablePanelOpen: false,
+    });
+    useLayerStore.setState({
+      layers: [
+        { id: "L", source: STREAMED_SOURCE, model: { objects: {} } },
+      ] as never,
+    });
+    runQuery.mockResolvedValue({ ok: true, columns: ["n"], rows: [{ n: 1 }] });
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: "L", objectId: "P1" });
+    render(<Probe />);
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(screen.getByTestId("counts").textContent!),
+      ).toMatchObject({ selected: 1 }),
+    );
+    // The FILE answers which feature the selected id belongs to — one statement,
+    // no resident index and no second round trip.
+    const selected = runQuery.mock.calls
+      .map(([sql]) => sql as string)
+      .find((sql) => sql.includes('"id" IN'));
+    expect(selected).toContain(
+      'COALESCE("feature_id", "id") IN (SELECT DISTINCT COALESCE("feature_id", "id") FROM "layer_1" WHERE "id" IN (\'P1\'))',
     );
   });
 

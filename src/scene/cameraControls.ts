@@ -5,9 +5,9 @@
  * on): every function here takes the camera state the viewport last read out of
  * the engine and returns the state it should be given, so the zoom step, the
  * tilt step and the "reset to north" are unit-testable without WebGL. The
- * viewport hands the result to `view.setCamera()` — instant, and emitting no
- * camera events of its own, which is why the caller has to publish the new pose
- * itself (see `cameraPose.ts`).
+ * viewport hands the result to `view.setCamera()` — instant, its `move`
+ * reporting the pose only a frame later, which is why the caller publishes the
+ * new pose itself (see `cameraPose.ts`).
  *
  * PIVOT, NOT POSITION. Naively zooming by scaling `height`, or tilting by
  * writing `pitch` where the camera stands, both swing the model out of frame:

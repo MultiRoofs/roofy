@@ -27,6 +27,8 @@ import {
   isDroppedColumn,
   lodsFromColumnNames,
   type ColumnInfo,
+  LOD_MARKER_PREFIX,
+  readerTableSelectList,
 } from "../../../src/insights/columnKind";
 import {
   buildAttributeExportSql,
@@ -160,6 +162,48 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
     for (const file of WRITTEN_FILES) {
       rmSync(resolve(process.cwd(), file), { force: true });
     }
+  });
+
+  it("builds in one statement the table the DESCRIBE route built, LoD ladder and all", () => {
+    db.query(
+      `CREATE OR REPLACE TABLE one_read AS SELECT ${readerTableSelectList()} FROM read_cityjson('two.city.json')`,
+    );
+    const names = db
+      .query("DESCRIBE one_read")
+      .map((row) => String(row.column_name));
+    const markers = names.filter((n) => n.startsWith(LOD_MARKER_PREFIX));
+    expect(names.filter((n) => !n.startsWith(LOD_MARKER_PREFIX))).toEqual(
+      columns.map((c) => c.name),
+    );
+    expect(
+      lodsFromColumnNames(
+        markers.map((n) => n.slice(LOD_MARKER_PREFIX.length)),
+      ),
+    ).toEqual(lodsFromColumnNames(allColumns.map((c) => c.name)));
+  });
+
+  it("builds a table from a file with no geometry at all", () => {
+    const doc = {
+      type: "CityJSON",
+      version: "2.0",
+      transform: { scale: [1, 1, 1], translate: [0, 0, 0] },
+      CityObjects: { a: { type: "Building", attributes: { h: 1 } } },
+      vertices: [],
+    };
+    db.registerBytes(
+      "nogeom.city.json",
+      new TextEncoder().encode(JSON.stringify(doc)),
+    );
+    db.query(
+      `CREATE OR REPLACE TABLE no_geometry AS SELECT ${readerTableSelectList()} FROM read_cityjson('nogeom.city.json')`,
+    );
+    const names = db
+      .query("DESCRIBE no_geometry")
+      .map((row) => String(row.column_name));
+    expect(names).toContain("h");
+    expect(names.filter((n) => n.startsWith(LOD_MARKER_PREFIX))).toEqual([
+      `${LOD_MARKER_PREFIX}id`,
+    ]);
   });
 
   it("returns exactly the id set parseCityJSON produces — the map sync joins on it", async () => {

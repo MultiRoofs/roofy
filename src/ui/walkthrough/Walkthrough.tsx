@@ -16,6 +16,7 @@ import { useLayerStore } from "../../features/layers/layerStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
 import { useWorkspaceStore } from "../../features/workspace/workspaceStore";
 import { useQueryStore } from "../../features/query/queryStore";
+import { useActiveTableKey } from "../../features/layers/familyStore";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { useSolarStore } from "../../features/solar/solarStore";
 import { useRenderDebugStore } from "../../features/debug/renderDebugStore";
@@ -163,7 +164,13 @@ export function Walkthrough({
   const selected = useSelectionStore((s) =>
     s.selections.some((item) => item.layerId === layer?.id),
   );
-  const query = useQueryStore((s) => (layer ? s.queries[layer.id] : undefined));
+  // Through the ACTIVE family's key (R-C′): a CityParquet layer's query state
+  // lives under `${layerId}::${family}`, so the bare key would make the tour's
+  // "apply a filter" step never notice one.
+  const queryKey = useActiveTableKey(layer?.id ?? null);
+  const query = useQueryStore((s) =>
+    queryKey === null ? undefined : s.queries[queryKey],
+  );
   const volumeDone = useProcessingStore((s) =>
     s.runs.some(
       (r) =>

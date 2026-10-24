@@ -1,6 +1,7 @@
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { WALKTHROUGH_STEPS } from "./steps";
+import { appPreferences } from "../../persistence/storage/appStorage";
 
 export interface WalkthroughPersistence {
   hasSeen: () => boolean;
@@ -100,18 +101,17 @@ export function createWalkthroughStore(persistence: WalkthroughPersistence) {
     },
   }));
 }
-const KEY = "roofy.walkthrough.seen.v1";
+const SEEN_KEY = "walkthrough-seen";
+const PROGRESS_KEY = "walkthrough-progress";
 export const walkthroughStore = createWalkthroughStore({
-  hasSeen: () => window.localStorage.getItem(KEY) === "1",
-  markSeen: () => window.localStorage.setItem(KEY, "1"),
+  hasSeen: () => appPreferences.get(SEEN_KEY) === "1",
+  markSeen: () => appPreferences.set(SEEN_KEY, "1"),
   readProgress: () => {
-    const raw = window.localStorage.getItem(`${KEY}.progress`);
+    const raw = appPreferences.get(PROGRESS_KEY);
     return raw === null ? null : Number(raw);
   },
-  writeProgress: (index) => {
-    if (index === null) window.localStorage.removeItem(`${KEY}.progress`);
-    else window.localStorage.setItem(`${KEY}.progress`, String(index));
-  },
+  writeProgress: (index) =>
+    appPreferences.set(PROGRESS_KEY, index === null ? null : String(index)),
 });
 export const useWalkthroughStore = <T>(
   selector: (state: WalkthroughState) => T,

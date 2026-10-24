@@ -8,7 +8,11 @@ import { ProcessingInfo } from "./ProcessingInfo";
  * four states replace each other in the same place (§6.1–§6.3).
  */
 import { useProcessingStore } from "../../features/processing/processingStore";
-import { STREAMING_NO_NEW_LAYER } from "../../features/processing/deriveLayer";
+import { useHasFamilies } from "../../features/layers/familyStore";
+import {
+  FILE_BACKED_NO_LAYER_COLUMNS,
+  STREAMING_NO_NEW_LAYER,
+} from "../../features/processing/deriveLayer";
 import { submitRun } from "../../features/processing/runQueue";
 import type { ToolId } from "../../features/processing/types";
 import { useToolForm } from "./useToolForm";
@@ -24,6 +28,10 @@ const fmt = (n: number | null) =>
 
 export function ToolView({ toolId }: { readonly toolId: ToolId }) {
   const f = useToolForm(toolId);
+  // Is the scope layer's table a family VIEW over the file (R-B′)? Only a
+  // resident table is partial, and the note below is the last place that still
+  // said otherwise.
+  const familyBacked = useHasFamilies(f.cityLayer?.id ?? null);
   // §6.2's "Run again unlocks the form with the same values": it DISMISSES the
   // card for that run rather than submitting anything. The dismissal lives in
   // the store, so it survives leaving the tool view and Recent runs' "Edit &
@@ -317,7 +325,10 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
               />
             </label>
           </div>
-          {f.cityLayer?.isStreaming === true && (
+          {f.cityLayer?.source.coverage === "viewport" && !familyBacked && (
+            /* Only a RESIDENT table is partial. A CityParquet family's table is
+               a view over the file (R-B′) and `counts.all` is the whole
+               family's, so this sentence would contradict its own number. */
             <p className="processing-note">
               Runs over the {fmt(f.counts.all)} currently loaded buildings, not
               the whole dataset.
@@ -418,11 +429,23 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
             role="radiogroup"
             aria-label="Write to"
           >
-            <label>
+            {/* Disabled when the TARGET's table is a view over its file: the
+                write ends in an `ALTER TABLE` DuckDB refuses over one, and the
+                run used to fail there with a message about SQL. */}
+            <label
+              data-tooltip={
+                f.layerBlocked ? FILE_BACKED_NO_LAYER_COLUMNS : undefined
+              }
+            >
               <input
                 type="radio"
                 name="writeTo"
-                title="Write calculated attributes to the target layer. Existing output columns may be replaced, as listed below."
+                disabled={f.layerBlocked}
+                title={
+                  f.layerBlocked
+                    ? FILE_BACKED_NO_LAYER_COLUMNS
+                    : "Write calculated attributes to the target layer. Existing output columns may be replaced, as listed below."
+                }
                 checked={f.draft.destination === "layer"}
                 onChange={() => f.setDraft({ destination: "layer" })}
               />
@@ -461,8 +484,15 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
               />
             </label>
           </div>
-          {f.newLayerBlocked && (
-            <p className="processing-note">{STREAMING_NO_NEW_LAYER}</p>
+          {/* ONE note. A file-backed target blocks BOTH destinations, and its
+              sentence already says the New layer is unavailable too — printing
+              the other one under it would repeat half of itself. */}
+          {f.layerBlocked ? (
+            <p className="processing-note">{FILE_BACKED_NO_LAYER_COLUMNS}</p>
+          ) : (
+            f.newLayerBlocked && (
+              <p className="processing-note">{STREAMING_NO_NEW_LAYER}</p>
+            )
           )}
         </div>
         {f.draft.destination === "new" && (

@@ -109,10 +109,10 @@ function bloomEffectDescClass(): EffectDescConstructor {
      * wrapped in the ENGINE'S `Effect` class, never in our own
      * `new EffectPass(...)`.
      *
-     * `@navaramap/three` INLINES its copy of `postprocessing` (6.39.3) into
-     * its bundle rather than importing the peer dependency — 0.0.5 and 0.1.1
-     * alike; both bundles carry the `postprocessing@6.39.3` region and import
-     * only `three` and `@navaramap/engine*` — so the app's `postprocessing`
+     * `@navaramap/three` INLINES its copy of `postprocessing` into its bundle
+     * rather than importing the peer dependency — 0.0.5, 0.1.1 and 0.2.1
+     * alike; the 0.2.1 bundle carries the `postprocessing@6.39.4` region and
+     * imports only `three`, `srgb-linear` and `@navaramap/engine*` — so the app's `postprocessing`
      * (6.39.0) exports a DIFFERENT `Pass` class object. And
      * `EffectDesc.insertPass` picks the pass to hand the composer with
      * `instance instanceof Pass ? instance.rawPass : instance instanceof

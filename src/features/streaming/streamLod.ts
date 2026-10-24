@@ -26,7 +26,7 @@ import {
   lodForCellSize,
   type Grid,
   type LodSelection,
-} from "@cityjson/navara-flatcitybuf";
+} from "@cityjson/navara-stream";
 
 export interface StreamLodSelection {
   /** "auto": the streaming driver re-derives the LoD from the current cell
