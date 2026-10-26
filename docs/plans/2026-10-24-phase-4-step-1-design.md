@@ -1,8 +1,8 @@
 # Phase 4 step 1: re-bake streamed cells from data the worker holds
 
-Status: the store answering a cell from its own entry is built (plugins
-58f62af). Answering from an ancestor or from four children is the next
-stage. Measured on PLATEAU Chuo-ku
+Status: built. The store answers a cell from its own entry (plugins
+58f62af) and from an ancestor or its children (plugins 1d6cecc). Measured on
+PLATEAU Chuo-ku
 (`https://cityparquet.open3d.city/data/plateau/chuo-ku/building.parquet`, 72 MB,
 51,604 rows, LoD 0 to 3, EPSG:6697), streamed, camera at 1.2 km nadir.
 
@@ -74,15 +74,20 @@ Ownership is the feature's bbox centre (`ownerKey`), so it nests: a feature
 owned by cell `C` at level `l` is owned by `C`'s parent at `l - 1`. For each
 requested cell `C`, the worker looks for, in order:
 
-1. `C` itself, with a ceiling that covers the LoD. Built.
+1. `C` itself, with a ceiling that covers the LoD.
 2. An ancestor of `C` that covers it. `C`'s features are the ancestor's
-   features whose owner at `C`'s level is `C`. Next stage.
+   features whose owner at `C`'s level is `C`.
 3. All four children of `C`, each answered by this rule, at most two levels
-   down. `C`'s features are the union of theirs. Next stage.
+   down. `C`'s features are the union of theirs.
 
-Only rule 1 is built, so a level change still reads. Rules 2 and 3 need the
-ownership test to give the same cell from the stored model as from a fresh
-read at the new level, which the next stage tests first.
+An entry holds the models its cell owns (`ownedModels`), not one merged
+model, so it can be split for a finer level and joined for a coarser one;
+the bake merges a cell's list with `bucketFeatures`, as a fresh read does.
+The ownership test nests exactly: a cell size is a power-of-two fraction of
+the root, so `ownerKey` at level `l + 1`, halved, is `ownerKey` at `l`,
+clamping included. A joined cell can list its objects in another order than
+a fresh read; its geometry, records and LoDs are otherwise the same, which
+the tests check object by object.
 
 A cell that is answered is baked from those features. The others are read as
 today: one `select` over the union of their bounds, then filed into the store
@@ -96,8 +101,7 @@ This makes three things free of reads once the data is held:
   automatic read has an empty LoD ladder, so it reads `lod: null` and holds
   every LoD;
 - an appearance change, which re-bakes the same features under another theme;
-- a level change over an area already held, in either direction (rules 2
-  and 3, next stage);
+- a level change over an area already held, in either direction;
 - a cell evicted from the cell cache and fetched again.
 
 A LoD above the ceiling is still a read. Reading only that LoD's geometry
@@ -164,6 +168,27 @@ also saves the transfer. Page heap stayed at 264 to 294 MB in both. Restyles
 are unchanged, as expected: they never read. One earlier run with the
 profiler attached (`chuo9s`) hit a three.js `createBuffer` exception and drew
 no frames; it did not recur in either run without the profiler.
+
+### Zoom
+
+A zoom whose cells the main thread still holds fetches nothing, with or
+without the store, so the case the store changes is a zoom into cells never
+fetched at that level. Streamed Chuo-ku from 1.2 km, two wheel steps in
+(level 5 to 6), profiled, without (`zib`, plugins 58f62af) and with
+(`ziw`, plugins 1d6cecc) answers across levels:
+
+| Worker, zoom in    | Without | With   |
+| ------------------ | ------- | ------ |
+| Fetch handler      | 695 ms  | 309 ms |
+| Garbage collection | 962 ms  | 83 ms  |
+| Parquet read       | yes     | none   |
+
+The time to the screen did not change (13 to 15 s in both). Headless, it is
+set by the engine: on a wheel zoom it reads the depth buffer under the
+cursor (`pickDepthPosition`), and with software WebGL that `readPixels`
+blocks the main thread for 4.8 to 5.3 s while the frame renders. The rest is
+the wheel animation and the settle wait. On a GPU that read is short, so the
+worker's saving should show there; it is not measured here.
 
 ## How it is measured
 
