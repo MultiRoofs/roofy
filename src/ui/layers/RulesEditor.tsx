@@ -876,7 +876,22 @@ function orderFields(attributeFields: ReadonlyArray<string>): string[] {
   return [...metrics, ...named, ...rest];
 }
 
-function collectAttributeFields(model: CityModel): string[] {
+/** Per model, its attribute fields. Models are never changed in place (a
+ *  tool's results arrive as a new model), and walking every surface of a
+ *  city on each render of the editor cost a third of a second per rule
+ *  edit. */
+const fieldsByModel = new WeakMap<CityModel, readonly string[]>();
+
+function collectAttributeFields(model: CityModel): readonly string[] {
+  let cached = fieldsByModel.get(model);
+  if (cached === undefined) {
+    cached = walkAttributeFields(model);
+    fieldsByModel.set(model, cached);
+  }
+  return cached;
+}
+
+function walkAttributeFields(model: CityModel): string[] {
   const fields = new Set<string>();
   for (const obj of Object.values(model.objects)) {
     if (!obj) continue;

@@ -216,3 +216,30 @@ Unit tests in `navara-stream`:
   lands in the same cell as a fresh read at the new level would put it;
 - the store's budget evicts and a later request reads again;
 - `close` clears the store.
+
+## Restyles
+
+A streamed restyle does about 0.5 s of work; the 2.4–5.3 s first measured
+was basemap tiles settling. Chuo-ku (72 MB) loads whole by default, and there
+a restyle blocked the main thread for 0.6–2.1 s. The profile named six costs,
+all now removed: roof metrics re-measured per restyle (`roofMetricsOf` measures
+each surface once), every object attribute copied per roof in the rule
+evaluator, three `pow` per slot converting colours to bytes, a WeakMap lookup
+per slot in the expression evaluator, the legend re-walking every surface on
+any layer change (it now caches per object and per model), and the rule
+editor collecting attribute fields from every surface on every render (per
+model).
+
+Main-thread block per restyle, Chuo-ku loaded whole, profiled dev build:
+
+| Restyle            | Before | After  |
+| ------------------ | ------ | ------ |
+| rules              | 1.39 s | 0.66 s |
+| single colour      | 1.07 s | 0.47 s |
+| expression         | 1.95 s | 1.10 s |
+| surface types      | 0.56 s | 0.17 s |
+| rules, second time | 1.17 s | 0.50 s |
+
+What remains in an expression restyle is mostly the style spec's own
+`evaluate`. Static LoD switches still block 2–8 s; they are not part of this
+change.

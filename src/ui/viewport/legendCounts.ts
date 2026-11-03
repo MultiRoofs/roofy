@@ -1,8 +1,8 @@
 /** Pure, surface-level legend counts. These are deliberately separate from
  * building/table totals: palette and rule entries describe rendered surfaces,
  * while vector entries describe features. */
-import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
-import type { CityObject } from "../../domain/citymodel/types";
+import { roofMetricsOf, type RoofMetrics } from "@cityjson/navara-core";
+import type { CityModel, CityObject } from "../../domain/citymodel/types";
 import type { ResidentModel } from "../../features/streaming/residentModel";
 import type { GeoLayer } from "../../features/geoLayers/geoLayerStore";
 import { readGeoStableFeatureId } from "../../features/geoLayers/geoJsonRecords";
@@ -26,28 +26,89 @@ export interface CountedLegendGroup extends Omit<LegendGroup, "rows"> {
   readonly rows: ReadonlyArray<CountedLegendRow>;
 }
 
-const roofMetricsByObject = new WeakMap<
-  CityObject,
-  ReadonlyArray<{
-    readonly metrics: RoofMetrics;
-    readonly attributes: Readonly<Record<string, unknown>>;
-  }>
+/** Per object, what its surfaces add to the legend whatever the rules:
+ *  surfaces per semantic type, and its roofs' metrics. Objects are never
+ *  changed in place, so this is measured once per object. */
+interface ObjectTally {
+  readonly types: ReadonlyArray<readonly [string, number]>;
+  readonly roofs: ReadonlyArray<RoofMetrics>;
+}
+
+const objectTallies = new WeakMap<CityObject, ObjectTally>();
+
+function objectTally(object: CityObject): ObjectTally {
+  const cached = objectTallies.get(object);
+  if (cached !== undefined) return cached;
+  const types = new Map<string, number>();
+  const roofs: RoofMetrics[] = [];
+  for (const surface of object.surfaces) {
+    types.set(surface.type, (types.get(surface.type) ?? 0) + 1);
+    if (surface.type === "RoofSurface") roofs.push(roofMetricsOf(surface));
+  }
+  const tally = { types: [...types], roofs };
+  objectTallies.set(object, tally);
+  return tally;
+}
+
+interface StaticTally {
+  readonly total: number;
+  readonly surfaceCounts: ReadonlyMap<string, number>;
+  readonly ruleCounts: ReadonlyMap<string, number>;
+  readonly unmatched: number;
+}
+
+/** A static model's last tally and what it was counted under. A layer
+ *  changes for many reasons (visibility, colour mode, selection), and only
+ *  these four change a static layer's counts. */
+const staticTallies = new WeakMap<
+  CityModel,
+  {
+    readonly rules: Layer["rules"];
+    readonly hiddenTypes: Layer["hiddenTypes"];
+    readonly visibleObjectIds: Layer["visibleObjectIds"];
+    readonly tally: StaticTally;
+  }
 >();
 
-function staticRoofs(object: CityObject): ReadonlyArray<{
-  readonly metrics: RoofMetrics;
-  readonly attributes: Readonly<Record<string, unknown>>;
-}> {
-  const cached = roofMetricsByObject.get(object);
-  if (cached !== undefined) return cached;
-  const roofs = object.surfaces
-    .filter((surface) => surface.type === "RoofSurface")
-    .map((surface) => ({
-      metrics: computeRoofMetrics(surface),
-      attributes: object.attributes,
-    }));
-  roofMetricsByObject.set(object, roofs);
-  return roofs;
+function staticTally(layer: Layer): StaticTally {
+  const cached = staticTallies.get(layer.model);
+  if (
+    cached !== undefined &&
+    cached.rules === layer.rules &&
+    cached.hiddenTypes === layer.hiddenTypes &&
+    cached.visibleObjectIds === layer.visibleObjectIds
+  ) {
+    return cached.tally;
+  }
+  let total = 0;
+  const surfaceCounts = new Map<string, number>([
+    ["RoofSurface", 0],
+    ["WallSurface", 0],
+    ["GroundSurface", 0],
+  ]);
+  const ruleCounts = new Map<string, number>();
+  let unmatched = 0;
+  for (const object of Object.values(layer.model.objects)) {
+    if (!object || !shown(layer, object)) continue;
+    total += object.surfaces.length;
+    const { types, roofs } = objectTally(object);
+    for (const [type, count] of types) {
+      surfaceCounts.set(type, (surfaceCounts.get(type) ?? 0) + count);
+    }
+    for (const metrics of roofs) {
+      const match = firstMatchingRule(object.attributes, metrics, layer.rules);
+      if (match === null) unmatched += 1;
+      else ruleCounts.set(match.id, (ruleCounts.get(match.id) ?? 0) + 1);
+    }
+  }
+  const tally = { total, surfaceCounts, ruleCounts, unmatched };
+  staticTallies.set(layer.model, {
+    rules: layer.rules,
+    hiddenTypes: layer.hiddenTypes,
+    visibleObjectIds: layer.visibleObjectIds,
+    tally,
+  });
+  return tally;
 }
 
 function shown(
@@ -66,27 +127,16 @@ function cityCounts(
 ): ReadonlyArray<number | null> {
   const rows = cityRows(layer);
   const streaming = layer.source.access === "stream";
-  const surfaceCounts = new Map<string, number>([
-    ["RoofSurface", 0],
-    ["WallSurface", 0],
-    ["GroundSurface", 0],
-  ]);
   let total = 0;
   let unavailable = false;
   let metricsUnavailable = false;
-  const ruleCounts = new Map<string, number>();
+  let surfaceCounts: ReadonlyMap<string, number>;
+  let ruleCounts: ReadonlyMap<string, number>;
   let unmatched = 0;
 
-  const matchRoof = (
-    attributes: Readonly<Record<string, unknown>>,
-    metrics: RoofMetrics,
-  ) => {
-    const match = firstMatchingRule(attributes, metrics, layer.rules);
-    if (match === null) unmatched += 1;
-    else ruleCounts.set(match.id, (ruleCounts.get(match.id) ?? 0) + 1);
-  };
-
   if (streaming) {
+    let roofs = 0;
+    const matched = new Map<string, number>();
     for (const record of Object.values(resident?.objects ?? {})) {
       if (!shown(layer, record)) continue;
       if (!Number.isFinite(record.surfaceCount)) unavailable = true;
@@ -95,26 +145,25 @@ function cityCounts(
         metricsUnavailable = true;
         continue;
       }
-      surfaceCounts.set(
-        "RoofSurface",
-        (surfaceCounts.get("RoofSurface") ?? 0) + record.roofMetrics.length,
-      );
-      for (const metrics of record.roofMetrics)
-        matchRoof(record.attributes, metrics);
-    }
-  } else {
-    for (const object of Object.values(layer.model.objects)) {
-      if (!object || !shown(layer, object)) continue;
-      total += object.surfaces.length;
-      for (const surface of object.surfaces) {
-        surfaceCounts.set(
-          surface.type,
-          (surfaceCounts.get(surface.type) ?? 0) + 1,
+      roofs += record.roofMetrics.length;
+      for (const metrics of record.roofMetrics) {
+        const match = firstMatchingRule(
+          record.attributes,
+          metrics,
+          layer.rules,
         );
+        if (match === null) unmatched += 1;
+        else matched.set(match.id, (matched.get(match.id) ?? 0) + 1);
       }
-      for (const roof of staticRoofs(object))
-        matchRoof(roof.attributes, roof.metrics);
     }
+    surfaceCounts = new Map([["RoofSurface", roofs]]);
+    ruleCounts = matched;
+  } else {
+    const tally = staticTally(layer);
+    total = tally.total;
+    surfaceCounts = tally.surfaceCounts;
+    ruleCounts = tally.ruleCounts;
+    unmatched = tally.unmatched;
   }
 
   const visibleRuleIds = layer.rules

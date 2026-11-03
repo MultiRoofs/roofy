@@ -122,6 +122,35 @@ describe("legend surface counts", () => {
     expect(counts(layer)).toEqual([2, 0, 0]);
   });
 
+  it("recounts one model when its rules, hidden types or visible objects change", () => {
+    const steep = {
+      id: "steep",
+      name: "Steep",
+      color: "#222222",
+      enabled: true,
+      logic: "AND" as const,
+      conditions: [
+        { field: "inclinationDeg", operator: ">" as const, value: 45 },
+      ],
+    };
+    const flat = {
+      ...steep,
+      id: "flat",
+      conditions: [
+        { field: "inclinationDeg", operator: "<" as const, value: 45 },
+      ],
+    };
+    expect(counts(city({ colorBy: "rules", rules: [steep] }))).toEqual([1, 1]);
+    expect(counts(city({ colorBy: "rules", rules: [steep, flat] }))).toEqual([
+      1, 1, 0,
+    ]);
+    expect(counts(city({ colorBy: "rules", rules: [steep] }))).toEqual([1, 1]);
+    expect(counts(city({ hiddenTypes: ["Building"] }))).toEqual([0, 0, 0, 0]);
+    expect(counts(city({ visibleObjectIds: new Set() }))).toEqual([0, 0, 0, 0]);
+    expect(counts(city())).toEqual([2, 1, 1, 0]);
+    expect(counts(city({ colorBy: "single" }))).toEqual([4]);
+  });
+
   it("marks streaming roof and rule counts unavailable when metrics are absent", () => {
     const layer = city({
       source: STREAMED_SOURCE,
