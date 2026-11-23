@@ -11,6 +11,9 @@
 // app's. `--data` is served on a local port with Range and CORS. Scenarios:
 //   d9-seq  delft9.city.jsonl  (3x3 grid of the Delft tile, static layer)
 //   d9-fcb  delft9.fcb         (the same grid, streamed through the worker)
+//   forest  `--file <name>`    (trees placed from geometry templates, written
+//           by `make-template-forest.mjs`; its own operations: colouring,
+//           hiding the type and showing it again)
 // `scripts/performance/replicate-grid.py delft.city.jsonl delft9.city.jsonl 9 3`
 // makes the grid; `fcb ser delft9.city.jsonl delft9.fcb` (flatcitybuf's CLI) makes the .fcb.
 //
@@ -40,7 +43,11 @@ const DATA = args.data;
 const SCENARIO = args.scenario ?? "d9-seq";
 const OUT = args.out ?? `perf-${SCENARIO}.jsonl`;
 const CHROME =
-  args.chrome ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+  args.chrome ??
+  [
+    "/opt/pw-browsers/chromium",
+    "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+  ].find((file) => fs.existsSync(file));
 const CDP_PORT = Number(args.cdp ?? 9333);
 const DATA_PORT = Number(args.dataPort ?? 8765);
 const WIDTH = 1280;
@@ -49,13 +56,33 @@ const HEIGHT = 800;
 const SCENARIOS = {
   "d9-seq": { file: "delft9.city.jsonl", name: "Delft9" },
   "d9-fcb": { file: "delft9.fcb", name: "Delft9" },
+  ...(args.file ? { forest: { file: args.file, name: "Forest" } } : {}),
+};
+// Tilted over the forest's centre (`make-template-forest.mjs` centres it on
+// EPSG:7415 84500, 447500).
+const FOREST_CAMERA = {
+  lng: 4.3585,
+  lat: 51.995,
+  height: 1500,
+  heading: 0,
+  pitch: -40,
+  roll: 0,
 };
 // Straight down over the grid's centre, low enough that the stream's
 // footprint (T_MAX_M) reaches the grid's corners, so the streamed layer holds
 // every object once its first LoD switch has run. `--cam '<json>'` replaces it.
 const CAMERA = args.cam
   ? JSON.parse(args.cam)
-  : { lng: 4.386, lat: 52.0123, height: 5000, heading: 0, pitch: -89, roll: 0 };
+  : SCENARIO === "forest"
+    ? FOREST_CAMERA
+    : {
+        lng: 4.386,
+        lat: 52.0123,
+        height: 5000,
+        heading: 0,
+        pitch: -89,
+        roll: 0,
+      };
 
 if (!DATA || !SCENARIOS[SCENARIO]) {
   console.error(
@@ -468,22 +495,41 @@ const EXPR = JSON.stringify([
   ],
   ["get", "$base"],
 ]);
-await op("lod-1.2", "s.setLodMode(id, 'manual'); s.setLayerLod(id, '1.2');");
-await op("lod-2.2", "s.setLayerLod(id, '2.2');");
-await op("lod-1.2b", "s.setLayerLod(id, '1.2');");
-await op("lod-2.2b", "s.setLayerLod(id, '2.2');");
-await op(
-  "style-rules",
-  `s.addRule(id, ${FLAT}); s.updateLayer(id, { colorBy: 'rules' });`,
-);
-await op("style-single", "s.updateLayer(id, { colorBy: 'single' });");
-await op(
-  "style-expression",
-  `s.updateLayer(id, { colorBy: 'expression', styleExpression: ${EXPR} });`,
-);
-await op("style-surface", "s.updateLayer(id, { colorBy: 'surface' });");
-await op("style-rules-b", "s.updateLayer(id, { colorBy: 'rules' });");
-await op("style-surface-b", "s.updateLayer(id, { colorBy: 'surface' });");
+if (SCENARIO === "forest") {
+  const TALL = JSON.stringify({
+    id: "tall",
+    name: "Tall",
+    color: "#1b5e20",
+    logic: "AND",
+    enabled: true,
+    conditions: [{ field: "height", operator: ">", value: 9 }],
+  });
+  await op("style-single", "s.updateLayer(id, { colorBy: 'single' });");
+  await op(
+    "style-rules",
+    `s.addRule(id, ${TALL}); s.updateLayer(id, { colorBy: 'rules' });`,
+  );
+  await op("style-surface", "s.updateLayer(id, { colorBy: 'surface' });");
+  await op("hide", "s.setHiddenTypes(id, ['SolitaryVegetationObject']);");
+  await op("show", "s.setHiddenTypes(id, []);");
+} else {
+  await op("lod-1.2", "s.setLodMode(id, 'manual'); s.setLayerLod(id, '1.2');");
+  await op("lod-2.2", "s.setLayerLod(id, '2.2');");
+  await op("lod-1.2b", "s.setLayerLod(id, '1.2');");
+  await op("lod-2.2b", "s.setLayerLod(id, '2.2');");
+  await op(
+    "style-rules",
+    `s.addRule(id, ${FLAT}); s.updateLayer(id, { colorBy: 'rules' });`,
+  );
+  await op("style-single", "s.updateLayer(id, { colorBy: 'single' });");
+  await op(
+    "style-expression",
+    `s.updateLayer(id, { colorBy: 'expression', styleExpression: ${EXPR} });`,
+  );
+  await op("style-surface", "s.updateLayer(id, { colorBy: 'surface' });");
+  await op("style-rules-b", "s.updateLayer(id, { colorBy: 'rules' });");
+  await op("style-surface-b", "s.updateLayer(id, { colorBy: 'surface' });");
+}
 await shot("end");
 fs.writeFileSync(
   OUT,

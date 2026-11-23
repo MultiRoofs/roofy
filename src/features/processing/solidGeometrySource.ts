@@ -11,7 +11,11 @@
  * The static/streaming split for solids lives HERE and nowhere else.
  */
 import type { Layer } from "../layers/layerStore";
-import { lodOptionsBy, type LodOption } from "./roofGeometrySource";
+import {
+  labelledSurfaces,
+  lodOptionsBy,
+  type LodOption,
+} from "./roofGeometrySource";
 // The three CityJSON geometry types that carry a solid come from the ONE place
 // that spells them (`solidRollUp.ts`, which the executors read the reader's
 // `geometry_properties_lod*.type` against). The MODEL's tags and the READER's
@@ -36,9 +40,10 @@ export function hasSolidAt(
 ): (objectId: string, lod: string) => boolean {
   if (layer.source.access === "stream") return () => false;
   const byObject = new Map<string, ReadonlySet<string>>();
+  const templates = layer.model.implicitTemplates;
   for (const [id, object] of Object.entries(layer.model.objects)) {
     const lods = new Set<string>();
-    for (const surface of object.surfaces) {
+    for (const surface of labelledSurfaces(object, templates)) {
       const geometryType = surface.geometryType;
       if (
         surface.lod !== null &&

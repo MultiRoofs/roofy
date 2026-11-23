@@ -1,7 +1,12 @@
 /** Pure, surface-level legend counts. These are deliberately separate from
  * building/table totals: palette and rule entries describe rendered surfaces,
  * while vector entries describe features. */
-import { roofMetricsOf, type RoofMetrics } from "@cityjson/navara-core";
+import {
+  objectSurfaces,
+  roofMetricsOf,
+  type ImplicitTemplates,
+  type RoofMetrics,
+} from "@cityjson/navara-core";
 import type { CityModel, CityObject } from "../../domain/citymodel/types";
 import type { ResidentModel } from "../../features/streaming/residentModel";
 import type { GeoLayer } from "../../features/geoLayers/geoLayerStore";
@@ -32,20 +37,29 @@ export interface CountedLegendGroup extends Omit<LegendGroup, "rows"> {
 interface ObjectTally {
   readonly types: ReadonlyArray<readonly [string, number]>;
   readonly roofs: ReadonlyArray<RoofMetrics>;
+  /** Every surface, of any type. */
+  readonly count: number;
 }
 
 const objectTallies = new WeakMap<CityObject, ObjectTally>();
 
-function objectTally(object: CityObject): ObjectTally {
+function objectTally(
+  object: CityObject,
+  templates: ImplicitTemplates | undefined,
+): ObjectTally {
   const cached = objectTallies.get(object);
   if (cached !== undefined) return cached;
   const types = new Map<string, number>();
   const roofs: RoofMetrics[] = [];
-  for (const surface of object.surfaces) {
+  // Its own surfaces and its placed template's. An object is measured once
+  // per model, whose templates never change.
+  for (const surface of objectSurfaces(object, templates)) {
     types.set(surface.type, (types.get(surface.type) ?? 0) + 1);
     if (surface.type === "RoofSurface") roofs.push(roofMetricsOf(surface));
   }
-  const tally = { types: [...types], roofs };
+  let count = 0;
+  for (const [, n] of types) count += n;
+  const tally = { types: [...types], roofs, count };
   objectTallies.set(object, tally);
   return tally;
 }
@@ -90,8 +104,11 @@ function staticTally(layer: Layer): StaticTally {
   let unmatched = 0;
   for (const object of Object.values(layer.model.objects)) {
     if (!object || !shown(layer, object)) continue;
-    total += object.surfaces.length;
-    const { types, roofs } = objectTally(object);
+    const { types, roofs, count } = objectTally(
+      object,
+      layer.model.implicitTemplates,
+    );
+    total += count;
     for (const [type, count] of types) {
       surfaceCounts.set(type, (surfaceCounts.get(type) ?? 0) + count);
     }

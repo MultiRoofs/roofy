@@ -24,4 +24,5 @@ export type {
   CityModel,
   AppearanceTheme,
   CityAppearance,
+  ImplicitTemplate,
 } from "@cityjson/navara-core";

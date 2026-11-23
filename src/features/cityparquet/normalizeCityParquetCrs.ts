@@ -81,7 +81,22 @@ export function normalizeCityParquetCrs(model: CityModel): CityModel {
         }),
       ),
     }));
-    objects[id] = { ...object, surfaces, bbox: objectBounds };
+    // Only the reference point is in the file CRS; the template and its
+    // matrix are in the template's own frame.
+    const ref = object.implicitGeometry;
+    objects[id] = {
+      ...object,
+      surfaces,
+      bbox: objectBounds,
+      ...(ref
+        ? {
+            implicitGeometry: {
+              ...ref,
+              referencePoint: project(ref.referencePoint),
+            },
+          }
+        : {}),
+    };
     bbox = mergeBBox(bbox, objectBounds);
   }
   return {

@@ -322,3 +322,25 @@ describe("computeModelStatsFromRecords / computeObjectStatsFromRecord", () => {
     expect(modelStats.totalRoofArea).toBe(5);
   });
 });
+
+describe("statistics of implicit geometry", () => {
+  const trees = parseCityJSON(
+    JSON.parse(
+      fs.readFileSync(
+        path.resolve(
+          import.meta.dirname!,
+          "../../../fixtures/geometry-templates.city.json",
+        ),
+        "utf-8",
+      ),
+    ) as CityJSONRoot,
+  );
+
+  it("counts each object's placed template surfaces", () => {
+    // tree-1 places two surfaces, tree-2 one; neither has its own.
+    expect(computeModelStats(trees).surfaceCount).toBe(3);
+    expect(computeObjectStats(trees, "tree-1")?.surfaceCount).toBe(2);
+    const { records } = toObjectRecords(trees);
+    expect(records.map((r) => r.surfaceCount)).toEqual([2, 1]);
+  });
+});

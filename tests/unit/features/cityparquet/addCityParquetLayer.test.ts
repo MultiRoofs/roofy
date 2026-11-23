@@ -154,6 +154,26 @@ describe("addCityParquetLayerFromUrl — object families", () => {
     expect(mocks.enqueue).not.toHaveBeenCalled();
   });
 
+  it("opens with the package's implicit-geometry sidecar, and keeps it for reopens", async () => {
+    const implicitGeometries = { url: `${URL_}implicit_geometries.parquet` };
+    mocks.decide.mockResolvedValue({
+      ...twoFamilyStream(),
+      implicitGeometries,
+    });
+    const plugin = fakePlugin();
+    const layerId = await addCityParquetLayerFromUrl(
+      URL_,
+      { name: "yokohama-shi" },
+      { resolveStreamPlugin: async () => plugin },
+    );
+    expect(plugin.openStream.mock.calls[0]![0].implicitGeometries).toEqual(
+      implicitGeometries,
+    );
+    expect(
+      useFamilyStore.getState().layers[layerId]!.implicitGeometries,
+    ).toEqual(implicitGeometries);
+  });
+
   it("reopens a RESTORED choice of families, and returns to the saved family", async () => {
     // Ruling S4: a restored workspace opens exactly what the user had open, and
     // its table panel comes back on the family they were reading.

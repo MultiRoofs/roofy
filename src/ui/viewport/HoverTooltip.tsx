@@ -1,5 +1,9 @@
 import { useMemo } from "react";
-import { computeRoofMetrics } from "@cityjson/navara-core";
+import {
+  computeRoofMetrics,
+  objectSurfaceAt,
+  objectSurfaces,
+} from "@cityjson/navara-core";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
 import { useStreamStore } from "../../features/streaming/streamStore";
@@ -65,7 +69,11 @@ export function HoverTooltip() {
     const object = layer.model.objects[hovered.objectId];
     if (object === undefined) return null;
     if (hovered.kind === "surface") {
-      const surface = object.surfaces[hovered.surfaceIndex];
+      const surface = objectSurfaceAt(
+        object,
+        layer.model.implicitTemplates,
+        hovered.surfaceIndex,
+      );
       if (surface === undefined) return null;
       if (surface.type !== "RoofSurface")
         return {
@@ -82,7 +90,9 @@ export function HoverTooltip() {
       .map((id) => layer.model.objects[id])
       .filter((part): part is NonNullable<typeof part> => part !== undefined);
     const roofs = [object, ...parts].flatMap((item) =>
-      item.surfaces.filter((surface) => surface.type === "RoofSurface"),
+      objectSurfaces(item, layer.model.implicitTemplates).filter(
+        (surface) => surface.type === "RoofSurface",
+      ),
     );
     return {
       title: `${object.objectType} · ${object.id}`,

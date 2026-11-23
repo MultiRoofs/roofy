@@ -7,7 +7,11 @@
 
 import type { CityModel, CityObject } from "../domain/citymodel/types";
 import { FLAT_THRESHOLD_DEG } from "../domain/roofMetrics/aggregate";
-import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
+import {
+  computeRoofMetrics,
+  objectSurfaces,
+  type RoofMetrics,
+} from "@cityjson/navara-core";
 import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import type { ModelStats, ObjectStats, OrientationCount } from "./types";
 
@@ -119,11 +123,12 @@ export function computeModelStats(model: CityModel): ModelStats {
   const inputs: StatsInput[] = [];
   for (const obj of Object.values(model.objects)) {
     if (!obj) continue;
-    const roofMetrics = obj.surfaces
+    const surfaces = objectSurfaces(obj, model.implicitTemplates);
+    const roofMetrics = surfaces
       .filter((s) => s.type === "RoofSurface")
       .map(computeRoofMetrics);
     inputs.push({
-      surfaceCount: obj.surfaces.length,
+      surfaceCount: surfaces.length,
       roofMetrics,
       height: heightFromAttributes(obj.attributes),
     });
@@ -212,14 +217,15 @@ export function computeObjectStats(
   const obj: CityObject | undefined = model.objects[objectId];
   if (!obj) return null;
 
-  const roofMetrics = obj.surfaces
+  const surfaces = objectSurfaces(obj, model.implicitTemplates);
+  const roofMetrics = surfaces
     .filter((s) => s.type === "RoofSurface")
     .map(computeRoofMetrics);
 
   return accumulateObjectStats({
     objectId,
     objectType: obj.objectType,
-    surfaceCount: obj.surfaces.length,
+    surfaceCount: surfaces.length,
     roofMetrics,
     height: heightFromAttributes(obj.attributes),
   });

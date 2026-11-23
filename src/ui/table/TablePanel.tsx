@@ -228,7 +228,11 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         if (query?.view === "raw" || id === null || activeLayer === null)
           return row;
         const objects = layerObjects(activeLayer, streamVersion ?? 0);
-        const values = derivedBuildingValues(id, objects);
+        const values = derivedBuildingValues(
+          id,
+          objects,
+          activeLayer.model.implicitTemplates,
+        );
         return {
           ...row,
           [derivedKeys[0]!.name]: values.roofArea,

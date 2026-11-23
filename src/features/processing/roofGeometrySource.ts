@@ -19,13 +19,21 @@
  *  - `RoofGeometrySource.hasGeometryAt` is §7's contributor question, about
  *    surfaces of EVERY semantic type, and is also tags only.
  */
-import { computeRoofMetrics } from "@cityjson/navara-core";
+import {
+  computeRoofMetrics,
+  objectSurfaces,
+  objectTemplate,
+} from "@cityjson/navara-core";
 import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import {
   parentsIndexOf,
   rootFeatureId,
 } from "../../domain/citymodel/featureId";
-import type { Surface } from "../../domain/citymodel/types";
+import type {
+  CityObject,
+  ImplicitTemplate,
+  Surface,
+} from "../../domain/citymodel/types";
 import type { RoofSurfaceMetric } from "../../domain/roofMetrics/roofRollUp";
 import type { Layer } from "../layers/layerStore";
 import { getResidentModel } from "../streaming/residentModel";
@@ -92,8 +100,12 @@ export function roofGeometrySource(layer: Layer): RoofGeometrySource {
   }
 
   const objects = layer.model.objects;
-  const surfacesOf = (id: string): ReadonlyArray<Surface> =>
-    objects[id]?.surfaces ?? [];
+  const templates = layer.model.implicitTemplates;
+  // Every surface of the object, its placed template's after its own.
+  const surfacesOf = (id: string): ReadonlyArray<Surface> => {
+    const object = objects[id];
+    return object ? objectSurfaces(object, templates) : [];
+  };
   return {
     has: (id) => objects[id] !== undefined,
     hasGeometryAt: (id, lod) => surfacesOf(id).some((s) => s.lod === lod),
@@ -116,6 +128,21 @@ export function roofGeometrySource(layer: Layer): RoofGeometrySource {
       return out;
     },
   };
+}
+
+/**
+ * An object's surfaces for reading their LoD and type only: its own, then its
+ * template's UNPLACED, which carry the same labels as the placed copies and
+ * cost no copy.
+ */
+export function labelledSurfaces(
+  object: CityObject,
+  templates: ReadonlyMap<number, ImplicitTemplate> | undefined,
+): ReadonlyArray<Surface> {
+  const template = objectTemplate(object, templates);
+  return template
+    ? [...object.surfaces, ...template.surfaces]
+    : object.surfaces;
 }
 
 /** Every object of the layer to the id of the FEATURE it belongs to. */
@@ -158,9 +185,10 @@ export function geometryLodsByObject(
     }
     return out;
   }
+  const templates = layer.model.implicitTemplates;
   for (const [id, object] of Object.entries(layer.model.objects)) {
     const lods = new Set<string>();
-    for (const s of object.surfaces) {
+    for (const s of labelledSurfaces(object, templates)) {
       if (s.lod !== null) lods.add(s.lod);
     }
     out.set(id, lods);
@@ -185,9 +213,10 @@ function roofLodsByObject(
     }
     return out;
   }
+  const templates = layer.model.implicitTemplates;
   for (const [id, object] of Object.entries(layer.model.objects)) {
     const roof = new Set<string>();
-    for (const s of object.surfaces) {
+    for (const s of labelledSurfaces(object, templates)) {
       if (s.lod !== null && s.type === "RoofSurface") roof.add(s.lod);
     }
     out.set(id, roof);

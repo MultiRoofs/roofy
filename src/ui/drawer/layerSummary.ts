@@ -1,4 +1,9 @@
-import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
+import {
+  computeRoofMetrics,
+  objectSurfaces,
+  type ImplicitTemplates,
+  type RoofMetrics,
+} from "@cityjson/navara-core";
 import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 import type { CityObject } from "../../domain/citymodel/types";
 
@@ -153,6 +158,8 @@ function summarize(
 export function summarizeCityModel(
   objects: Readonly<Record<string, CityObject>>,
   matchingIds: ReadonlySet<string> | null = null,
+  /** The model's templates: an object's placed template's roofs count. */
+  templates?: ImplicitTemplates,
 ): LayerSummary {
   const summaryObjects = Object.fromEntries(
     Object.values(objects).map((object) => [
@@ -164,7 +171,7 @@ export function summarizeCityModel(
         children: Array.isArray(object.children) ? object.children : [],
         parents: Array.isArray(object.parents) ? object.parents : [],
         roofMetrics: Array.isArray(object.surfaces)
-          ? object.surfaces
+          ? objectSurfaces(object, templates)
               .filter((surface) => surface.type === "RoofSurface")
               .map(computeRoofMetrics)
           : null,

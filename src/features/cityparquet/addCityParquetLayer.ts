@@ -92,7 +92,9 @@ function openStream(
     // as `undefined`, which is the R-D default rather than a layer with no
     // stream (ruling S4).
     const restored = restoredFamilyChoice(families, settings.families);
-    useFamilyStore.getState().setFamilies(id, families, restored.enabled);
+    useFamilyStore
+      .getState()
+      .setFamilies(id, families, restored.enabled, mode.implicitGeometries);
     if (restored.active !== null) {
       useFamilyStore.getState().setActiveFamily(id, restored.active);
     }
@@ -108,6 +110,9 @@ function openStream(
         plugin,
         format: "cityparquet",
         source,
+        ...(mode.implicitGeometries
+          ? { implicitGeometries: mode.implicitGeometries }
+          : {}),
         name: settings.name,
         modelRef,
         rules: settings.rules,
