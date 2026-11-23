@@ -20,7 +20,7 @@ import { activateLayer } from "../../features/workspace/layerCoordination";
 import { getResidentModel } from "../../features/streaming/residentModel";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import type { CityObject } from "../../domain/citymodel/types";
-import { computeRoofMetrics } from "@cityjson/navara-core";
+import { computeRoofMetrics, objectWithSurfaces } from "@cityjson/navara-core";
 import {
   subjectOf,
   identityTrail,
@@ -55,8 +55,14 @@ export function DetailsPanel({ onClose }: { readonly onClose: () => void }) {
     return (layerId: string, id: string): CityObject | null => {
       const layer = layers.find((l) => l.id === layerId);
       if (layer === undefined) return null;
-      if (layer.source.access !== "stream")
-        return layer.model.objects[id] ?? null;
+      if (layer.source.access !== "stream") {
+        // The inspector reads one object: its placed template joins its
+        // surfaces here, so every section and a surface index see them all.
+        const object = layer.model.objects[id];
+        return object
+          ? objectWithSurfaces(object, layer.model.implicitTemplates)
+          : null;
+      }
       const record = getResidentModel(layerId, streamVersion ?? 0)?.objects[id];
       if (record === undefined) return null;
       return {

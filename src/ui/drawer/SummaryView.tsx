@@ -73,7 +73,11 @@ export function SummaryView({
     () =>
       layer.source.access === "stream"
         ? summarizeResidentRecords(resident!.objects)
-        : summarizeCityModel(layer.model.objects),
+        : summarizeCityModel(
+            layer.model.objects,
+            null,
+            layer.model.implicitTemplates,
+          ),
     [layer, resident],
   );
   const [matchingIds, setMatchingIds] = useState<ReadonlySet<string> | null>(
@@ -140,7 +144,11 @@ export function SummaryView({
         ? null
         : layer.source.access === "stream"
           ? summarizeResidentRecords(resident!.objects, matchingIds)
-          : summarizeCityModel(layer.model.objects, matchingIds);
+          : summarizeCityModel(
+              layer.model.objects,
+              matchingIds,
+              layer.model.implicitTemplates,
+            );
   const matchingAvailable =
     query?.applied !== null && query?.applied !== undefined;
   const scopeLabel =

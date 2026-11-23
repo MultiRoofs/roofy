@@ -1,4 +1,9 @@
-import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
+import {
+  computeRoofMetrics,
+  objectSurfaces,
+  type ImplicitTemplates,
+  type RoofMetrics,
+} from "@cityjson/navara-core";
 import type { CityObject } from "../../domain/citymodel/types";
 import type { ResidentObjectRecord } from "@cityjson/navara-stream";
 
@@ -9,17 +14,23 @@ export interface DerivedBuildingValues {
 }
 
 type Source =
-  | Pick<CityObject, "id" | "children" | "objectType" | "surfaces">
+  | Pick<
+      CityObject,
+      "id" | "children" | "objectType" | "surfaces" | "implicitGeometry"
+    >
   | Pick<
       ResidentObjectRecord,
       "id" | "children" | "objectType" | "roofMetrics"
     >;
 
-function metricsOf(object: Source): ReadonlyArray<RoofMetrics> | null {
+function metricsOf(
+  object: Source,
+  templates: ImplicitTemplates | undefined,
+): ReadonlyArray<RoofMetrics> | null {
   if ("roofMetrics" in object)
     return Array.isArray(object.roofMetrics) ? object.roofMetrics : null;
   return Array.isArray(object.surfaces)
-    ? object.surfaces
+    ? objectSurfaces(object as CityObject, templates)
         .filter((surface) => surface.type === "RoofSurface")
         .map(computeRoofMetrics)
     : null;
@@ -30,6 +41,8 @@ function metricsOf(object: Source): ReadonlyArray<RoofMetrics> | null {
 export function derivedBuildingValues(
   rootId: string,
   objects: Readonly<Record<string, Source>>,
+  /** The model's templates, for a static layer's objects. */
+  templates?: ImplicitTemplates,
 ): DerivedBuildingValues {
   const root = objects[rootId];
   if (!root) return { roofArea: null, meanSlope: null, parts: null };
@@ -48,8 +61,10 @@ export function derivedBuildingValues(
     for (const child of object.children) visit(child);
   };
   visit(rootId);
-  const metrics = family.flatMap((object) => metricsOf(object) ?? []);
-  if (missing || family.some((object) => metricsOf(object) === null))
+  const metrics = family.flatMap(
+    (object) => metricsOf(object, templates) ?? [],
+  );
+  if (missing || family.some((object) => metricsOf(object, templates) === null))
     return { roofArea: null, meanSlope: null, parts: null };
   const roofArea = metrics.reduce((sum, metric) => sum + metric.areaSqM, 0);
   return {

@@ -904,6 +904,15 @@ function walkAttributeFields(model: CityModel): string[] {
       }
     }
   }
+  // A placed template's surfaces are the template's, attributes and all:
+  // read them once, not once per instance.
+  for (const template of model.implicitTemplates?.values() ?? []) {
+    for (const surface of template.surfaces) {
+      for (const key of Object.keys(surface.attributes)) {
+        fields.add(key);
+      }
+    }
+  }
   return [...fields].sort();
 }
 

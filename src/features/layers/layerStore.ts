@@ -313,8 +313,16 @@ export type LayerStore = LayerStoreState & LayerStoreActions;
  */
 export function computeAvailableLods(model: CityModel): string[] {
   const set = new Set<string>();
+  const placed = new Set<number>();
   for (const obj of Object.values(model.objects)) {
     for (const surface of obj?.surfaces ?? []) {
+      if (surface.lod) set.add(surface.lod);
+    }
+    if (obj?.implicitGeometry) placed.add(obj.implicitGeometry.templateId);
+  }
+  // A placed template's LoD is a LoD of every object placing it.
+  for (const id of placed) {
+    for (const surface of model.implicitTemplates?.get(id)?.surfaces ?? []) {
       if (surface.lod) set.add(surface.lod);
     }
   }
