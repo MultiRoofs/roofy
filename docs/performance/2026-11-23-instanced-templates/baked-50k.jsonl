@@ -1,0 +1,2 @@
+{"scenario":"forest","phase":"load","loadMs":77625,"ticks":72,"frames":5,"drawCalls":1259,"drawnVertices":232695885,"uploadedBytes":687773264,"readbacks":0,"longTasks":13,"longTaskMs":76092,"longestTaskMs":49941,"fetchedBytes":8529428,"at":"2026-11-23T14:00:22.594Z"}
+{"scenario":"forest","phase":"loaded","heapMB":2370,"stream":"[] 50.0K loaded objects","ticks":84,"frames":15,"drawCalls":5696,"drawnVertices":1086708192,"uploadedBytes":915091480,"readbacks":0,"longTasks":24,"longTaskMs":167226,"longestTaskMs":49941,"fetchedBytes":8529428,"at":"2026-11-23T14:02:01.376Z"}
