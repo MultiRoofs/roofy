@@ -37,6 +37,7 @@ import {
 import { getLayerTable, layerTableKey } from "../../insights/layerTables";
 import { useQueryStore } from "../query/queryStore";
 import { familySourceCrs } from "../cityparquet/familySourceCrs";
+import type { StreamImplicitGeometries } from "../cityparquet/streamDecision";
 import { reopenStreamingLayer } from "../streaming/openStreamingLayer";
 import type { StreamPlugin } from "../streaming/streamPlugin";
 import { useStreamStore } from "../streaming/streamStore";
@@ -130,6 +131,9 @@ export interface LayerFamilyState {
    * survives the store entry being deleted (see `farewells`).
    */
   readonly generation: number;
+  /** The package's `implicit_geometries.parquet`, which every (re)open of the
+   *  stream reads for its templates; absent when the package ships none. */
+  readonly implicitGeometries?: StreamImplicitGeometries;
 }
 
 export interface FamilyStoreState {
@@ -158,6 +162,7 @@ export interface FamilyStoreActions {
     layerId: string,
     families: ReadonlyArray<LayerFamily>,
     enabled?: ReadonlyArray<string>,
+    implicitGeometries?: StreamImplicitGeometries,
   ) => void;
   /** Forget a layer: it was removed, or its open failed. Bumps the generation,
    *  so an open still in flight disposes rather than registers. */
@@ -384,7 +389,7 @@ function patchLayer(
 export const useFamilyStore = create<FamilyStore>((set) => ({
   layers: {},
 
-  setFamilies: (layerId, families, enabled) => {
+  setFamilies: (layerId, families, enabled, implicitGeometries) => {
     const enabledKeys = enabled ?? defaultEnabledKeys(families);
     const open = families
       .filter((f) => enabledKeys.includes(f.key))
@@ -408,6 +413,7 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
           table,
           reopen: { state: "idle" },
           generation: (s.layers[layerId]?.generation ?? 0) + 1,
+          ...(implicitGeometries ? { implicitGeometries } : {}),
         },
       },
     }));
@@ -885,7 +891,12 @@ async function runReopen(
     plugin,
     layerId,
     streamSourceOf(families),
-    { isSuperseded: () => generationOf(layerId) !== generation },
+    {
+      isSuperseded: () => generationOf(layerId) !== generation,
+      ...(entry.implicitGeometries
+        ? { implicitGeometries: entry.implicitGeometries }
+        : {}),
+    },
   );
 
   if (generationOf(layerId) !== generation) {

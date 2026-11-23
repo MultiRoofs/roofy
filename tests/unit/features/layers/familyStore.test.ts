@@ -557,6 +557,36 @@ describe("enabling a family reopens the stream (R-E′)", () => {
     expect(opts.appearance).toBeNull();
   });
 
+  it("reopens with the package's implicit-geometry sidecar", async () => {
+    seedLayer(
+      "L1",
+      familiesOf(
+        { key: "building", href: "building.parquet" },
+        { key: "bridge", href: "bridge.parquet" },
+      ),
+    );
+    const implicitGeometries = {
+      url: "https://data.example/implicit_geometries.parquet",
+    };
+    useFamilyStore
+      .getState()
+      .setFamilies(
+        "L1",
+        useFamilyStore.getState().layers.L1!.families,
+        undefined,
+        implicitGeometries,
+      );
+    const plugin = fakePlugin(async () => fakeHandle().handle);
+    await setFamilyEnabled({
+      plugin: plugin.plugin,
+      layerId: "L1",
+      family: "bridge",
+      enabled: true,
+    });
+    const opts = plugin.openStream.mock.calls[0]![0];
+    expect(opts.implicitGeometries).toEqual(implicitGeometries);
+  });
+
   it("disabling a family reopens with the rest and drops its view", async () => {
     seedLayer(
       "L1",

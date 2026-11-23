@@ -76,7 +76,15 @@ export type CityParquetMode =
       readonly totalBytes: number;
       /** One family per object table, in the source's own order. */
       readonly families: ReadonlyArray<CityParquetStreamFamily>;
+      /** The package's `implicit_geometries.parquet`, when it ships one: the
+       *  templates the stream worker reads once per open. */
+      readonly implicitGeometries?: StreamImplicitGeometries;
     };
+
+/** Where a streamed package's implicit-geometry templates are. */
+export type StreamImplicitGeometries =
+  | { readonly url: string }
+  | { readonly blob: Blob };
 
 /** A byte length, or `null` when it could not be learned. */
 export type SizeProbe = (url: string) => Promise<number | null>;
@@ -164,6 +172,9 @@ async function decideUrl(
       size: sizes[index] ?? null,
       source: { url: t.url },
     })),
+    ...(targets.sidecars.implicitGeometries
+      ? { implicitGeometries: { url: targets.sidecars.implicitGeometries.url } }
+      : {}),
   };
 }
 
@@ -190,6 +201,9 @@ async function decideFiles(
       // `registerFileHandle` and the worker through ranged `Blob` reads.
       source: { file: t.file },
     })),
+    ...(targets.sidecars.implicitGeometries
+      ? { implicitGeometries: { blob: targets.sidecars.implicitGeometries } }
+      : {}),
   };
 }
 

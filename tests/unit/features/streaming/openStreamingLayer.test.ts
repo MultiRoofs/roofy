@@ -243,6 +243,22 @@ describe("openStreamingLayer", () => {
     });
   });
 
+  it("passes a package's implicit-geometry sidecar to the open", async () => {
+    const plugin = fakePlugin();
+    const implicitGeometries = { blob: new Blob(["i"]) };
+    await openStreamingLayer({
+      plugin,
+      format: "cityparquet",
+      source: { blob: new Blob(["v"]) },
+      implicitGeometries,
+      name: "pkg",
+      modelRef: { type: "file", fileName: "pkg" },
+    });
+    expect(plugin.openStream.mock.calls[0]![0].implicitGeometries).toBe(
+      implicitGeometries,
+    );
+  });
+
   it("passes a picked folder's blobs straight through", async () => {
     const plugin = fakePlugin();
     const blobs = [new Blob(["a"]), new Blob(["b"])];

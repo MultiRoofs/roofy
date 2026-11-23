@@ -34,6 +34,7 @@ import { type AttributeOrders } from "../attributes/attributeOrder";
  */
 import type { AppearanceTheme } from "@cityjson/navara-core";
 import type {
+  OpenStreamOptions,
   StreamLayerHandle,
   StreamSource,
   WorkerFormat,
@@ -75,6 +76,9 @@ export interface OpenStreamingLayerInput {
   /** Which worker reads the source. Default `"flatcitybuf"`; a large
    *  CityParquet source streams with `"cityparquet"` (`streamDecision.ts`). */
   readonly format?: WorkerFormat;
+  /** A CityParquet package's `implicit_geometries.parquet`, which the worker
+   *  reads once per open for the templates its objects place. */
+  readonly implicitGeometries?: OpenStreamOptions["implicitGeometries"];
   readonly name: string;
   readonly modelRef: CityModelReference;
   readonly rules?: ReadonlyArray<Rule>;
@@ -149,6 +153,9 @@ export async function openStreamingLayer(
     id,
     source: input.source,
     format,
+    ...(input.implicitGeometries
+      ? { implicitGeometries: input.implicitGeometries }
+      : {}),
     // The EFFECTIVE list, so the very first cell is baked exactly like every
     // cell that arrives after it — a rule with zero conditions colours a
     // streamed roof, which is the whole premise of "Color by".
@@ -319,6 +326,8 @@ export async function reopenStreamingLayer(
   options: {
     /** Asked twice — before the open and after it resolves. */
     readonly isSuperseded?: () => boolean;
+    /** The package's implicit-geometry sidecar, as the first open had it. */
+    readonly implicitGeometries?: OpenStreamOptions["implicitGeometries"];
   } = {},
 ): Promise<ReopenOutcome> {
   const isSuperseded = options.isSuperseded ?? (() => false);
@@ -350,6 +359,9 @@ export async function reopenStreamingLayer(
       // A reopen is only ever a CityParquet family change; a `.fcb` has one
       // file and no families to toggle.
       format: "cityparquet",
+      ...(options.implicitGeometries
+        ? { implicitGeometries: options.implicitGeometries }
+        : {}),
       // From the ROW, so the reopened stream paints and hides exactly what the
       // layer was showing. `effectiveRules` compiles the same catch-alls the
       // static path does, which is what makes a "Color by" choice survive.

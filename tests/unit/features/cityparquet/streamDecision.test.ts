@@ -125,6 +125,34 @@ describe("decideCityParquetMode — urls", () => {
     expect(headLength).not.toHaveBeenCalled();
   });
 
+  it("names a streamed package's implicit_geometries sidecar, never as an object table", async () => {
+    const http = manifestHttp({
+      v: {
+        href: "./vegetation.parquet",
+        roles: ["cityparquet-objects"],
+        "file:size": 300 * MB,
+      },
+      i: {
+        href: "./implicit_geometries.parquet",
+        roles: ["cityparquet-sidecar"],
+        "file:size": 1 * MB,
+      },
+    });
+    const mode = await decideCityParquetMode({
+      kind: "url",
+      url: "https://x.test/pkg/",
+      http,
+      headLength: async () => null,
+    });
+    expect(mode).toMatchObject({
+      mode: "stream",
+      source: { url: "https://x.test/pkg/vegetation.parquet" },
+      implicitGeometries: {
+        url: "https://x.test/pkg/implicit_geometries.parquet",
+      },
+    });
+  });
+
   it("fills a manifest's missing size with a HEAD per table", async () => {
     const http = manifestHttp({
       a: {
@@ -259,6 +287,30 @@ describe("decideCityParquetMode — local files", () => {
       mode: "stream",
       source: { blobs: [a, b] },
       totalBytes: 200 * MB,
+    });
+  });
+
+  it("names a picked folder's implicit_geometries sidecar as a Blob", async () => {
+    const v = sizedFile(
+      "vegetation.parquet",
+      200 * MB,
+      "pkg/vegetation.parquet",
+    );
+    const implicit = sizedFile(
+      "implicit_geometries.parquet",
+      1 * MB,
+      "pkg/implicit_geometries.parquet",
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mode = await decideCityParquetMode({
+      kind: "files",
+      files: [v, implicit],
+    });
+    warn.mockRestore();
+    expect(mode).toMatchObject({
+      mode: "stream",
+      source: { blob: v },
+      implicitGeometries: { blob: implicit },
     });
   });
 
